@@ -1,0 +1,80 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# --- App Studio toolchain ---
+# Flutter SDK from tool/bundle_toolchain.sh (~1GB+)
+/toolchain/flutter/
+
+# Prebuilt Serverpod CLI bundles (binary + native libs)
+/toolchain/serverpod_cli/*/bin/
+/toolchain/serverpod_cli/*/lib/
+
+# Legacy embed staging (Release syncs from /toolchain)
+/macos/Runner/Resources/toolchain/**
+!/macos/Runner/Resources/toolchain/.gitkeep
+
+# Release / distribution artifacts
+/dist/
+
+# --- macOS / Xcode / CocoaPods ---
+/macos/Flutter/ephemeral/
+/macos/Pods/
+/macos/Podfile.lock
+**/xcuserdata/
+*.xcuserstate
+**/DerivedData/
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+
+# CEF / webview_cef local build cache (if present under the project)
+**/third/cef/

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ACTIVE="$ROOT/active.json"
+FLUTTER_VER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["flutter"])' "$ACTIVE")"
+CLI_VER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["serverpod_cli"])' "$ACTIVE")"
+export FLUTTER_ROOT="$ROOT/flutter/$FLUTTER_VER"
+CLI_HOME="$ROOT/serverpod_cli/$CLI_VER"
+SERVERPOD="$CLI_HOME/bin/serverpod"
+# Ensure sqlite dylibs from the full CLI bundle are loadable.
+export DYLD_LIBRARY_PATH="$CLI_HOME/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+export PATH="$FLUTTER_ROOT/bin:$CLI_HOME/bin:$PATH"
+exec "$SERVERPOD" "$@"
