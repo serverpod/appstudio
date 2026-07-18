@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:webview_cef/webview_cef.dart';
 
+import '../preview/preview_bootstrap.dart';
 import '../theme/app_theme.dart';
 
 class PreviewPane extends StatefulWidget {
@@ -10,10 +13,13 @@ class PreviewPane extends StatefulWidget {
     super.key,
     required this.previewUrl,
     required this.shouldLoad,
+    this.reloadToken = 0,
   });
 
   final Uri previewUrl;
   final bool shouldLoad;
+  /// When this value increases, reload the current preview URL.
+  final int reloadToken;
 
   @override
   State<PreviewPane> createState() => PreviewPaneState();
@@ -22,24 +28,42 @@ class PreviewPane extends StatefulWidget {
 class PreviewPaneState extends State<PreviewPane> {
   WebViewController? _controller;
   bool _initializing = false;
-  bool _initialized = false;
+  bool _managerReady = false;
   String? _error;
+  int _lastReloadToken = 0;
 
   Future<void> reload() async {
     if (!widget.shouldLoad) return;
     final controller = _controller;
-    if (controller == null) {
+    if (controller == null || !controller.value) {
       await _ensureWebView();
       return;
     }
-    await controller.loadUrl(widget.previewUrl.toString());
+    try {
+      await controller.loadUrl(widget.previewUrl.toString());
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    }
   }
 
   @override
   void didUpdateWidget(covariant PreviewPane oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!widget.shouldLoad && oldWidget.shouldLoad) {
+      _tearDownWebView();
+      return;
+    }
     if (widget.shouldLoad && !oldWidget.shouldLoad) {
       _ensureWebView();
+      return;
+    }
+    if (widget.shouldLoad &&
+        widget.reloadToken != _lastReloadToken &&
+        widget.reloadToken > 0) {
+      _lastReloadToken = widget.reloadToken;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) reload();
+      });
     }
   }
 
@@ -50,25 +74,58 @@ class PreviewPaneState extends State<PreviewPane> {
     if (mounted) setState(() {});
 
     try {
-      if (!_initialized) {
+      if (!_managerReady) {
         await WebviewManager().initialize(
           userAgent: 'AppStudio/1.0 (Chromium CEF)',
         );
-        _initialized = true;
+        _managerReady = true;
       }
 
-      _controller ??= WebviewManager().createWebView(
-        loading: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-        injectUserScripts: InjectUserScripts(),
-      );
+      // webview_cef binds each controller's temp index once; never re-initialize.
+      await _disposeController();
 
-      await _controller!.initialize(widget.previewUrl.toString());
+      final scripts = InjectUserScripts()
+        ..add(
+          UserScript(previewBootstrapScript, ScriptInjectTime.LOAD_START),
+        );
+
+      final controller = WebviewManager().createWebView(
+        loading: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        injectUserScripts: scripts,
+      );
+      _controller = controller;
+      await controller.initialize(widget.previewUrl.toString());
+      _lastReloadToken = widget.reloadToken;
     } catch (e) {
       _error = e.toString();
+      await _disposeController();
     } finally {
       _initializing = false;
       if (mounted) setState(() {});
     }
+  }
+
+  void _tearDownWebView() {
+    _error = null;
+    _lastReloadToken = 0;
+    unawaited(_disposeController().then((_) {
+      if (mounted) setState(() {});
+    }));
+  }
+
+  Future<void> _disposeController() async {
+    final controller = _controller;
+    _controller = null;
+    if (controller == null) return;
+    try {
+      await controller.dispose();
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    unawaited(_disposeController());
+    super.dispose();
   }
 
   @override
@@ -144,7 +201,7 @@ class PreviewPaneState extends State<PreviewPane> {
       );
     }
 
-    if (controller == null || _initializing) {
+    if (controller == null || _initializing || !controller.value) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,

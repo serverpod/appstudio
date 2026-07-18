@@ -20,9 +20,13 @@ class StudioTerminal extends ChangeNotifier {
   late final Terminal terminal;
   Pty? _pty;
   StreamSubscription<List<int>>? _outputSub;
+  final _outputController = StreamController<String>.broadcast();
   bool _running = false;
 
   bool get isRunning => _running;
+  /// Raw PTY stdout/stderr chunks (includes ANSI). Broadcast; late listeners
+  /// only see future output.
+  Stream<String> get output => _outputController.stream;
   int get cols => terminal.viewWidth > 0 ? terminal.viewWidth : 80;
   int get rows => terminal.viewHeight > 0 ? terminal.viewHeight : 24;
 
@@ -48,7 +52,11 @@ class StudioTerminal extends ChangeNotifier {
     notifyListeners();
 
     _outputSub = pty.output.listen((data) {
-      terminal.write(utf8.decode(data, allowMalformed: true));
+      final text = utf8.decode(data, allowMalformed: true);
+      terminal.write(text);
+      if (!_outputController.isClosed) {
+        _outputController.add(text);
+      }
     });
 
     unawaited(
@@ -96,6 +104,7 @@ class StudioTerminal extends ChangeNotifier {
   @override
   void dispose() {
     unawaited(stop());
+    unawaited(_outputController.close());
     super.dispose();
   }
 }

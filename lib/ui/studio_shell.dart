@@ -68,6 +68,7 @@ class _StudioShellState extends State<StudioShell> {
                       previewKey: _previewKey,
                       previewUrl: ProjectSession.previewUri,
                       shouldLoad: widget.process.previewReady,
+                      reloadToken: widget.process.previewReloadToken,
                     )
                   : _EmptyState(session: widget.session),
             ),
@@ -255,6 +256,7 @@ class _Workspace extends StatelessWidget {
     required this.previewKey,
     required this.previewUrl,
     required this.shouldLoad,
+    required this.reloadToken,
   });
 
   final double splitRatio;
@@ -263,6 +265,7 @@ class _Workspace extends StatelessWidget {
   final GlobalKey<PreviewPaneState> previewKey;
   final Uri previewUrl;
   final bool shouldLoad;
+  final int reloadToken;
 
   @override
   Widget build(BuildContext context) {
@@ -297,6 +300,7 @@ class _Workspace extends StatelessWidget {
                 key: previewKey,
                 previewUrl: previewUrl,
                 shouldLoad: shouldLoad,
+                reloadToken: reloadToken,
               ),
             ),
           ],

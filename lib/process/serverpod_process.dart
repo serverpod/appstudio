@@ -9,6 +9,15 @@ import '../toolchain/toolchain.dart';
 
 enum ProcessState { idle, starting, running, stopping }
 
+/// Matches Serverpod's progress line for any Flutter app name, e.g.
+/// `Connecting to Example app VM service`.
+final _vmServiceConnecting = RegExp(
+  r'Connecting to .+ VM service',
+  caseSensitive: false,
+);
+
+final _ansiEscape = RegExp(r'\x1B\[[0-9;]*[A-Za-z]');
+
 class ServerpodProcessController extends ChangeNotifier {
   ServerpodProcessController({
     required this.toolchain,
@@ -22,12 +31,19 @@ class ServerpodProcessController extends ChangeNotifier {
 
   ProcessState _state = ProcessState.idle;
   bool _previewReady = false;
+  int _previewReloadToken = 0;
   String _statusMessage = 'Idle';
   Timer? _pollTimer;
   VoidCallback? _terminalListener;
+  StreamSubscription<String>? _outputSub;
+  final _outputBuffer = StringBuffer();
+  bool _scheduledVmServiceReload = false;
 
   ProcessState get state => _state;
+  /// Web server is accepting connections on :9998 (CEF may load).
   bool get previewReady => _previewReady;
+  /// Increments when the preview should reload (DWDS/VM service attach).
+  int get previewReloadToken => _previewReloadToken;
   String get statusMessage => _statusMessage;
   bool get canStart => session.hasProject && _state == ProcessState.idle;
   bool get canStop =>
@@ -42,6 +58,8 @@ class ServerpodProcessController extends ChangeNotifier {
 
     _setState(ProcessState.starting, 'Starting serverpod…');
     _previewReady = false;
+    _scheduledVmServiceReload = false;
+    _outputBuffer.clear();
     notifyListeners();
 
     _terminalListener ??= () {
@@ -52,10 +70,13 @@ class ServerpodProcessController extends ChangeNotifier {
     };
     terminal.addListener(_terminalListener!);
 
+    await _outputSub?.cancel();
+    _outputSub = terminal.output.listen(_onTerminalOutput);
+
     try {
       await terminal.spawn(
         executable: toolchain.serverpodExecutable,
-        arguments: const ['start'],
+        arguments: const ['start', '--no-tui'],
         workingDirectory: projectPath,
         environment: toolchain.processEnvironment(),
       );
@@ -78,18 +99,35 @@ class ServerpodProcessController extends ChangeNotifier {
 
   void _onProcessExited() {
     _stopPolling();
+    unawaited(_outputSub?.cancel());
+    _outputSub = null;
     _previewReady = false;
+    _scheduledVmServiceReload = false;
+    _outputBuffer.clear();
     _setState(ProcessState.idle, 'Idle');
+  }
+
+  void _onTerminalOutput(String chunk) {
+    _outputBuffer.write(chunk);
+    if (_scheduledVmServiceReload) return;
+
+    final plain = _outputBuffer.toString().replaceAll(_ansiEscape, '');
+    if (!_vmServiceConnecting.hasMatch(plain)) return;
+
+    _scheduledVmServiceReload = true;
+    _previewReloadToken++;
+    _statusMessage = 'Preview · VM service attaching · reloading';
+    notifyListeners();
   }
 
   void _startPolling() {
     _stopPolling();
     _pollTimer = Timer.periodic(const Duration(milliseconds: 750), (_) async {
       if (_state != ProcessState.running) return;
-      final ready = await _httpReady(9998);
+      final ready = await _tcpReady(9998);
       if (ready && !_previewReady) {
         _previewReady = true;
-        _statusMessage = 'Preview ready · :9998';
+        _statusMessage = 'Preview · :9998 up · waiting for Flutter attach';
         notifyListeners();
       }
     });
@@ -100,7 +138,7 @@ class ServerpodProcessController extends ChangeNotifier {
     _pollTimer = null;
   }
 
-  Future<bool> _httpReady(int port) async {
+  Future<bool> _tcpReady(int port) async {
     try {
       final socket = await Socket.connect(
         '127.0.0.1',
@@ -123,6 +161,7 @@ class ServerpodProcessController extends ChangeNotifier {
   @override
   void dispose() {
     _stopPolling();
+    unawaited(_outputSub?.cancel());
     if (_terminalListener != null) {
       terminal.removeListener(_terminalListener!);
     }
