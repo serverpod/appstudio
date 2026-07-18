@@ -69,6 +69,7 @@ class _StudioShellState extends State<StudioShell> {
                       previewUrl: ProjectSession.previewUri,
                       shouldLoad: widget.process.previewReady,
                       reloadToken: widget.process.previewReloadToken,
+                      previewBrightness: _previewBrightness(context),
                     )
                   : _EmptyState(session: widget.session),
             ),
@@ -76,6 +77,14 @@ class _StudioShellState extends State<StudioShell> {
         );
       },
     );
+  }
+
+  Brightness _previewBrightness(BuildContext context) {
+    return switch (widget.themeController.mode) {
+      ThemeMode.light => Brightness.light,
+      ThemeMode.dark => Brightness.dark,
+      ThemeMode.system => MediaQuery.platformBrightnessOf(context),
+    };
   }
 }
 
@@ -257,6 +266,7 @@ class _Workspace extends StatelessWidget {
     required this.previewUrl,
     required this.shouldLoad,
     required this.reloadToken,
+    required this.previewBrightness,
   });
 
   final double splitRatio;
@@ -266,6 +276,7 @@ class _Workspace extends StatelessWidget {
   final Uri previewUrl;
   final bool shouldLoad;
   final int reloadToken;
+  final Brightness previewBrightness;
 
   @override
   Widget build(BuildContext context) {
@@ -301,6 +312,7 @@ class _Workspace extends StatelessWidget {
                 previewUrl: previewUrl,
                 shouldLoad: shouldLoad,
                 reloadToken: reloadToken,
+                previewBrightness: previewBrightness,
               ),
             ),
           ],

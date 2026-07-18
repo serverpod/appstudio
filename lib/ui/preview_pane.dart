@@ -6,6 +6,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:webview_cef/webview_cef.dart';
 
 import '../preview/preview_bootstrap.dart';
+import '../preview/preview_theme.dart';
 import '../theme/app_theme.dart';
 
 class PreviewPane extends StatefulWidget {
@@ -13,11 +14,13 @@ class PreviewPane extends StatefulWidget {
     super.key,
     required this.previewUrl,
     required this.shouldLoad,
+    required this.previewBrightness,
     this.reloadToken = 0,
   });
 
   final Uri previewUrl;
   final bool shouldLoad;
+  final Brightness previewBrightness;
   /// When this value increases, reload the current preview URL.
   final int reloadToken;
 
@@ -31,6 +34,7 @@ class PreviewPaneState extends State<PreviewPane> {
   bool _managerReady = false;
   String? _error;
   int _lastReloadToken = 0;
+  Brightness? _appliedBrightness;
 
   Future<void> reload() async {
     if (!widget.shouldLoad) return;
@@ -58,6 +62,10 @@ class PreviewPaneState extends State<PreviewPane> {
       return;
     }
     if (widget.shouldLoad &&
+        widget.previewBrightness != oldWidget.previewBrightness) {
+      unawaited(_applyPreviewTheme(widget.previewBrightness));
+    }
+    if (widget.shouldLoad &&
         widget.reloadToken != _lastReloadToken &&
         widget.reloadToken > 0) {
       _lastReloadToken = widget.reloadToken;
@@ -83,8 +91,13 @@ class PreviewPaneState extends State<PreviewPane> {
 
       // webview_cef binds each controller's temp index once; never re-initialize.
       await _disposeController();
+      _appliedBrightness = null;
 
+      final isDark = widget.previewBrightness == Brightness.dark;
       final scripts = InjectUserScripts()
+        ..add(
+          UserScript(previewThemeShimScript(isDark: isDark), ScriptInjectTime.LOAD_START),
+        )
         ..add(
           UserScript(previewBootstrapScript, ScriptInjectTime.LOAD_START),
         );
@@ -95,6 +108,7 @@ class PreviewPaneState extends State<PreviewPane> {
       );
       _controller = controller;
       await controller.initialize(widget.previewUrl.toString());
+      _appliedBrightness = widget.previewBrightness;
       _lastReloadToken = widget.reloadToken;
     } catch (e) {
       _error = e.toString();
@@ -105,9 +119,24 @@ class PreviewPaneState extends State<PreviewPane> {
     }
   }
 
+  Future<void> _applyPreviewTheme(Brightness brightness) async {
+    if (_appliedBrightness == brightness) return;
+    final controller = _controller;
+    if (controller == null || !controller.value) return;
+    try {
+      await controller.executeJavaScript(
+        previewThemeApplyCall(isDark: brightness == Brightness.dark),
+      );
+      _appliedBrightness = brightness;
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    }
+  }
+
   void _tearDownWebView() {
     _error = null;
     _lastReloadToken = 0;
+    _appliedBrightness = null;
     unawaited(_disposeController().then((_) {
       if (mounted) setState(() {});
     }));
