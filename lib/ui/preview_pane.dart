@@ -11,6 +11,9 @@ import '../preview/preview_theme.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/icon_segmented_control.dart';
+import '../widgets/text_segmented_control.dart';
+
+enum _PreviewHeaderLabel { preview }
 
 class PreviewPane extends StatefulWidget {
   const PreviewPane({
@@ -324,7 +327,6 @@ class _PreviewHeaderBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final scheme = theme.colorScheme;
-    final textTheme = theme.textTheme;
 
     return Container(
       height: kPaneHeaderHeight,
@@ -335,9 +337,17 @@ class _PreviewHeaderBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Text(
-            'Preview',
-            style: textTheme.small.copyWith(fontWeight: FontWeight.w500),
+          TextSegmentedControl<_PreviewHeaderLabel>(
+            value: _PreviewHeaderLabel.preview,
+            onChanged: (_) {},
+            interactive: false,
+            onMutedSurface: true,
+            segments: const [
+              TextSegment(
+                value: _PreviewHeaderLabel.preview,
+                label: 'Preview',
+              ),
+            ],
           ),
           const Spacer(),
           IconSegmentedControl<PreviewViewMode>(

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
+import '../theme/app_theme.dart';
+
 /// Icon-only segmented control styled like cloudui_flutter's account theme toggle.
 ///
 /// On a default surface, the track uses [ShadColorScheme.muted] and the active
@@ -91,8 +93,11 @@ class _IconSegmentButtonState extends State<_IconSegmentButton> {
   Widget build(BuildContext context) {
     final scheme = ShadTheme.of(context).colorScheme;
     final isActive = widget.selected;
-    final activeColor =
-        widget.onMutedSurface ? scheme.muted : scheme.background;
+    final activeColor = segmentedControlSelectedColor(
+      scheme,
+      ShadTheme.of(context).brightness,
+      onMutedSurface: widget.onMutedSurface,
+    );
 
     Widget icon = Icon(
       widget.icon,
@@ -113,11 +118,14 @@ class _IconSegmentButtonState extends State<_IconSegmentButton> {
           onTap: widget.onPressed,
           child: Container(
             decoration: BoxDecoration(
-              color: isActive
-                  ? activeColor
-                  : _hovered
-                  ? scheme.accent
-                  : Colors.transparent,
+            color: isActive
+                ? activeColor
+                : _hovered
+                ? segmentedControlHoverColor(
+                    scheme,
+                    onMutedSurface: widget.onMutedSurface,
+                  )
+                : Colors.transparent,
               borderRadius: BorderRadius.circular(4),
               boxShadow: isActive
                   ? [

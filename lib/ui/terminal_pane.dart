@@ -6,6 +6,7 @@ import '../agent/agent_controller.dart';
 import '../terminal/studio_terminal.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../widgets/text_segmented_control.dart';
 import 'agent/agent_pane.dart';
 
 enum _TerminalTab { agent, serverLogs }
@@ -84,7 +85,7 @@ class TerminalPane extends StatefulWidget {
 }
 
 class _TerminalPaneState extends State<TerminalPane> {
-  _TerminalTab _selectedTab = _TerminalTab.serverLogs;
+  _TerminalTab _selectedTab = _TerminalTab.agent;
 
   @override
   Widget build(BuildContext context) {
@@ -95,9 +96,28 @@ class _TerminalPaneState extends State<TerminalPane> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _TerminalTabBar(
-          selected: _selectedTab,
-          onSelected: (tab) => setState(() => _selectedTab = tab),
+        Container(
+          height: kPaneHeaderHeight,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: scheme.muted,
+            border: Border(bottom: paneBorderSide(scheme.border)),
+          ),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: TextSegmentedControl<_TerminalTab>(
+              value: _selectedTab,
+              onChanged: (tab) => setState(() => _selectedTab = tab),
+              onMutedSurface: true,
+              segments: const [
+                TextSegment(value: _TerminalTab.agent, label: 'Agent'),
+                TextSegment(
+                  value: _TerminalTab.serverLogs,
+                  label: 'Server logs',
+                ),
+              ],
+            ),
+          ),
         ),
         Expanded(
           child: ColoredBox(
@@ -122,133 +142,6 @@ class _TerminalPaneState extends State<TerminalPane> {
           ),
         ),
       ],
-    );
-  }
-}
-
-/// VS Code–style panel tabs: active tab matches content and covers the strip divider.
-class _TerminalTabBar extends StatelessWidget {
-  const _TerminalTabBar({
-    required this.selected,
-    required this.onSelected,
-  });
-
-  final _TerminalTab selected;
-  final ValueChanged<_TerminalTab> onSelected;
-
-  static const _height = kPaneHeaderHeight;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    final scheme = theme.colorScheme;
-
-    return SizedBox(
-      height: _height,
-      child: Stack(
-        clipBehavior: Clip.none,
-        fit: StackFit.expand,
-        children: [
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: scheme.muted,
-              border: Border(bottom: paneBorderSide(scheme.border)),
-            ),
-          ),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _TerminalTabItem(
-                label: 'Agent',
-                selected: selected == _TerminalTab.agent,
-                onTap: () => onSelected(_TerminalTab.agent),
-                showRightBorder: true,
-              ),
-              _TerminalTabItem(
-                label: 'Server logs',
-                selected: selected == _TerminalTab.serverLogs,
-                onTap: () => onSelected(_TerminalTab.serverLogs),
-                showRightBorder: false,
-              ),
-              const Spacer(),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TerminalTabItem extends StatefulWidget {
-  const _TerminalTabItem({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-    required this.showRightBorder,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  final bool showRightBorder;
-
-  @override
-  State<_TerminalTabItem> createState() => _TerminalTabItemState();
-}
-
-class _TerminalTabItemState extends State<_TerminalTabItem> {
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    final scheme = theme.colorScheme;
-    final textTheme = theme.textTheme;
-
-    final background = widget.selected
-        ? scheme.background
-        : _hovered
-            ? scheme.accent.withValues(alpha: 0.55)
-            : Colors.transparent;
-
-    final textColor = widget.selected
-        ? scheme.foreground
-        : scheme.mutedForeground;
-
-    final tab = Container(
-      height: widget.selected
-          ? _TerminalTabBar._height + 1
-          : _TerminalTabBar._height,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      decoration: BoxDecoration(
-        color: background,
-        border: Border(
-          right: widget.showRightBorder && !widget.selected
-              ? paneBorderSide(scheme.border)
-              : BorderSide.none,
-        ),
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        widget.label,
-        style: textTheme.small.copyWith(
-          color: textColor,
-          fontWeight: widget.selected ? FontWeight.w500 : FontWeight.w400,
-        ),
-      ),
-    );
-
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        behavior: HitTestBehavior.opaque,
-        child: widget.selected
-            ? Transform.translate(offset: const Offset(0, 1), child: tab)
-            : tab,
-      ),
     );
   }
 }

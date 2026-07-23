@@ -25,6 +25,31 @@ const kSplitHandleWidth = 6.0;
 BorderSide paneBorderSide(Color color) =>
     BorderSide(color: color, width: kDividerWidth);
 
+/// Subtle hover fill for segmented control segments (distinct from selection).
+Color segmentedControlHoverColor(
+  ShadColorScheme scheme, {
+  required bool onMutedSurface,
+}) {
+  final track = onMutedSurface ? scheme.background : scheme.muted;
+  return Color.alphaBlend(
+    scheme.foreground.withValues(alpha: 0.06),
+    track,
+  );
+}
+
+/// Fill for the selected segment in a segmented control.
+Color segmentedControlSelectedColor(
+  ShadColorScheme scheme,
+  Brightness brightness, {
+  required bool onMutedSurface,
+}) {
+  if (onMutedSurface) {
+    // On pane headers (muted bar + white track), light-mode muted is too close to white.
+    return brightness == Brightness.light ? scheme.border : scheme.muted;
+  }
+  return scheme.background;
+}
+
 const ShadSlateColorScheme lightColorScheme = ShadSlateColorScheme.light(
   primary: kBrandBlue,
   primaryForeground: kBrandBlueForeground,
