@@ -40,6 +40,7 @@ class StudioShell extends StatefulWidget {
 class _StudioShellState extends State<StudioShell> {
   final _previewKey = GlobalKey<PreviewPaneState>();
   double _splitRatio = 0.42;
+  bool _leftPanelVisible = true;
 
   @override
   void initState() {
@@ -74,12 +75,21 @@ class _StudioShellState extends State<StudioShell> {
               toolchain: widget.toolchain,
               session: widget.session,
               process: widget.process,
+              leftPanelVisible: _leftPanelVisible,
+              onToggleLeftPanel: widget.session.hasProject
+                  ? () {
+                      setState(() {
+                        _leftPanelVisible = !_leftPanelVisible;
+                      });
+                    }
+                  : null,
               onReload: () => _previewKey.currentState?.reload(),
             ),
             Expanded(
               child: hasProject
                   ? _Workspace(
                       splitRatio: _splitRatio,
+                      leftPanelVisible: _leftPanelVisible,
                       onSplitChanged: (value) {
                         setState(() {
                           _splitRatio = value.clamp(0.25, 0.70);
@@ -107,12 +117,16 @@ class _Toolbar extends StatelessWidget {
     required this.toolchain,
     required this.session,
     required this.process,
+    required this.leftPanelVisible,
+    required this.onToggleLeftPanel,
     required this.onReload,
   });
 
   final Toolchain toolchain;
   final ProjectSession session;
   final ServerpodProcessController process;
+  final bool leftPanelVisible;
+  final VoidCallback? onToggleLeftPanel;
   final VoidCallback onReload;
 
   @override
@@ -142,6 +156,14 @@ class _Toolbar extends StatelessWidget {
       child: Row(
         children: [
           _IconAction(
+            icon: LucideIcons.panelLeft,
+            tooltip: leftPanelVisible
+                ? 'Hide Agent & logs panel'
+                : 'Show Agent & logs panel',
+            onPressed: onToggleLeftPanel,
+          ),
+          const SizedBox(width: 4),
+          _IconAction(
             icon: LucideIcons.play,
             tooltip: 'Start',
             onPressed: process.canStart ? process.start : null,
@@ -150,11 +172,6 @@ class _Toolbar extends StatelessWidget {
             icon: LucideIcons.square,
             tooltip: 'Stop',
             onPressed: process.canStop ? process.stop : null,
-          ),
-          _IconAction(
-            icon: LucideIcons.refreshCw,
-            tooltip: 'Reload preview',
-            onPressed: process.previewReady ? onReload : null,
           ),
           const SizedBox(width: 12),
           if (session.hasProject)
@@ -229,6 +246,12 @@ class _Toolbar extends StatelessWidget {
               ],
             ),
           ),
+          const SizedBox(width: 4),
+          _IconAction(
+            icon: LucideIcons.refreshCw,
+            tooltip: 'Reload preview',
+            onPressed: process.previewReady ? onReload : null,
+          ),
         ],
       ),
     );
@@ -238,6 +261,7 @@ class _Toolbar extends StatelessWidget {
 class _Workspace extends StatelessWidget {
   const _Workspace({
     required this.splitRatio,
+    required this.leftPanelVisible,
     required this.onSplitChanged,
     required this.terminal,
     required this.agent,
@@ -249,6 +273,7 @@ class _Workspace extends StatelessWidget {
   });
 
   final double splitRatio;
+  final bool leftPanelVisible;
   final ValueChanged<double> onSplitChanged;
   final StudioTerminal terminal;
   final AgentController agent;
@@ -265,21 +290,22 @@ class _Workspace extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final total = constraints.maxWidth;
-        final left = total * splitRatio;
+        final left = leftPanelVisible ? total * splitRatio : 0.0;
 
         return Stack(
           children: [
             Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SizedBox(
-                  width: left,
-                  child: TerminalPane(
-                    studioTerminal: terminal,
-                    agent: agent,
-                    onOpenSettings: onOpenSettings,
+                if (leftPanelVisible)
+                  SizedBox(
+                    width: left,
+                    child: TerminalPane(
+                      studioTerminal: terminal,
+                      agent: agent,
+                      onOpenSettings: onOpenSettings,
+                    ),
                   ),
-                ),
                 Expanded(
                   child: PreviewPane(
                     key: previewKey,
@@ -290,28 +316,30 @@ class _Workspace extends StatelessWidget {
                 ),
               ],
             ),
-            Positioned(
-              left: left - kDividerWidth / 2,
-              top: 0,
-              bottom: 0,
-              width: kDividerWidth,
-              child: ColoredBox(color: scheme.border),
-            ),
-            Positioned(
-              left: left - kSplitHandleWidth / 2,
-              top: 0,
-              bottom: 0,
-              width: kSplitHandleWidth,
-              child: MouseRegion(
-                cursor: SystemMouseCursors.resizeColumn,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onHorizontalDragUpdate: (details) {
-                    onSplitChanged((left + details.delta.dx) / total);
-                  },
+            if (leftPanelVisible) ...[
+              Positioned(
+                left: left - kDividerWidth / 2,
+                top: 0,
+                bottom: 0,
+                width: kDividerWidth,
+                child: ColoredBox(color: scheme.border),
+              ),
+              Positioned(
+                left: left - kSplitHandleWidth / 2,
+                top: 0,
+                bottom: 0,
+                width: kSplitHandleWidth,
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.resizeColumn,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onHorizontalDragUpdate: (details) {
+                      onSplitChanged((left + details.delta.dx) / total);
+                    },
+                  ),
                 ),
               ),
-            ),
+            ],
           ],
         );
       },
