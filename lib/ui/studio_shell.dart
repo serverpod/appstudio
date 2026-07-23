@@ -74,9 +74,7 @@ class _StudioShellState extends State<StudioShell> {
               toolchain: widget.toolchain,
               session: widget.session,
               process: widget.process,
-              themeController: widget.themeController,
               onReload: () => _previewKey.currentState?.reload(),
-              onOpenSettings: _openSettings,
             ),
             Expanded(
               child: hasProject
@@ -109,17 +107,13 @@ class _Toolbar extends StatelessWidget {
     required this.toolchain,
     required this.session,
     required this.process,
-    required this.themeController,
     required this.onReload,
-    required this.onOpenSettings,
   });
 
   final Toolchain toolchain;
   final ProjectSession session;
   final ServerpodProcessController process;
-  final ThemeController themeController;
   final VoidCallback onReload;
-  final VoidCallback onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -234,21 +228,6 @@ class _Toolbar extends StatelessWidget {
                 ),
               ],
             ),
-          ),
-          const SizedBox(width: 4),
-          _IconAction(
-            icon: LucideIcons.settings,
-            tooltip: 'Settings',
-            onPressed: onOpenSettings,
-          ),
-          _IconAction(
-            icon: switch (themeController.mode) {
-              ThemeMode.light => LucideIcons.sun,
-              ThemeMode.dark => LucideIcons.moon,
-              ThemeMode.system => LucideIcons.monitor,
-            },
-            tooltip: 'Theme: ${themeController.label}',
-            onPressed: themeController.cycle,
           ),
         ],
       ),
