@@ -16,6 +16,8 @@ lib/
   theme/                 # Shad themes, layout constants, ThemeController
   toolchain/             # Bundled vs host flutter/dart/serverpod/opencode
   widgets/               # Shared UI (IconSegmentedControl, MenuItemTile)
+packages/
+  mac_menu_bar/            # Local fork — SF Symbol icons + menu separators
 tool/
   apply_webview_cef_patch.sh   # Run after flutter pub get
   webview_cef_patches/         # CEF resize fix for webview_cef

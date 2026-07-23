@@ -104,7 +104,7 @@ class _StudioShellState extends State<StudioShell> {
   }
 }
 
-class _Toolbar extends StatefulWidget {
+class _Toolbar extends StatelessWidget {
   const _Toolbar({
     required this.toolchain,
     required this.session,
@@ -122,30 +122,17 @@ class _Toolbar extends StatefulWidget {
   final VoidCallback onOpenSettings;
 
   @override
-  State<_Toolbar> createState() => _ToolbarState();
-}
-
-class _ToolbarState extends State<_Toolbar> {
-  final _recentsController = ShadPopoverController();
-
-  @override
-  void dispose() {
-    _recentsController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final scheme = theme.colorScheme;
     final textTheme = theme.textTheme;
 
-    final statusColor = switch (widget.process.state) {
-      ProcessState.idle => widget.process.previewReady
+    final statusColor = switch (process.state) {
+      ProcessState.idle => process.previewReady
           ? AppColors.successDot
           : scheme.mutedForeground,
       ProcessState.starting => AppColors.warningAmber,
-      ProcessState.running => widget.process.previewReady
+      ProcessState.running => process.previewReady
           ? AppColors.successDot
           : kBrandBlue,
       ProcessState.stopping => AppColors.warningAmber,
@@ -160,78 +147,29 @@ class _ToolbarState extends State<_Toolbar> {
       ),
       child: Row(
         children: [
-          Text(
-            'App Studio',
-            style: textTheme.p.copyWith(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(width: 16),
-          _IconAction(
-            icon: LucideIcons.folderOpen,
-            tooltip: 'Open project',
-            onPressed: widget.session.openProjectPicker,
-          ),
           _IconAction(
             icon: LucideIcons.play,
             tooltip: 'Start',
-            onPressed: widget.process.canStart ? widget.process.start : null,
+            onPressed: process.canStart ? process.start : null,
           ),
           _IconAction(
             icon: LucideIcons.square,
             tooltip: 'Stop',
-            onPressed: widget.process.canStop ? widget.process.stop : null,
+            onPressed: process.canStop ? process.stop : null,
           ),
           _IconAction(
             icon: LucideIcons.refreshCw,
             tooltip: 'Reload preview',
-            onPressed: widget.process.previewReady ? widget.onReload : null,
+            onPressed: process.previewReady ? onReload : null,
           ),
-          if (widget.session.recents.isNotEmpty) ...[
-            const SizedBox(width: 4),
-            ShadPopover(
-              controller: _recentsController,
-              anchor: const ShadAnchor(
-                childAlignment: Alignment.topLeft,
-                overlayAlignment: Alignment.bottomLeft,
-                offset: Offset(0, 4),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-              popover: (context) => SizedBox(
-                width: 360,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (final path in widget.session.recents)
-                      MenuItemTile(
-                        icon: LucideIcons.folder,
-                        label: p.basename(path),
-                        subtitle: path,
-                        onTap: () {
-                          _recentsController.hide();
-                          widget.session.openPath(path);
-                        },
-                      ),
-                  ],
-                ),
-              ),
-              child: ShadTooltip(
-                builder: (context) => const Text('Recent projects'),
-                child: ShadIconButton.ghost(
-                  icon: const Icon(LucideIcons.history, size: 16),
-                  onPressed: _recentsController.toggle,
-                  width: 34,
-                  height: 34,
-                ),
-              ),
-            ),
-          ],
           const SizedBox(width: 12),
-          if (widget.session.hasProject)
+          if (session.hasProject)
             Expanded(
               child: Row(
                 children: [
                   Flexible(
                     child: Text(
-                      widget.session.projectName ?? '',
+                      session.projectName ?? '',
                       style: textTheme.small.copyWith(
                         fontWeight: FontWeight.w500,
                       ),
@@ -241,7 +179,7 @@ class _ToolbarState extends State<_Toolbar> {
                   const SizedBox(width: 8),
                   Flexible(
                     child: Text(
-                      widget.session.projectPath ?? '',
+                      session.projectPath ?? '',
                       style: textTheme.muted.copyWith(
                         fontFamily: kMacMonoFont,
                         fontSize: 11,
@@ -265,7 +203,7 @@ class _ToolbarState extends State<_Toolbar> {
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  widget.toolchain.badgeLabel,
+                  toolchain.badgeLabel,
                   style: textTheme.small.copyWith(
                     fontWeight: FontWeight.w500,
                     color: scheme.mutedForeground,
@@ -289,7 +227,7 @@ class _ToolbarState extends State<_Toolbar> {
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  widget.process.statusMessage,
+                  process.statusMessage,
                   style: textTheme.small.copyWith(
                     color: scheme.mutedForeground,
                   ),
@@ -301,16 +239,16 @@ class _ToolbarState extends State<_Toolbar> {
           _IconAction(
             icon: LucideIcons.settings,
             tooltip: 'Settings',
-            onPressed: widget.onOpenSettings,
+            onPressed: onOpenSettings,
           ),
           _IconAction(
-            icon: switch (widget.themeController.mode) {
+            icon: switch (themeController.mode) {
               ThemeMode.light => LucideIcons.sun,
               ThemeMode.dark => LucideIcons.moon,
               ThemeMode.system => LucideIcons.monitor,
             },
-            tooltip: 'Theme: ${widget.themeController.label}',
-            onPressed: widget.themeController.cycle,
+            tooltip: 'Theme: ${themeController.label}',
+            onPressed: themeController.cycle,
           ),
         ],
       ),

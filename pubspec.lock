@@ -389,6 +389,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.1.15"
+  mac_menu_bar:
+    dependency: "direct main"
+    description:
+      path: "packages/mac_menu_bar"
+      relative: true
+    source: path
+    version: "0.0.5+1"
   markdown:
     dependency: transitive
     description:

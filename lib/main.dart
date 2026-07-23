@@ -12,6 +12,7 @@ import 'terminal/studio_terminal.dart';
 import 'theme/app_theme.dart';
 import 'theme/theme_controller.dart';
 import 'toolchain/toolchain.dart';
+import 'platform/macos_app_menu.dart';
 import 'ui/studio_shell.dart';
 
 Future<void> main() async {
@@ -71,8 +72,42 @@ class AppStudioApp extends StatefulWidget {
 }
 
 class _AppStudioAppState extends State<AppStudioApp> {
+  MacAppMenu? _macMenu;
+
+  @override
+  void initState() {
+    super.initState();
+    _macMenu = MacAppMenu(
+      session: widget.session,
+      process: widget.process,
+      agent: widget.agent,
+      onNewProject: _showNewProjectDialog,
+    );
+    unawaited(_macMenu!.install());
+  }
+
+  void _showNewProjectDialog() {
+    if (!mounted) return;
+    showShadDialog<void>(
+      context: context,
+      builder: (context) => ShadDialog.alert(
+        title: const Text('New Project'),
+        description: const Text(
+          'Creating a new Serverpod project from App Studio is not available yet.',
+        ),
+        actions: [
+          ShadButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
+    _macMenu?.dispose();
     try {
       WebviewManager().quit();
     } catch (_) {}

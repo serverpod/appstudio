@@ -24,6 +24,13 @@ class ProjectSession extends ChangeNotifier {
   String? get projectName =>
       _projectPath == null ? null : p.basename(_projectPath!);
 
+  void closeProject() {
+    if (_projectPath == null) return;
+    _projectPath = null;
+    _error = null;
+    notifyListeners();
+  }
+
   Future<void> loadRecents() async {
     final prefs = await SharedPreferences.getInstance();
     _recents = prefs.getStringList(_recentsKey) ?? [];
