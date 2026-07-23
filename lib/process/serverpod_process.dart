@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../process/dev_session_cleanup.dart';
 import '../session/project_session.dart';
 import '../terminal/studio_terminal.dart';
 import '../toolchain/toolchain.dart';
@@ -124,7 +125,7 @@ class ServerpodProcessController extends ChangeNotifier {
     _stopPolling();
     _pollTimer = Timer.periodic(const Duration(milliseconds: 750), (_) async {
       if (_state != ProcessState.running) return;
-      final ready = await _tcpReady(9998);
+      final ready = await _tcpReady(kPreviewPort);
       if (ready && !_previewReady) {
         _previewReady = true;
         _statusMessage = 'Preview · :9998 up · waiting for Flutter attach';
@@ -164,6 +165,9 @@ class ServerpodProcessController extends ChangeNotifier {
     unawaited(_outputSub?.cancel());
     if (_terminalListener != null) {
       terminal.removeListener(_terminalListener!);
+    }
+    if (canStop) {
+      unawaited(stop());
     }
     super.dispose();
   }

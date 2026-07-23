@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:kyroon_pty/kyroon_pty.dart';
 import 'package:xterm/xterm.dart';
 
+import '../process/dev_session_cleanup.dart';
+
 class StudioTerminal extends ChangeNotifier {
   StudioTerminal() {
     terminal = Terminal(
@@ -49,6 +51,7 @@ class StudioTerminal extends ChangeNotifier {
     );
     _pty = pty;
     _running = true;
+    await registerDevSessionPid(pty.pid);
     notifyListeners();
 
     _outputSub = pty.output.listen((data) {
@@ -73,11 +76,22 @@ class StudioTerminal extends ChangeNotifier {
     final pty = _pty;
     if (pty == null) return;
 
+    final pid = pty.pid;
     pty.kill(ProcessSignal.sigterm);
+    if (Platform.isMacOS || Platform.isLinux) {
+      try {
+        Process.killPid(-pid, ProcessSignal.sigterm);
+      } catch (_) {}
+    }
     try {
       await pty.exitCode.timeout(const Duration(seconds: 2));
     } on TimeoutException {
       pty.kill(ProcessSignal.sigkill);
+      if (Platform.isMacOS || Platform.isLinux) {
+        try {
+          Process.killPid(-pid, ProcessSignal.sigkill);
+        } catch (_) {}
+      }
       try {
         await pty.exitCode.timeout(const Duration(seconds: 1));
       } catch (_) {}
@@ -87,6 +101,7 @@ class StudioTerminal extends ChangeNotifier {
     _outputSub = null;
     _pty = null;
     _running = false;
+    await clearDevSessionPid();
     notifyListeners();
   }
 

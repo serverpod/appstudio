@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:webview_cef/webview_cef.dart';
 
 import 'agent/agent_controller.dart';
+import 'process/dev_session_cleanup.dart';
 import 'process/serverpod_process.dart';
 import 'session/project_session.dart';
 import 'terminal/studio_terminal.dart';
@@ -13,6 +16,8 @@ import 'ui/studio_shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  await cleanupOrphanedDevSession();
 
   final themeController = ThemeController();
   await themeController.load();
@@ -71,6 +76,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
     try {
       WebviewManager().quit();
     } catch (_) {}
+    unawaited(widget.process.stop());
     widget.agent.dispose();
     widget.process.dispose();
     widget.terminal.dispose();
