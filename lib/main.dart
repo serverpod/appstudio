@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:webview_cef/webview_cef.dart';
 
 import 'process/serverpod_process.dart';
@@ -74,20 +75,18 @@ class _AppStudioAppState extends State<AppStudioApp> {
     return ListenableBuilder(
       listenable: widget.themeController,
       builder: (context, _) {
-        return MaterialApp(
+        return ShadApp(
           title: 'App Studio',
           debugShowCheckedModeBanner: false,
-          theme: AppTheme.light(),
-          darkTheme: AppTheme.dark(),
+          theme: buildLightTheme(),
+          darkTheme: buildDarkTheme(),
           themeMode: widget.themeController.mode,
-          home: Scaffold(
-            body: StudioShell(
-              toolchain: widget.toolchain,
-              session: widget.session,
-              terminal: widget.terminal,
-              process: widget.process,
-              themeController: widget.themeController,
-            ),
+          home: StudioShell(
+            toolchain: widget.toolchain,
+            session: widget.session,
+            terminal: widget.terminal,
+            process: widget.process,
+            themeController: widget.themeController,
           ),
         );
       },

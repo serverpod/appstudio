@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:xterm/xterm.dart';
 
 import '../terminal/studio_terminal.dart';
+import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 
 class TerminalPane extends StatelessWidget {
@@ -11,35 +11,68 @@ class TerminalPane extends StatelessWidget {
 
   final StudioTerminal studioTerminal;
 
-  static final TerminalTheme paperTheme = TerminalTheme(
-    cursor: const Color(0xFF0F172A),
-    selection: const Color(0x660F766E),
-    foreground: const Color(0xFF0F172A),
-    background: const Color(0xFFEEF1F5),
-    black: const Color(0xFF0F172A),
-    red: const Color(0xFFDC2626),
-    green: const Color(0xFF059669),
-    yellow: const Color(0xFFD97706),
-    blue: const Color(0xFF2563EB),
-    magenta: const Color(0xFF9333EA),
-    cyan: const Color(0xFF0F766E),
-    white: const Color(0xFF334155),
-    brightBlack: const Color(0xFF64748B),
-    brightRed: const Color(0xFFEF4444),
-    brightGreen: const Color(0xFF10B981),
-    brightYellow: const Color(0xFFF59E0B),
-    brightBlue: const Color(0xFF3B82F6),
-    brightMagenta: const Color(0xFFA855F7),
-    brightCyan: const Color(0xFF14B8A6),
-    brightWhite: const Color(0xFF0F172A),
-    searchHitBackground: const Color(0x66FBBF24),
-    searchHitBackgroundCurrent: const Color(0x99F59E0B),
-    searchHitForeground: const Color(0xFF0F172A),
-  );
+  static TerminalTheme terminalTheme(ShadThemeData theme) {
+    final isDark = theme.brightness == Brightness.dark;
+    if (isDark) {
+      return TerminalTheme(
+        cursor: theme.colorScheme.foreground,
+        selection: theme.colorScheme.selection.withValues(alpha: 0.35),
+        foreground: theme.colorScheme.foreground,
+        background: theme.colorScheme.muted,
+        black: const Color(0xFF1E293B),
+        red: AppColors.errorRed,
+        green: AppColors.successDot,
+        yellow: AppColors.warningAmber,
+        blue: kBrandBlue,
+        magenta: const Color(0xFFA855F7),
+        cyan: const Color(0xFF14B8A6),
+        white: theme.colorScheme.foreground,
+        brightBlack: theme.colorScheme.mutedForeground,
+        brightRed: const Color(0xFFFCA5A5),
+        brightGreen: AppColors.successTextDark,
+        brightYellow: AppColors.warningTextDark,
+        brightBlue: const Color(0xFF93C5FD),
+        brightMagenta: const Color(0xFFC4B5FD),
+        brightCyan: const Color(0xFF5EEAD4),
+        brightWhite: theme.colorScheme.foreground,
+        searchHitBackground: const Color(0x66FBBF24),
+        searchHitBackgroundCurrent: const Color(0x99F59E0B),
+        searchHitForeground: theme.colorScheme.foreground,
+      );
+    }
+
+    return TerminalTheme(
+      cursor: theme.colorScheme.foreground,
+      selection: theme.colorScheme.selection.withValues(alpha: 0.35),
+      foreground: theme.colorScheme.foreground,
+      background: theme.colorScheme.muted,
+      black: const Color(0xFF0F172A),
+      red: AppColors.errorRed,
+      green: AppColors.successDot,
+      yellow: AppColors.warningAmber,
+      blue: kBrandBlue,
+      magenta: const Color(0xFF9333EA),
+      cyan: const Color(0xFF0F766E),
+      white: const Color(0xFF334155),
+      brightBlack: theme.colorScheme.mutedForeground,
+      brightRed: const Color(0xFFEF4444),
+      brightGreen: const Color(0xFF10B981),
+      brightYellow: const Color(0xFFF59E0B),
+      brightBlue: const Color(0xFF3B82F6),
+      brightMagenta: const Color(0xFFA855F7),
+      brightCyan: const Color(0xFF14B8A6),
+      brightWhite: theme.colorScheme.foreground,
+      searchHitBackground: const Color(0x66FBBF24),
+      searchHitBackgroundCurrent: const Color(0x99F59E0B),
+      searchHitForeground: theme.colorScheme.foreground,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).extension<AppColors>()!;
+    final theme = ShadTheme.of(context);
+    final scheme = theme.colorScheme;
+    final xtermTheme = terminalTheme(theme);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -48,19 +81,20 @@ class TerminalPane extends StatelessWidget {
           height: 32,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
-            color: colors.paneHeaderBackground,
-            border: Border(
-              bottom: BorderSide(color: colors.divider, width: 1),
-            ),
+            color: scheme.muted,
+            border: Border(bottom: BorderSide(color: scheme.border)),
           ),
           child: Row(
             children: [
-              Icon(LucideIcons.terminal, size: 14, color: colors.statusIdle),
+              Icon(
+                LucideIcons.terminal,
+                size: 14,
+                color: scheme.mutedForeground,
+              ),
               const SizedBox(width: 8),
               Text(
                 'Terminal',
-                style: GoogleFonts.ibmPlexSans(
-                  fontSize: 12,
+                style: theme.textTheme.small.copyWith(
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -69,13 +103,13 @@ class TerminalPane extends StatelessWidget {
         ),
         Expanded(
           child: ColoredBox(
-            color: paperTheme.background,
+            color: xtermTheme.background,
             child: TerminalView(
               studioTerminal.terminal,
-              theme: paperTheme,
+              theme: xtermTheme,
               textStyle: TerminalStyle(
                 fontSize: 13,
-                fontFamily: GoogleFonts.ibmPlexMono().fontFamily!,
+                fontFamily: kMacMonoFont,
               ),
               padding: const EdgeInsets.all(8),
               autofocus: true,

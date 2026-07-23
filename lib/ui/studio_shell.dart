@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:path/path.dart' as p;
+import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../process/serverpod_process.dart';
 import '../session/project_session.dart';
 import '../terminal/studio_terminal.dart';
+import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import '../toolchain/toolchain.dart';
+import '../widgets/menu_item_tile.dart';
 import 'preview_pane.dart';
 import 'terminal_pane.dart';
 
@@ -79,7 +80,7 @@ class _StudioShellState extends State<StudioShell> {
   }
 }
 
-class _Toolbar extends StatelessWidget {
+class _Toolbar extends StatefulWidget {
   const _Toolbar({
     required this.toolchain,
     required this.session,
@@ -95,92 +96,117 @@ class _Toolbar extends StatelessWidget {
   final VoidCallback onReload;
 
   @override
+  State<_Toolbar> createState() => _ToolbarState();
+}
+
+class _ToolbarState extends State<_Toolbar> {
+  final _recentsController = ShadPopoverController();
+
+  @override
+  void dispose() {
+    _recentsController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).extension<AppColors>()!;
-    final statusColor = switch (process.state) {
-      ProcessState.idle =>
-        process.previewReady ? colors.statusReady : colors.statusIdle,
-      ProcessState.starting => colors.statusStarting,
-      ProcessState.running =>
-        process.previewReady ? colors.statusReady : colors.statusRunning,
-      ProcessState.stopping => colors.statusStarting,
+    final theme = ShadTheme.of(context);
+    final scheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
+
+    final statusColor = switch (widget.process.state) {
+      ProcessState.idle => widget.process.previewReady
+          ? AppColors.successDot
+          : scheme.mutedForeground,
+      ProcessState.starting => AppColors.warningAmber,
+      ProcessState.running => widget.process.previewReady
+          ? AppColors.successDot
+          : kBrandBlue,
+      ProcessState.stopping => AppColors.warningAmber,
     };
 
     return Container(
       height: 48,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
-        color: colors.toolbarBackground,
-        border: Border(bottom: BorderSide(color: colors.divider)),
+        color: scheme.background,
+        border: Border(bottom: BorderSide(color: scheme.border)),
       ),
       child: Row(
         children: [
           Text(
             'App Studio',
-            style: GoogleFonts.ibmPlexSans(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              letterSpacing: -0.2,
-            ),
+            style: textTheme.p.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(width: 16),
           _IconAction(
             icon: LucideIcons.folderOpen,
             tooltip: 'Open project',
-            onPressed: session.openProjectPicker,
+            onPressed: widget.session.openProjectPicker,
           ),
           _IconAction(
             icon: LucideIcons.play,
             tooltip: 'Start',
-            onPressed: process.canStart ? process.start : null,
+            onPressed: widget.process.canStart ? widget.process.start : null,
           ),
           _IconAction(
             icon: LucideIcons.square,
             tooltip: 'Stop',
-            onPressed: process.canStop ? process.stop : null,
+            onPressed: widget.process.canStop ? widget.process.stop : null,
           ),
           _IconAction(
             icon: LucideIcons.refreshCw,
             tooltip: 'Reload preview',
-            onPressed: process.previewReady ? onReload : null,
+            onPressed: widget.process.previewReady ? widget.onReload : null,
           ),
-          if (session.recents.isNotEmpty) ...[
+          if (widget.session.recents.isNotEmpty) ...[
             const SizedBox(width: 4),
-            PopupMenuButton<String>(
-              tooltip: 'Recent projects',
-              padding: EdgeInsets.zero,
-              onSelected: session.openPath,
-              itemBuilder: (context) => [
-                for (final path in session.recents)
-                  PopupMenuItem(
-                    value: path,
-                    child: Text(
-                      path,
-                      style: GoogleFonts.ibmPlexMono(fontSize: 12),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-              ],
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                child: Icon(
-                  LucideIcons.history,
-                  size: 16,
-                  color: Theme.of(context).iconTheme.color,
+            ShadPopover(
+              controller: _recentsController,
+              anchor: const ShadAnchor(
+                childAlignment: Alignment.topLeft,
+                overlayAlignment: Alignment.bottomLeft,
+                offset: Offset(0, 4),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+              popover: (context) => SizedBox(
+                width: 360,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final path in widget.session.recents)
+                      MenuItemTile(
+                        icon: LucideIcons.folder,
+                        label: p.basename(path),
+                        subtitle: path,
+                        onTap: () {
+                          _recentsController.hide();
+                          widget.session.openPath(path);
+                        },
+                      ),
+                  ],
+                ),
+              ),
+              child: ShadTooltip(
+                builder: (context) => const Text('Recent projects'),
+                child: ShadIconButton.ghost(
+                  icon: const Icon(LucideIcons.history, size: 16),
+                  onPressed: _recentsController.toggle,
+                  width: 34,
+                  height: 34,
                 ),
               ),
             ),
           ],
           const SizedBox(width: 12),
-          if (session.hasProject)
+          if (widget.session.hasProject)
             Expanded(
               child: Row(
                 children: [
                   Flexible(
                     child: Text(
-                      session.projectName ?? '',
-                      style: GoogleFonts.ibmPlexSans(
-                        fontSize: 13,
+                      widget.session.projectName ?? '',
+                      style: textTheme.small.copyWith(
                         fontWeight: FontWeight.w500,
                       ),
                       overflow: TextOverflow.ellipsis,
@@ -189,10 +215,10 @@ class _Toolbar extends StatelessWidget {
                   const SizedBox(width: 8),
                   Flexible(
                     child: Text(
-                      session.projectPath ?? '',
-                      style: GoogleFonts.ibmPlexMono(
+                      widget.session.projectPath ?? '',
+                      style: textTheme.muted.copyWith(
+                        fontFamily: kMacMonoFont,
                         fontSize: 11,
-                        color: colors.emptyStateMuted,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -202,14 +228,28 @@ class _Toolbar extends StatelessWidget {
             )
           else
             const Spacer(),
-          _Badge(label: toolchain.badgeLabel),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              border: Border.all(color: colors.divider),
-              borderRadius: BorderRadius.circular(6),
+          ShadBadge.secondary(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  LucideIcons.package,
+                  size: 12,
+                  color: scheme.mutedForeground,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  widget.toolchain.badgeLabel,
+                  style: textTheme.small.copyWith(
+                    fontWeight: FontWeight.w500,
+                    color: scheme.mutedForeground,
+                  ),
+                ),
+              ],
             ),
+          ),
+          const SizedBox(width: 8),
+          ShadBadge.outline(
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -223,10 +263,9 @@ class _Toolbar extends StatelessWidget {
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  process.statusMessage,
-                  style: GoogleFonts.ibmPlexSans(
-                    fontSize: 11,
-                    color: colors.emptyStateMuted,
+                  widget.process.statusMessage,
+                  style: textTheme.small.copyWith(
+                    color: scheme.mutedForeground,
                   ),
                 ),
               ],
@@ -234,13 +273,13 @@ class _Toolbar extends StatelessWidget {
           ),
           const SizedBox(width: 4),
           _IconAction(
-            icon: switch (themeController.mode) {
+            icon: switch (widget.themeController.mode) {
               ThemeMode.light => LucideIcons.sun,
               ThemeMode.dark => LucideIcons.moon,
               ThemeMode.system => LucideIcons.monitor,
             },
-            tooltip: 'Theme: ${themeController.label}',
-            onPressed: themeController.cycle,
+            tooltip: 'Theme: ${widget.themeController.label}',
+            onPressed: widget.themeController.cycle,
           ),
         ],
       ),
@@ -269,7 +308,7 @@ class _Workspace extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).extension<AppColors>()!;
+    final scheme = ShadTheme.of(context).colorScheme;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -291,7 +330,7 @@ class _Workspace extends StatelessWidget {
                 },
                 child: Container(
                   width: 5,
-                  color: colors.divider,
+                  color: scheme.border,
                 ),
               ),
             ),
@@ -317,8 +356,10 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).extension<AppColors>()!;
-    final scheme = Theme.of(context).colorScheme;
+    final theme = ShadTheme.of(context);
+    final scheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
+    final isDark = theme.brightness == Brightness.dark;
 
     return Center(
       child: ConstrainedBox(
@@ -332,37 +373,32 @@ class _EmptyState extends StatelessWidget {
               const SizedBox(height: 16),
               Text(
                 'App Studio',
-                style: GoogleFonts.ibmPlexSans(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: -0.6,
-                ),
+                style: textTheme.h3.copyWith(fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 8),
               Text(
                 'Open a Serverpod project to get started',
                 textAlign: TextAlign.center,
-                style: GoogleFonts.ibmPlexSans(
-                  fontSize: 14,
-                  color: colors.emptyStateMuted,
-                ),
+                style: textTheme.muted,
               ),
               if (session.error != null) ...[
                 const SizedBox(height: 12),
                 Text(
                   session.error!,
                   textAlign: TextAlign.center,
-                  style: GoogleFonts.ibmPlexSans(
-                    fontSize: 12,
-                    color: colors.statusDanger,
+                  style: textTheme.small.copyWith(
+                    color: isDark
+                        ? AppColors.errorTextDark
+                        : AppColors.errorText,
                   ),
                 ),
               ],
               const SizedBox(height: 24),
-              FilledButton.icon(
+              ShadButton(
                 onPressed: session.openProjectPicker,
-                icon: const Icon(LucideIcons.folderOpen, size: 16),
-                label: const Text('Open project'),
+                size: ShadButtonSize.sm,
+                leading: const Icon(LucideIcons.folderOpen, size: 16),
+                child: const Text('Open project'),
               ),
               if (session.recents.isNotEmpty) ...[
                 const SizedBox(height: 32),
@@ -370,37 +406,34 @@ class _EmptyState extends StatelessWidget {
                   alignment: Alignment.centerLeft,
                   child: Text(
                     'Recent',
-                    style: GoogleFonts.ibmPlexSans(
-                      fontSize: 12,
+                    style: textTheme.small.copyWith(
                       fontWeight: FontWeight.w500,
-                      color: colors.emptyStateMuted,
+                      color: scheme.mutedForeground,
                     ),
                   ),
                 ),
                 const SizedBox(height: 8),
-                for (final path in session.recents)
-                  ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(
-                      LucideIcons.folder,
-                      size: 16,
-                      color: colors.emptyStateMuted,
-                    ),
-                    title: Text(
-                      p.basename(path),
-                      style: GoogleFonts.ibmPlexSans(fontSize: 13),
-                    ),
-                    subtitle: Text(
-                      path,
-                      style: GoogleFonts.ibmPlexMono(
-                        fontSize: 11,
-                        color: colors.emptyStateMuted,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    onTap: () => session.openPath(path),
+                Container(
+                  decoration: BoxDecoration(
+                    borderRadius: theme.radius,
+                    border: Border.all(color: scheme.border),
+                    color: scheme.card,
                   ),
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < session.recents.length; i++) ...[
+                        if (i > 0)
+                          Divider(height: 1, color: scheme.border),
+                        MenuItemTile(
+                          icon: LucideIcons.folder,
+                          label: p.basename(session.recents[i]),
+                          subtitle: session.recents[i],
+                          onTap: () => session.openPath(session.recents[i]),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
               ],
             ],
           ),
@@ -423,46 +456,13 @@ class _IconAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: IconButton(
-        onPressed: onPressed,
+    return ShadTooltip(
+      builder: (context) => Text(tooltip),
+      child: ShadIconButton.ghost(
         icon: Icon(icon, size: 16),
-        visualDensity: VisualDensity.compact,
-        constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
-      ),
-    );
-  }
-}
-
-class _Badge extends StatelessWidget {
-  const _Badge({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).extension<AppColors>()!;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: colors.badgeBackground,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(LucideIcons.package, size: 12, color: colors.badgeForeground),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: GoogleFonts.ibmPlexSans(
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-              color: colors.badgeForeground,
-            ),
-          ),
-        ],
+        onPressed: onPressed,
+        width: 34,
+        height: 34,
       ),
     );
   }

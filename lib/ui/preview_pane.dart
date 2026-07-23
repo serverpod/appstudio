@@ -1,14 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:webview_cef/webview_cef.dart';
 
 import '../preview/preview_bootstrap.dart';
 import '../preview/preview_device.dart';
 import '../preview/preview_surface_sync.dart';
 import '../preview/preview_theme.dart';
+import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 
 class PreviewPane extends StatefulWidget {
@@ -21,7 +21,6 @@ class PreviewPane extends StatefulWidget {
 
   final Uri previewUrl;
   final bool shouldLoad;
-  /// When this value increases, reload the current preview URL.
   final int reloadToken;
 
   @override
@@ -154,7 +153,7 @@ class PreviewPaneState extends State<PreviewPane> {
         );
 
       final controller = WebviewManager().createWebView(
-        loading: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+        loading: const _PreviewLoadingIndicator(),
         injectUserScripts: scripts,
       );
       _controller = controller;
@@ -210,7 +209,6 @@ class PreviewPaneState extends State<PreviewPane> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).extension<AppColors>()!;
     final controller = _controller;
     final viewport = previewPhoneViewport(_orientation);
 
@@ -218,7 +216,6 @@ class PreviewPaneState extends State<PreviewPane> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _PreviewHeaderBar(
-          colors: colors,
           previewUrl: widget.previewUrl,
           previewBrightness: _previewBrightness,
           displayMode: _displayMode,
@@ -230,7 +227,6 @@ class PreviewPaneState extends State<PreviewPane> {
         Expanded(
           child: _buildBody(
             controller,
-            colors,
             viewport: viewport,
           ),
         ),
@@ -239,15 +235,21 @@ class PreviewPaneState extends State<PreviewPane> {
   }
 
   Widget _buildBody(
-    WebViewController? controller,
-    AppColors colors, {
+    WebViewController? controller, {
     required Size viewport,
   }) {
+    final theme = ShadTheme.of(context);
+    final scheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
+    final isDark = theme.brightness == Brightness.dark;
+
     if (_error != null) {
       return Center(
         child: Text(
           'Preview error: $_error',
-          style: GoogleFonts.ibmPlexSans(color: colors.statusDanger),
+          style: textTheme.small.copyWith(
+            color: isDark ? AppColors.errorTextDark : AppColors.errorText,
+          ),
         ),
       );
     }
@@ -257,14 +259,11 @@ class PreviewPaneState extends State<PreviewPane> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(LucideIcons.globe, size: 28, color: colors.emptyStateMuted),
+            Icon(LucideIcons.globe, size: 28, color: scheme.mutedForeground),
             const SizedBox(height: 12),
             Text(
               'Preview will appear when the app is ready',
-              style: GoogleFonts.ibmPlexSans(
-                fontSize: 13,
-                color: colors.emptyStateMuted,
-              ),
+              style: textTheme.muted,
             ),
           ],
         ),
@@ -272,26 +271,7 @@ class PreviewPaneState extends State<PreviewPane> {
     }
 
     if (controller == null || _initializing || !controller.value) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(
-              width: 22,
-              height: 22,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Loading preview…',
-              style: GoogleFonts.ibmPlexSans(
-                fontSize: 13,
-                color: colors.emptyStateMuted,
-              ),
-            ),
-          ],
-        ),
-      );
+      return const Center(child: _PreviewLoadingIndicator());
     }
 
     return ValueListenableBuilder<bool>(
@@ -318,9 +298,30 @@ class PreviewPaneState extends State<PreviewPane> {
   }
 }
 
+class _PreviewLoadingIndicator extends StatelessWidget {
+  const _PreviewLoadingIndicator();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(
+          width: 120,
+          child: ShadProgress(value: null, minHeight: 4),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Loading preview…',
+          style: ShadTheme.of(context).textTheme.muted,
+        ),
+      ],
+    );
+  }
+}
+
 class _PreviewHeaderBar extends StatelessWidget {
   const _PreviewHeaderBar({
-    required this.colors,
     required this.previewUrl,
     required this.previewBrightness,
     required this.displayMode,
@@ -330,7 +331,6 @@ class _PreviewHeaderBar extends StatelessWidget {
     required this.onToggleOrientation,
   });
 
-  final AppColors colors;
   final Uri previewUrl;
   final Brightness previewBrightness;
   final PreviewDisplayMode displayMode;
@@ -341,6 +341,9 @@ class _PreviewHeaderBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final scheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
     final viewport = previewPhoneViewport(orientation);
     final sizeLabel = displayMode == PreviewDisplayMode.phone
         ? '${viewport.width.toInt()}×${viewport.height.toInt()}'
@@ -350,27 +353,24 @@ class _PreviewHeaderBar extends StatelessWidget {
       height: 36,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
-        color: colors.paneHeaderBackground,
-        border: Border(bottom: BorderSide(color: colors.divider, width: 1)),
+        color: scheme.muted,
+        border: Border(bottom: BorderSide(color: scheme.border)),
       ),
       child: Row(
         children: [
-          Icon(LucideIcons.globe, size: 14, color: colors.statusIdle),
+          Icon(LucideIcons.globe, size: 14, color: scheme.mutedForeground),
           const SizedBox(width: 8),
           Text(
             'Preview',
-            style: GoogleFonts.ibmPlexSans(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-            ),
+            style: textTheme.small.copyWith(fontWeight: FontWeight.w500),
           ),
           if (sizeLabel != null) ...[
             const SizedBox(width: 8),
             Text(
               sizeLabel,
-              style: GoogleFonts.ibmPlexMono(
+              style: textTheme.muted.copyWith(
+                fontFamily: kMacMonoFont,
                 fontSize: 10,
-                color: colors.emptyStateMuted,
               ),
             ),
           ],
@@ -405,14 +405,14 @@ class _PreviewHeaderBar extends StatelessWidget {
                 displayMode == PreviewDisplayMode.phone ? onToggleOrientation : null,
           ),
           const SizedBox(width: 4),
-          Tooltip(
-            message: previewUrl.toString(),
+          ShadTooltip(
+            builder: (context) => Text(previewUrl.toString()),
             child: Padding(
               padding: const EdgeInsets.only(left: 4, right: 4),
               child: Icon(
                 LucideIcons.link,
                 size: 13,
-                color: colors.emptyStateMuted,
+                color: scheme.mutedForeground,
               ),
             ),
           ),
@@ -435,13 +435,13 @@ class _PreviewIconAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: IconButton(
-        onPressed: onPressed,
+    return ShadTooltip(
+      builder: (context) => Text(tooltip),
+      child: ShadIconButton.ghost(
         icon: Icon(icon, size: 16),
-        visualDensity: VisualDensity.compact,
-        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+        onPressed: onPressed,
+        width: 32,
+        height: 32,
       ),
     );
   }
@@ -462,27 +462,22 @@ class _PreviewToggleAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).extension<AppColors>()!;
-    return Tooltip(
-      message: tooltip,
-      child: IconButton(
+    final scheme = ShadTheme.of(context).colorScheme;
+
+    return ShadTooltip(
+      builder: (context) => Text(tooltip),
+      child: ShadIconButton.ghost(
         onPressed: onPressed,
-        style: IconButton.styleFrom(
-          backgroundColor: selected ? colors.badgeBackground : null,
-        ),
-        icon: Icon(
-          icon,
-          size: 16,
-          color: selected ? colors.badgeForeground : colors.emptyStateMuted,
-        ),
-        visualDensity: VisualDensity.compact,
-        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+        backgroundColor: selected ? scheme.accent : null,
+        foregroundColor: selected ? scheme.foreground : scheme.mutedForeground,
+        icon: Icon(icon, size: 16),
+        width: 32,
+        height: 32,
       ),
     );
   }
 }
 
-/// Scales a fixed-size phone viewport to fit the panel; CEF keeps [viewport] px.
 class _PhonePreviewViewport extends StatelessWidget {
   const _PhonePreviewViewport({
     required this.viewport,
@@ -494,7 +489,7 @@ class _PhonePreviewViewport extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).extension<AppColors>()!;
+    final scheme = ShadTheme.of(context).colorScheme;
     final frameSize = previewPhoneFrameSize(
       viewport.width > viewport.height
           ? PreviewOrientation.landscape
@@ -502,7 +497,7 @@ class _PhonePreviewViewport extends StatelessWidget {
     );
 
     return ColoredBox(
-      color: colors.toolbarBackground,
+      color: scheme.background,
       child: Padding(
         padding: const EdgeInsets.all(previewPhonePreviewPadding),
         child: Center(
@@ -541,7 +536,7 @@ class _PhoneDeviceFrame extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDarkShell = Theme.of(context).brightness == Brightness.dark;
+    final isDarkShell = ShadTheme.of(context).brightness == Brightness.dark;
     final bezelColor = isDarkShell ? const Color(0xFF2A2A2E) : const Color(0xFF1C1C1E);
 
     return Container(

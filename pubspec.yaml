@@ -9,15 +9,16 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   cupertino_icons: ^1.0.8
+  shadcn_ui: ^0.54.0
   xterm: ^4.0.0
   kyroon_pty: ^1.0.4
   webview_cef: ^0.5.1
   file_selector: ^1.0.3
   shared_preferences: ^2.5.3
   path: ^1.9.1
-  google_fonts: ^6.2.1
-  lucide_icons_flutter: ^3.1.15
 
 dev_dependencies:
   flutter_test:
