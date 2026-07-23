@@ -8,6 +8,22 @@ enum PreviewDisplayMode { desktop, phone }
 
 enum PreviewOrientation { portrait, landscape }
 
+enum PreviewViewMode { phonePortrait, phoneLandscape, desktop }
+
+extension PreviewViewModeX on PreviewViewMode {
+  PreviewDisplayMode get displayMode => switch (this) {
+    PreviewViewMode.desktop => PreviewDisplayMode.desktop,
+    PreviewViewMode.phonePortrait || PreviewViewMode.phoneLandscape =>
+      PreviewDisplayMode.phone,
+  };
+
+  PreviewOrientation get orientation => switch (this) {
+    PreviewViewMode.phoneLandscape => PreviewOrientation.landscape,
+    PreviewViewMode.desktop || PreviewViewMode.phonePortrait =>
+      PreviewOrientation.portrait,
+  };
+}
+
 Size previewPhoneViewport(PreviewOrientation orientation) {
   return switch (orientation) {
     PreviewOrientation.portrait => const Size(

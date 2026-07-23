@@ -130,7 +130,7 @@ class _ToolbarState extends State<_Toolbar> {
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
         color: scheme.background,
-        border: Border(bottom: BorderSide(color: scheme.border)),
+        border: Border(bottom: paneBorderSide(scheme.border)),
       ),
       child: Row(
         children: [
@@ -315,31 +315,45 @@ class _Workspace extends StatelessWidget {
         final total = constraints.maxWidth;
         final left = total * splitRatio;
 
-        return Row(
+        return Stack(
           children: [
-            SizedBox(
-              width: left,
-              child: TerminalPane(studioTerminal: terminal),
-            ),
-            MouseRegion(
-              cursor: SystemMouseCursors.resizeColumn,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onHorizontalDragUpdate: (details) {
-                  onSplitChanged((left + details.delta.dx) / total);
-                },
-                child: Container(
-                  width: 5,
-                  color: scheme.border,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  width: left,
+                  child: TerminalPane(studioTerminal: terminal),
                 ),
-              ),
+                Expanded(
+                  child: PreviewPane(
+                    key: previewKey,
+                    previewUrl: previewUrl,
+                    shouldLoad: shouldLoad,
+                    reloadToken: reloadToken,
+                  ),
+                ),
+              ],
             ),
-            Expanded(
-              child: PreviewPane(
-                key: previewKey,
-                previewUrl: previewUrl,
-                shouldLoad: shouldLoad,
-                reloadToken: reloadToken,
+            Positioned(
+              left: left - kDividerWidth / 2,
+              top: 0,
+              bottom: 0,
+              width: kDividerWidth,
+              child: ColoredBox(color: scheme.border),
+            ),
+            Positioned(
+              left: left - kSplitHandleWidth / 2,
+              top: 0,
+              bottom: 0,
+              width: kSplitHandleWidth,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.resizeColumn,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onHorizontalDragUpdate: (details) {
+                    onSplitChanged((left + details.delta.dx) / total);
+                  },
+                ),
               ),
             ),
           ],

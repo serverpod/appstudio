@@ -13,6 +13,18 @@ const _kMacUiFont = '.AppleSystemUIFont';
 /// macOS monospace font for terminal output.
 const kMacMonoFont = 'Menlo';
 
+/// Shared height for pane headers (preview bar, terminal tabs, etc.).
+const kPaneHeaderHeight = 36.0;
+
+/// Standard 1px divider stroke for pane chrome and toolbars.
+const kDividerWidth = 1.0;
+
+/// Drag hit area for the workspace split handle (visual line stays [kDividerWidth]).
+const kSplitHandleWidth = 6.0;
+
+BorderSide paneBorderSide(Color color) =>
+    BorderSide(color: color, width: kDividerWidth);
+
 const ShadSlateColorScheme lightColorScheme = ShadSlateColorScheme.light(
   primary: kBrandBlue,
   primaryForeground: kBrandBlueForeground,
@@ -25,6 +37,9 @@ const ShadSlateColorScheme darkColorScheme = ShadSlateColorScheme.dark(
   primaryForeground: kBrandBlueForeground,
   ring: kBrandBlue,
   selection: kBrandBlueSelection,
+  // Default dark slate sets border == muted (#1e293b), which hides dividers.
+  border: Color(0xFF334155),
+  input: Color(0xFF334155),
 );
 
 const _kTooltipTheme = ShadTooltipTheme(

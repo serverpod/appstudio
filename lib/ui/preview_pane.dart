@@ -10,6 +10,7 @@ import '../preview/preview_surface_sync.dart';
 import '../preview/preview_theme.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../widgets/icon_segmented_control.dart';
 
 class PreviewPane extends StatefulWidget {
   const PreviewPane({
@@ -36,8 +37,7 @@ class PreviewPaneState extends State<PreviewPane> {
   Brightness? _appliedBrightness;
 
   Brightness _previewBrightness = Brightness.light;
-  PreviewDisplayMode _displayMode = PreviewDisplayMode.desktop;
-  PreviewOrientation _orientation = PreviewOrientation.portrait;
+  PreviewViewMode _viewMode = PreviewViewMode.phonePortrait;
   int _surfaceSyncGeneration = 0;
 
   Future<void> reload() async {
@@ -75,28 +75,15 @@ class PreviewPaneState extends State<PreviewPane> {
     }
   }
 
-  void _togglePreviewTheme() {
-    setState(() {
-      _previewBrightness = _previewBrightness == Brightness.light
-          ? Brightness.dark
-          : Brightness.light;
-    });
-    unawaited(_applyPreviewTheme(_previewBrightness));
+  void _setPreviewTheme(Brightness brightness) {
+    if (_previewBrightness == brightness) return;
+    setState(() => _previewBrightness = brightness);
+    unawaited(_applyPreviewTheme(brightness));
   }
 
-  void _setDisplayMode(PreviewDisplayMode mode) {
-    if (_displayMode == mode) return;
-    setState(() => _displayMode = mode);
-    _requestSurfaceSync();
-  }
-
-  void _toggleOrientation() {
-    if (_displayMode != PreviewDisplayMode.phone) return;
-    setState(() {
-      _orientation = _orientation == PreviewOrientation.portrait
-          ? PreviewOrientation.landscape
-          : PreviewOrientation.portrait;
-    });
+  void _setViewMode(PreviewViewMode mode) {
+    if (_viewMode == mode) return;
+    setState(() => _viewMode = mode);
     _requestSurfaceSync();
   }
 
@@ -111,8 +98,8 @@ class PreviewPaneState extends State<PreviewPane> {
     _surfaceSyncGeneration++;
     final generation = _surfaceSyncGeneration;
 
-    final phoneViewport = _displayMode == PreviewDisplayMode.phone
-        ? previewPhoneViewport(_orientation)
+    final phoneViewport = _viewMode.displayMode == PreviewDisplayMode.phone
+        ? previewPhoneViewport(_viewMode.orientation)
         : null;
 
     await burstSyncPreviewSurface(
@@ -210,24 +197,24 @@ class PreviewPaneState extends State<PreviewPane> {
   @override
   Widget build(BuildContext context) {
     final controller = _controller;
-    final viewport = previewPhoneViewport(_orientation);
+    final viewport = previewPhoneViewport(_viewMode.orientation);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _PreviewHeaderBar(
-          previewUrl: widget.previewUrl,
           previewBrightness: _previewBrightness,
-          displayMode: _displayMode,
-          orientation: _orientation,
-          onToggleTheme: _togglePreviewTheme,
-          onDisplayModeChanged: _setDisplayMode,
-          onToggleOrientation: _toggleOrientation,
+          viewMode: _viewMode,
+          onPreviewThemeChanged: _setPreviewTheme,
+          onViewModeChanged: _setViewMode,
         ),
         Expanded(
-          child: _buildBody(
-            controller,
-            viewport: viewport,
+          child: ColoredBox(
+            color: ShadTheme.of(context).colorScheme.background,
+            child: _buildBody(
+              controller,
+              viewport: viewport,
+            ),
           ),
         ),
       ],
@@ -278,7 +265,7 @@ class PreviewPaneState extends State<PreviewPane> {
       valueListenable: controller,
       builder: (context, ready, _) {
         if (!ready) return controller.loadingWidget;
-        final phoneViewport = _displayMode == PreviewDisplayMode.phone
+        final phoneViewport = _viewMode.displayMode == PreviewDisplayMode.phone
             ? viewport
             : null;
         final webView = PreviewSurfaceSync(
@@ -286,7 +273,7 @@ class PreviewPaneState extends State<PreviewPane> {
           explicitSize: phoneViewport,
           child: controller.webviewWidget,
         );
-        if (_displayMode == PreviewDisplayMode.desktop) {
+        if (_viewMode.displayMode == PreviewDisplayMode.desktop) {
           return webView;
         }
         return _PhonePreviewViewport(
@@ -322,157 +309,79 @@ class _PreviewLoadingIndicator extends StatelessWidget {
 
 class _PreviewHeaderBar extends StatelessWidget {
   const _PreviewHeaderBar({
-    required this.previewUrl,
     required this.previewBrightness,
-    required this.displayMode,
-    required this.orientation,
-    required this.onToggleTheme,
-    required this.onDisplayModeChanged,
-    required this.onToggleOrientation,
+    required this.viewMode,
+    required this.onPreviewThemeChanged,
+    required this.onViewModeChanged,
   });
 
-  final Uri previewUrl;
   final Brightness previewBrightness;
-  final PreviewDisplayMode displayMode;
-  final PreviewOrientation orientation;
-  final VoidCallback onToggleTheme;
-  final ValueChanged<PreviewDisplayMode> onDisplayModeChanged;
-  final VoidCallback onToggleOrientation;
+  final PreviewViewMode viewMode;
+  final ValueChanged<Brightness> onPreviewThemeChanged;
+  final ValueChanged<PreviewViewMode> onViewModeChanged;
 
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final scheme = theme.colorScheme;
     final textTheme = theme.textTheme;
-    final viewport = previewPhoneViewport(orientation);
-    final sizeLabel = displayMode == PreviewDisplayMode.phone
-        ? '${viewport.width.toInt()}×${viewport.height.toInt()}'
-        : null;
 
     return Container(
-      height: 36,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      height: kPaneHeaderHeight,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         color: scheme.muted,
-        border: Border(bottom: BorderSide(color: scheme.border)),
+        border: Border(bottom: paneBorderSide(scheme.border)),
       ),
       child: Row(
         children: [
-          Icon(LucideIcons.globe, size: 14, color: scheme.mutedForeground),
-          const SizedBox(width: 8),
           Text(
             'Preview',
             style: textTheme.small.copyWith(fontWeight: FontWeight.w500),
           ),
-          if (sizeLabel != null) ...[
-            const SizedBox(width: 8),
-            Text(
-              sizeLabel,
-              style: textTheme.muted.copyWith(
-                fontFamily: kMacMonoFont,
-                fontSize: 10,
-              ),
-            ),
-          ],
           const Spacer(),
-          _PreviewIconAction(
-            icon: previewBrightness == Brightness.dark
-                ? LucideIcons.moon
-                : LucideIcons.sun,
-            tooltip: previewBrightness == Brightness.dark
-                ? 'App theme: Dark'
-                : 'App theme: Light',
-            onPressed: onToggleTheme,
-          ),
-          _PreviewToggleAction(
-            icon: LucideIcons.monitor,
-            tooltip: 'Desktop preview',
-            selected: displayMode == PreviewDisplayMode.desktop,
-            onPressed: () => onDisplayModeChanged(PreviewDisplayMode.desktop),
-          ),
-          _PreviewToggleAction(
-            icon: LucideIcons.smartphone,
-            tooltip: 'Phone preview',
-            selected: displayMode == PreviewDisplayMode.phone,
-            onPressed: () => onDisplayModeChanged(PreviewDisplayMode.phone),
-          ),
-          _PreviewIconAction(
-            icon: LucideIcons.rotateCw,
-            tooltip: orientation == PreviewOrientation.portrait
-                ? 'Switch to landscape'
-                : 'Switch to portrait',
-            onPressed:
-                displayMode == PreviewDisplayMode.phone ? onToggleOrientation : null,
-          ),
-          const SizedBox(width: 4),
-          ShadTooltip(
-            builder: (context) => Text(previewUrl.toString()),
-            child: Padding(
-              padding: const EdgeInsets.only(left: 4, right: 4),
-              child: Icon(
-                LucideIcons.link,
-                size: 13,
-                color: scheme.mutedForeground,
+          IconSegmentedControl<PreviewViewMode>(
+            value: viewMode,
+            onChanged: onViewModeChanged,
+            onMutedSurface: true,
+            segments: const [
+              IconSegment(
+                value: PreviewViewMode.phonePortrait,
+                tooltip: 'Phone preview',
+                icon: LucideIcons.smartphone,
               ),
-            ),
+              IconSegment(
+                value: PreviewViewMode.phoneLandscape,
+                tooltip: 'Phone preview (landscape)',
+                icon: LucideIcons.smartphone,
+                iconRotation: 1.5707963267948966,
+              ),
+              IconSegment(
+                value: PreviewViewMode.desktop,
+                tooltip: 'Desktop preview',
+                icon: LucideIcons.monitor,
+              ),
+            ],
+          ),
+          const SizedBox(width: 8),
+          IconSegmentedControl<Brightness>(
+            value: previewBrightness,
+            onChanged: onPreviewThemeChanged,
+            onMutedSurface: true,
+            segments: const [
+              IconSegment(
+                value: Brightness.light,
+                tooltip: 'App theme: Light',
+                icon: LucideIcons.sun,
+              ),
+              IconSegment(
+                value: Brightness.dark,
+                tooltip: 'App theme: Dark',
+                icon: LucideIcons.moon,
+              ),
+            ],
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _PreviewIconAction extends StatelessWidget {
-  const _PreviewIconAction({
-    required this.icon,
-    required this.tooltip,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return ShadTooltip(
-      builder: (context) => Text(tooltip),
-      child: ShadIconButton.ghost(
-        icon: Icon(icon, size: 16),
-        onPressed: onPressed,
-        width: 32,
-        height: 32,
-      ),
-    );
-  }
-}
-
-class _PreviewToggleAction extends StatelessWidget {
-  const _PreviewToggleAction({
-    required this.icon,
-    required this.tooltip,
-    required this.selected,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final String tooltip;
-  final bool selected;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = ShadTheme.of(context).colorScheme;
-
-    return ShadTooltip(
-      builder: (context) => Text(tooltip),
-      child: ShadIconButton.ghost(
-        onPressed: onPressed,
-        backgroundColor: selected ? scheme.accent : null,
-        foregroundColor: selected ? scheme.foreground : scheme.mutedForeground,
-        icon: Icon(icon, size: 16),
-        width: 32,
-        height: 32,
       ),
     );
   }
