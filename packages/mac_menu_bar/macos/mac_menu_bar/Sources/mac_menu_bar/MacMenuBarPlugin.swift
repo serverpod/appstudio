@@ -87,6 +87,8 @@ public class MacMenuBarPlugin: NSObject, FlutterPlugin {
             handleSetMenuItemEnabled(call: call, result: result)
         case "addMenuSeparator":
             handleAddMenuSeparator(call: call, result: result)
+        case "setMenuItemChecked":
+            handleSetMenuItemChecked(call: call, result: result)
         default:
             result(FlutterMethodNotImplemented)
         }
@@ -190,6 +192,28 @@ public class MacMenuBarPlugin: NSObject, FlutterPlugin {
         }
     }
     
+    /// Handles setting a menu item's checkmark state.
+    private func handleSetMenuItemChecked(call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let itemId = args["itemId"] as? String,
+              let checked = args["checked"] as? Bool else {
+            result(FlutterError(code: "INVALID_ARGUMENTS",
+                              message: "Missing required arguments",
+                              details: nil))
+            return
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else {
+                result(false)
+                return
+            }
+
+            let success = self.setMenuItemChecked(itemId: itemId, checked: checked)
+            result(success)
+        }
+    }
+
     /// Handles removing a menu item.
     private func handleRemoveMenuItem(call: FlutterMethodCall, result: @escaping FlutterResult) {
         guard let args = call.arguments as? [String: Any],
@@ -434,11 +458,22 @@ public class MacMenuBarPlugin: NSObject, FlutterPlugin {
               let menuItem = findMenuItem(byId: itemId, in: mainMenu) else {
             return false
         }
-        
+
         setStoredEnabledState(itemId, enabled: enabled, on: menuItem)
         return true
     }
-    
+
+    /// Sets a menu item's checkmark state.
+    private func setMenuItemChecked(itemId: String, checked: Bool) -> Bool {
+        guard let mainMenu = NSApplication.shared.mainMenu,
+              let menuItem = findMenuItem(byId: itemId, in: mainMenu) else {
+            return false
+        }
+
+        menuItem.state = checked ? .on : .off
+        return true
+    }
+
     /// Handles custom menu item actions.
     private func handleCustomMenuItemAction(itemId: String, sender: Any?) {
         if menuItemEnabledStates[itemId] == false {

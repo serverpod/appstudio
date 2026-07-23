@@ -22,11 +22,17 @@ class ThemeController extends ChangeNotifier {
   }
 
   Future<void> cycle() async {
-    _mode = switch (_mode) {
+    final next = switch (_mode) {
       ThemeMode.light => ThemeMode.dark,
       ThemeMode.dark => ThemeMode.system,
       ThemeMode.system => ThemeMode.light,
     };
+    await setMode(next);
+  }
+
+  Future<void> setMode(ThemeMode mode) async {
+    if (_mode == mode) return;
+    _mode = mode;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(

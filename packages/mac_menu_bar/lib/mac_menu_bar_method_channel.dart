@@ -336,6 +336,22 @@ class MethodChannelMacMenuBar extends MacMenuBarPlatform {
   }
 
   @override
+  Future<bool> setMenuItemChecked(String itemId, bool checked) async {
+    if (!_isMacOS && kReleaseMode) return false;
+
+    try {
+      final result = await methodChannel.invokeMethod<bool>(
+        'setMenuItemChecked',
+        <String, dynamic>{'itemId': itemId, 'checked': checked},
+      );
+      return result ?? false;
+    } on PlatformException catch (e) {
+      debugPrint('Error setting menu item checked state: ${e.message}');
+      return false;
+    }
+  }
+
+  @override
   Future<bool> updateMenuItem({
     required String itemId,
     String? title,

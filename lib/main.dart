@@ -81,6 +81,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
       session: widget.session,
       process: widget.process,
       agent: widget.agent,
+      themeController: widget.themeController,
       onNewProject: _showNewProjectDialog,
     );
     unawaited(_macMenu!.install());

@@ -167,6 +167,9 @@ abstract class MacMenuBarPlatform extends PlatformInterface {
   /// Returns `true` if the menu item's state was successfully updated.
   Future<bool> setMenuItemEnabled(String itemId, bool enabled);
 
+  /// Sets whether a menu item shows a checkmark.
+  Future<bool> setMenuItemChecked(String itemId, bool checked);
+
   /// Sets the callback handler for custom menu item selections.
   ///
   /// The handler receives the item ID when a custom menu item is selected.

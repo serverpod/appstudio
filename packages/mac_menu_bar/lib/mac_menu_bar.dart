@@ -319,6 +319,10 @@ class MacMenuBar {
     return instance.setMenuItemEnabled(itemId, enabled);
   }
 
+  static Future<bool> setMenuItemChecked(String itemId, bool checked) {
+    return instance.setMenuItemChecked(itemId, checked);
+  }
+
   /// Sets the callback handler for custom menu item selections.
   ///
   /// The [handler] function will be called when the user selects a custom menu item
