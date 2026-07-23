@@ -9,7 +9,9 @@ toolchain/
   serverpod_cli/<cli_version>/        # full prebuilt Serverpod CLI bundle
     bin/serverpod
     lib/                              # sqlite (and other) native libs — required
-  bin/{flutter,dart,serverpod}        # wrappers → active.json
+  opencode/<opencode_version>/        # OpenCode CLI (darwin-arm64 only)
+    opencode
+  bin/{flutter,dart,serverpod,opencode}  # wrappers → active.json
 ```
 
 ## Serverpod CLI
@@ -23,11 +25,14 @@ toolchain/serverpod_cli/<version>/
 Both `bin/serverpod` and `lib/` (sqlite dylibs, etc.) are required. Multiple
 versions can coexist; `active.json` selects which one is used.
 
-## Flutter (web)
+## Flutter (web) + OpenCode
 
 ```bash
 ./tool/bundle_toolchain.sh
+# optional pins:
+./tool/bundle_toolchain.sh --flutter=3.44.2 --serverpod=4.0.0-beta.0 --opencode=1.18.4
 ```
 
 Downloads and strips a web-only Flutter SDK into `toolchain/flutter/<version>/`.
+Downloads the **darwin-arm64** OpenCode binary into `toolchain/opencode/<version>/`.
 Does not download Serverpod — place the CLI bundle manually first.

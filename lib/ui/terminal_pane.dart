@@ -2,16 +2,25 @@ import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:xterm/xterm.dart';
 
+import '../agent/agent_controller.dart';
 import '../terminal/studio_terminal.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import 'agent/agent_pane.dart';
 
 enum _TerminalTab { agent, serverLogs }
 
 class TerminalPane extends StatefulWidget {
-  const TerminalPane({super.key, required this.studioTerminal});
+  const TerminalPane({
+    super.key,
+    required this.studioTerminal,
+    required this.agent,
+    this.onOpenSettings,
+  });
 
   final StudioTerminal studioTerminal;
+  final AgentController agent;
+  final VoidCallback? onOpenSettings;
 
   static TerminalTheme terminalTheme(ShadThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
@@ -94,7 +103,10 @@ class _TerminalPaneState extends State<TerminalPane> {
           child: ColoredBox(
             color: scheme.background,
             child: switch (_selectedTab) {
-              _TerminalTab.agent => const SizedBox.expand(),
+              _TerminalTab.agent => AgentPane(
+                  controller: widget.agent,
+                  onOpenSettings: widget.onOpenSettings,
+                ),
               _TerminalTab.serverLogs => TerminalView(
                   widget.studioTerminal.terminal,
                   theme: xtermTheme,

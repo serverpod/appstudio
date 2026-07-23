@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:shadcn_ui/shadcn_ui.dart';
 
+import '../agent/agent_controller.dart';
 import '../process/serverpod_process.dart';
 import '../session/project_session.dart';
 import '../terminal/studio_terminal.dart';
@@ -11,6 +12,7 @@ import '../theme/theme_controller.dart';
 import '../toolchain/toolchain.dart';
 import '../widgets/menu_item_tile.dart';
 import 'preview_pane.dart';
+import 'settings/providers_settings_dialog.dart';
 import 'terminal_pane.dart';
 
 class StudioShell extends StatefulWidget {
@@ -20,6 +22,7 @@ class StudioShell extends StatefulWidget {
     required this.session,
     required this.terminal,
     required this.process,
+    required this.agent,
     required this.themeController,
   });
 
@@ -27,6 +30,7 @@ class StudioShell extends StatefulWidget {
   final ProjectSession session;
   final StudioTerminal terminal;
   final ServerpodProcessController process;
+  final AgentController agent;
   final ThemeController themeController;
 
   @override
@@ -38,12 +42,29 @@ class _StudioShellState extends State<StudioShell> {
   double _splitRatio = 0.42;
 
   @override
+  void initState() {
+    super.initState();
+    widget.agent.setOpenSettingsHandler(_openSettings);
+  }
+
+  @override
+  void dispose() {
+    widget.agent.setOpenSettingsHandler(null);
+    super.dispose();
+  }
+
+  void _openSettings() {
+    showProvidersSettingsDialog(context, agent: widget.agent);
+  }
+
+  @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: Listenable.merge([
         widget.session,
         widget.process,
         widget.themeController,
+        widget.agent,
       ]),
       builder: (context, _) {
         final hasProject = widget.session.hasProject;
@@ -55,6 +76,7 @@ class _StudioShellState extends State<StudioShell> {
               process: widget.process,
               themeController: widget.themeController,
               onReload: () => _previewKey.currentState?.reload(),
+              onOpenSettings: _openSettings,
             ),
             Expanded(
               child: hasProject
@@ -66,6 +88,8 @@ class _StudioShellState extends State<StudioShell> {
                         });
                       },
                       terminal: widget.terminal,
+                      agent: widget.agent,
+                      onOpenSettings: _openSettings,
                       previewKey: _previewKey,
                       previewUrl: ProjectSession.previewUri,
                       shouldLoad: widget.process.previewReady,
@@ -87,6 +111,7 @@ class _Toolbar extends StatefulWidget {
     required this.process,
     required this.themeController,
     required this.onReload,
+    required this.onOpenSettings,
   });
 
   final Toolchain toolchain;
@@ -94,6 +119,7 @@ class _Toolbar extends StatefulWidget {
   final ServerpodProcessController process;
   final ThemeController themeController;
   final VoidCallback onReload;
+  final VoidCallback onOpenSettings;
 
   @override
   State<_Toolbar> createState() => _ToolbarState();
@@ -273,6 +299,11 @@ class _ToolbarState extends State<_Toolbar> {
           ),
           const SizedBox(width: 4),
           _IconAction(
+            icon: LucideIcons.settings,
+            tooltip: 'Settings',
+            onPressed: widget.onOpenSettings,
+          ),
+          _IconAction(
             icon: switch (widget.themeController.mode) {
               ThemeMode.light => LucideIcons.sun,
               ThemeMode.dark => LucideIcons.moon,
@@ -292,6 +323,8 @@ class _Workspace extends StatelessWidget {
     required this.splitRatio,
     required this.onSplitChanged,
     required this.terminal,
+    required this.agent,
+    required this.onOpenSettings,
     required this.previewKey,
     required this.previewUrl,
     required this.shouldLoad,
@@ -301,6 +334,8 @@ class _Workspace extends StatelessWidget {
   final double splitRatio;
   final ValueChanged<double> onSplitChanged;
   final StudioTerminal terminal;
+  final AgentController agent;
+  final VoidCallback onOpenSettings;
   final GlobalKey<PreviewPaneState> previewKey;
   final Uri previewUrl;
   final bool shouldLoad;
@@ -322,7 +357,11 @@ class _Workspace extends StatelessWidget {
               children: [
                 SizedBox(
                   width: left,
-                  child: TerminalPane(studioTerminal: terminal),
+                  child: TerminalPane(
+                    studioTerminal: terminal,
+                    agent: agent,
+                    onOpenSettings: onOpenSettings,
+                  ),
                 ),
                 Expanded(
                   child: PreviewPane(

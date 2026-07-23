@@ -18,10 +18,15 @@ cd macos && pod install && cd ..
 flutter run -d macos
 ```
 
-Without a bundled toolchain, the app uses host `flutter` / `dart` / `serverpod`.
+Without a bundled toolchain, the app uses host `flutter` / `dart` / `serverpod` /
+`opencode`.
 
 Opened projects must launch Flutter with `web-server` on port **9998** (Serverpod
 `flutter_apps` config).
+
+The **Agent** tab runs a project-scoped OpenCode server (`opencode serve`) and
+streams chat over HTTP/SSE. Configure LLM API keys via the toolbar Settings
+dialog (stored in OpenCode’s `auth.json`).
 
 ## Bundle toolchain
 
@@ -36,15 +41,16 @@ toolchain/serverpod_cli/4.0.0-beta.0/
   lib/                 # sqlite dylibs — required
 ```
 
-2. Download Flutter and strip non-macOS / non-web platform artifacts:
+2. Download Flutter (web-stripped) and OpenCode (darwin-arm64):
 
 ```bash
 ./tool/bundle_toolchain.sh
-# optional: --force --flutter=3.44.2 --serverpod=4.0.0-beta.0
+# optional: --force --flutter=3.44.2 --serverpod=4.0.0-beta.0 --opencode=1.18.4
 ```
 
-Release builds embed the entire `toolchain/` tree (including Serverpod `lib/`)
-into the `.app`. Debug `flutter run` skips embedding and uses host tools.
+Release builds embed the entire `toolchain/` tree (including Serverpod `lib/` and
+OpenCode) into the `.app`. Debug `flutter run` skips embedding and uses host tools
+when the local `toolchain/` pin is incomplete.
 
 ## Distribute
 

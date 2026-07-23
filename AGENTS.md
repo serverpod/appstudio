@@ -7,13 +7,14 @@ macOS Flutter IDE for **Serverpod 4** projects: open a project, run `serverpod s
 ```
 lib/
   main.dart              # ShadApp, wires controllers
-  ui/                    # studio_shell, preview_pane, terminal_pane
+  agent/                 # OpenCode serve client, SSE, AgentController, transcript
+  ui/                    # studio_shell, preview_pane, terminal_pane, agent/, settings/
   preview/               # CEF preview: device modes, theme shim, surface sync
   process/               # ServerpodProcessController (start/stop/reload)
   session/               # ProjectSession (open project, recents)
   terminal/              # xterm wrapper
   theme/                 # Shad themes, layout constants, ThemeController
-  toolchain/             # Bundled vs host flutter/dart/serverpod
+  toolchain/             # Bundled vs host flutter/dart/serverpod/opencode
   widgets/               # Shared UI (IconSegmentedControl, MenuItemTile)
 tool/
   apply_webview_cef_patch.sh   # Run after flutter pub get
@@ -23,6 +24,13 @@ toolchain/               # Release bundle (see README)
 ```
 
 UI reference for design patterns: `../cloudui/cloudui_flutter/`.
+
+## Agent (OpenCode)
+
+- Agent tab hosts a Cursor-style chat driven by bundled `opencode serve` (HTTP + SSE).
+- Scoped to the open project directory; restart serve on project switch.
+- API keys via Settings → Providers → OpenCode `auth.json` / `PUT /auth/{id}`.
+- Bundle: `toolchain/opencode/<ver>/` (darwin-arm64 only); pin in `active.json`.
 
 ## Setup & toolchain
 
@@ -43,11 +51,16 @@ flutter run -d macos
 
 ### Bundled runtime (shipped in release builds)
 
-App Studio embeds a **web-focused Flutter SDK** plus a **full Serverpod CLI bundle** so opened projects run without host tools installed. Source of truth: `toolchain/`.
+App Studio embeds a **web-focused Flutter SDK**, a **full Serverpod CLI bundle**, and **OpenCode** so opened projects run without host tools installed. Source of truth: `toolchain/`.
 
 ```
 toolchain/
-  active.json                          # pins versions (e.g. flutter 3.44.2, serverpod_cli 4.0.0-beta.0)
+  active.json                          # pins versions (flutter, serverpod_cli, opencode)
+  flutter/<version>/                   # stripped macOS + web engine only
+  serverpod_cli/<version>/{bin,lib}/   # full CLI bundle — lib/ has sqlite dylibs (required)
+  opencode/<version>/opencode          # darwin-arm64 CLI binary
+  bin/{flutter,dart,serverpod,opencode}
+```
   flutter/<version>/                   # stripped macOS + web engine only
   serverpod_cli/<version>/{bin,lib}/   # full CLI bundle — lib/ has sqlite dylibs (required)
   bin/{flutter,dart,serverpod}         # wrappers read active.json

@@ -10,8 +10,10 @@ class Toolchain {
     required this.flutterExecutable,
     required this.dartExecutable,
     required this.serverpodExecutable,
+    required this.opencodeExecutable,
     required this.flutterVersion,
     required this.serverpodCliVersion,
+    required this.opencodeVersion,
     required this.binPathPrefix,
     required this.serverpodLibDir,
   });
@@ -21,8 +23,10 @@ class Toolchain {
   final String flutterExecutable;
   final String dartExecutable;
   final String serverpodExecutable;
+  final String opencodeExecutable;
   final String? flutterVersion;
   final String? serverpodCliVersion;
+  final String? opencodeVersion;
   final List<String> binPathPrefix;
   final String? serverpodLibDir;
 
@@ -78,6 +82,7 @@ class Toolchain {
 
     final flutterVersion = active['flutter'] as String?;
     final serverpodCliVersion = active['serverpod_cli'] as String?;
+    final opencodeVersion = active['opencode'] as String?;
     if (flutterVersion == null || serverpodCliVersion == null) return null;
 
     final flutterRoot = p.join(root, 'flutter', flutterVersion);
@@ -97,6 +102,17 @@ class Toolchain {
         ? p.join(wrapperBin, 'serverpod')
         : p.join(serverpodBin, 'serverpod');
 
+    String? opencodeExe;
+    if (opencodeVersion != null && opencodeVersion.isNotEmpty) {
+      final wrapper = p.join(wrapperBin, 'opencode');
+      final bundled = p.join(root, 'opencode', opencodeVersion, 'opencode');
+      if (File(wrapper).existsSync()) {
+        opencodeExe = wrapper;
+      } else if (File(bundled).existsSync()) {
+        opencodeExe = bundled;
+      }
+    }
+
     // Require Flutter + the full Serverpod CLI bundle (bin + lib).
     if (!File(flutterExe).existsSync() || !File(dartExe).existsSync()) {
       return null;
@@ -108,14 +124,19 @@ class Toolchain {
       return null;
     }
 
+    // OpenCode is optional for bundled resolution — fall back to host PATH.
+    opencodeExe ??= await _which('opencode') ?? 'opencode';
+
     return Toolchain._(
       isBundled: true,
       flutterRoot: flutterRoot,
       flutterExecutable: flutterExe,
       dartExecutable: dartExe,
       serverpodExecutable: serverpodExe,
+      opencodeExecutable: opencodeExe,
       flutterVersion: flutterVersion,
       serverpodCliVersion: serverpodCliVersion,
+      opencodeVersion: opencodeVersion,
       binPathPrefix: [
         wrapperBin,
         flutterBin,
@@ -129,14 +150,17 @@ class Toolchain {
     final flutter = await _which('flutter') ?? 'flutter';
     final dart = await _which('dart') ?? 'dart';
     final serverpod = await _which('serverpod') ?? 'serverpod';
+    final opencode = await _which('opencode') ?? 'opencode';
     return Toolchain._(
       isBundled: false,
       flutterRoot: Platform.environment['FLUTTER_ROOT'],
       flutterExecutable: flutter,
       dartExecutable: dart,
       serverpodExecutable: serverpod,
+      opencodeExecutable: opencode,
       flutterVersion: null,
       serverpodCliVersion: null,
+      opencodeVersion: null,
       binPathPrefix: const [],
       serverpodLibDir: null,
     );

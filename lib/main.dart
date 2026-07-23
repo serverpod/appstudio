@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:webview_cef/webview_cef.dart';
 
+import 'agent/agent_controller.dart';
 import 'process/serverpod_process.dart';
 import 'session/project_session.dart';
 import 'terminal/studio_terminal.dart';
@@ -25,6 +26,10 @@ Future<void> main() async {
     session: session,
     terminal: terminal,
   );
+  final agent = AgentController(
+    toolchain: toolchain,
+    session: session,
+  );
 
   runApp(
     AppStudioApp(
@@ -33,6 +38,7 @@ Future<void> main() async {
       session: session,
       terminal: terminal,
       process: process,
+      agent: agent,
     ),
   );
 }
@@ -45,6 +51,7 @@ class AppStudioApp extends StatefulWidget {
     required this.session,
     required this.terminal,
     required this.process,
+    required this.agent,
   });
 
   final ThemeController themeController;
@@ -52,6 +59,7 @@ class AppStudioApp extends StatefulWidget {
   final ProjectSession session;
   final StudioTerminal terminal;
   final ServerpodProcessController process;
+  final AgentController agent;
 
   @override
   State<AppStudioApp> createState() => _AppStudioAppState();
@@ -63,6 +71,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
     try {
       WebviewManager().quit();
     } catch (_) {}
+    widget.agent.dispose();
     widget.process.dispose();
     widget.terminal.dispose();
     widget.session.dispose();
@@ -86,6 +95,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
             session: widget.session,
             terminal: widget.terminal,
             process: widget.process,
+            agent: widget.agent,
             themeController: widget.themeController,
           ),
         );

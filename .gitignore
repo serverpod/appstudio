@@ -52,6 +52,9 @@ app.*.map.json
 /toolchain/serverpod_cli/*/bin/
 /toolchain/serverpod_cli/*/lib/
 
+# Bundled OpenCode CLI binary (~40MB+)
+/toolchain/opencode/
+
 # Legacy embed staging (Release syncs from /toolchain)
 /macos/Runner/Resources/toolchain/**
 !/macos/Runner/Resources/toolchain/.gitkeep
