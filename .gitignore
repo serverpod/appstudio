@@ -78,3 +78,5 @@ app.*.map.json
 
 # CEF / webview_cef local build cache (if present under the project)
 **/third/cef/
+.cursor/skills
+.dart_skills
