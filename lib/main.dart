@@ -35,6 +35,7 @@ Future<void> main() async {
   final agent = AgentController(
     toolchain: toolchain,
     session: session,
+    process: process,
   );
 
   runApp(

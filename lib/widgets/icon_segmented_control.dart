@@ -65,20 +65,58 @@ class IconSegment<T> {
   final double iconRotation;
 }
 
+/// Standalone icon button using the same track/segment styling as
+/// [IconSegmentedControl].
+class SegmentedIconButton extends StatelessWidget {
+  const SegmentedIconButton({
+    super.key,
+    required this.icon,
+    required this.tooltip,
+    this.onPressed,
+    this.onMutedSurface = false,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onPressed;
+  final bool onMutedSurface;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = ShadTheme.of(context).colorScheme;
+    final trackColor = onMutedSurface ? scheme.background : scheme.muted;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: trackColor,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      padding: const EdgeInsets.all(2),
+      child: _IconSegmentButton(
+        selected: false,
+        tooltip: tooltip,
+        icon: icon,
+        onPressed: onPressed,
+        onMutedSurface: onMutedSurface,
+      ),
+    );
+  }
+}
+
 class _IconSegmentButton extends StatefulWidget {
   const _IconSegmentButton({
     required this.selected,
     required this.tooltip,
     required this.icon,
-    required this.onPressed,
     required this.onMutedSurface,
+    this.onPressed,
     this.iconRotation = 0,
   });
 
   final bool selected;
   final String tooltip;
   final IconData icon;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final bool onMutedSurface;
   final double iconRotation;
 
@@ -92,6 +130,7 @@ class _IconSegmentButtonState extends State<_IconSegmentButton> {
   @override
   Widget build(BuildContext context) {
     final scheme = ShadTheme.of(context).colorScheme;
+    final enabled = widget.onPressed != null;
     final isActive = widget.selected;
     final activeColor = segmentedControlSelectedColor(
       scheme,
@@ -107,25 +146,28 @@ class _IconSegmentButtonState extends State<_IconSegmentButton> {
     if (widget.iconRotation != 0) {
       icon = Transform.rotate(angle: widget.iconRotation, child: icon);
     }
+    if (!enabled) {
+      icon = Opacity(opacity: 0.4, child: icon);
+    }
 
     return ShadTooltip(
       builder: (context) => Text(widget.tooltip),
       child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
+        cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        onEnter: enabled ? (_) => setState(() => _hovered = true) : null,
+        onExit: enabled ? (_) => setState(() => _hovered = false) : null,
         child: GestureDetector(
           onTap: widget.onPressed,
           child: Container(
             decoration: BoxDecoration(
-            color: isActive
-                ? activeColor
-                : _hovered
-                ? segmentedControlHoverColor(
-                    scheme,
-                    onMutedSurface: widget.onMutedSurface,
-                  )
-                : Colors.transparent,
+              color: isActive
+                  ? activeColor
+                  : _hovered && enabled
+                      ? segmentedControlHoverColor(
+                          scheme,
+                          onMutedSurface: widget.onMutedSurface,
+                        )
+                      : Colors.transparent,
               borderRadius: BorderRadius.circular(4),
               boxShadow: isActive
                   ? [

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../process/serverpod_process.dart';
 import '../session/project_session.dart';
 import '../toolchain/toolchain.dart';
 import 'agent_transcript.dart';
@@ -25,18 +26,21 @@ class AgentController extends ChangeNotifier {
   AgentController({
     required this.toolchain,
     required this.session,
+    required this.process,
     OpenCodeAuthStore? authStore,
   })  : _authStore = authStore ?? OpenCodeAuthStore(),
         _serve = OpenCodeServe(toolchain: toolchain),
         _client = OpenCodeClient(),
         _sse = OpenCodeSse() {
-    session.addListener(_onSessionChanged);
+    session.addListener(_onSessionOrProcessChanged);
+    process.addListener(_onSessionOrProcessChanged);
     unawaited(_loadPrefs());
-    _onSessionChanged();
+    _onSessionOrProcessChanged();
   }
 
   final Toolchain toolchain;
   final ProjectSession session;
+  final ServerpodProcessController process;
   final OpenCodeAuthStore _authStore;
   final OpenCodeServe _serve;
   final OpenCodeClient _client;
@@ -69,6 +73,7 @@ class AgentController extends ChangeNotifier {
   bool get isBusy => _connection == AgentConnectionState.busy;
   bool get canSend =>
       session.hasProject &&
+      process.previewReady &&
       _connection == AgentConnectionState.ready &&
       _connectedProviders.isNotEmpty;
   bool get hasProviders => _connectedProviders.isNotEmpty;
@@ -108,12 +113,20 @@ class AgentController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _onSessionChanged() {
+  void _onSessionOrProcessChanged() {
     final path = session.projectPath;
     if (path == null) {
       unawaited(_teardown(clearMessages: true));
       return;
     }
+
+    if (!process.previewReady) {
+      if (_connection != AgentConnectionState.idle || _serve.isRunning) {
+        unawaited(_teardown(clearMessages: false));
+      }
+      return;
+    }
+
     if (path == _boundProjectPath &&
         (_connection == AgentConnectionState.ready ||
             _connection == AgentConnectionState.busy ||
@@ -690,7 +703,8 @@ class AgentController extends ChangeNotifier {
 
   @override
   void dispose() {
-    session.removeListener(_onSessionChanged);
+    session.removeListener(_onSessionOrProcessChanged);
+    process.removeListener(_onSessionOrProcessChanged);
     unawaited(_teardown(clearMessages: true));
     unawaited(_sse.dispose());
     _client.close();

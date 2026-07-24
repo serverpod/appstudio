@@ -7,9 +7,10 @@ import 'package:webview_cef/webview_cef.dart';
 import '../preview/preview_bootstrap.dart';
 import '../preview/preview_device.dart';
 import '../preview/preview_hero_gradient.dart';
+import '../preview/preview_status_overlay.dart';
 import '../preview/preview_surface_sync.dart';
 import '../preview/preview_theme.dart';
-import '../theme/app_colors.dart';
+import '../process/serverpod_process.dart';
 import '../theme/app_theme.dart';
 import '../widgets/icon_segmented_control.dart';
 import '../widgets/text_segmented_control.dart';
@@ -20,14 +21,12 @@ class PreviewPane extends StatefulWidget {
   const PreviewPane({
     super.key,
     required this.previewUrl,
-    required this.shouldLoad,
-    this.reloadToken = 0,
+    required this.process,
     this.gradientAnimating = false,
   });
 
   final Uri previewUrl;
-  final bool shouldLoad;
-  final int reloadToken;
+  final ServerpodProcessController process;
   final bool gradientAnimating;
 
   @override
@@ -45,40 +44,77 @@ class PreviewPaneState extends State<PreviewPane> {
   Brightness _previewBrightness = Brightness.light;
   PreviewViewMode _viewMode = PreviewViewMode.phonePortrait;
   int _surfaceSyncGeneration = 0;
+  int _revealGeneration = 0;
+
+  bool get _shouldLoad => widget.process.previewReady;
 
   Future<void> reload() async {
-    if (!widget.shouldLoad) return;
+    if (!_shouldLoad) return;
     final controller = _controller;
     if (controller == null || !controller.value) {
       await _ensureWebView();
       return;
     }
+    final revealGeneration = ++_revealGeneration;
     try {
       await controller.loadUrl(widget.previewUrl.toString());
+      await _waitForFlutterMain(
+        controller,
+        isCancelled: () =>
+            !mounted ||
+            _controller != controller ||
+            revealGeneration != _revealGeneration,
+      );
+      if (!mounted || revealGeneration != _revealGeneration) return;
+      widget.process.markPreviewLive();
+      if (mounted) setState(() {});
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     }
   }
 
   @override
+  void initState() {
+    super.initState();
+    widget.process.addListener(_onProcessChanged);
+    if (_shouldLoad) {
+      unawaited(_ensureWebView());
+    }
+  }
+
+  @override
   void didUpdateWidget(covariant PreviewPane oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!widget.shouldLoad && oldWidget.shouldLoad) {
+    if (oldWidget.process != widget.process) {
+      oldWidget.process.removeListener(_onProcessChanged);
+      widget.process.addListener(_onProcessChanged);
+    }
+  }
+
+  void _onProcessChanged() {
+    if (!mounted) return;
+
+    final shouldLoad = widget.process.previewReady;
+    final reloadToken = widget.process.previewReloadToken;
+
+    if (!shouldLoad && _controller != null) {
       _tearDownWebView();
       return;
     }
-    if (widget.shouldLoad && !oldWidget.shouldLoad) {
-      _ensureWebView();
+    if (shouldLoad && _controller == null && !_initializing) {
+      unawaited(_ensureWebView());
       return;
     }
-    if (widget.shouldLoad &&
-        widget.reloadToken != _lastReloadToken &&
-        widget.reloadToken > 0) {
-      _lastReloadToken = widget.reloadToken;
+    if (shouldLoad &&
+        reloadToken != _lastReloadToken &&
+        reloadToken > 0 &&
+        _controller != null) {
+      _lastReloadToken = reloadToken;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) reload();
       });
     }
+    setState(() {});
   }
 
   void _setPreviewTheme(Brightness brightness) {
@@ -117,7 +153,7 @@ class PreviewPaneState extends State<PreviewPane> {
   }
 
   Future<void> _ensureWebView() async {
-    if (!widget.shouldLoad || _initializing) return;
+    if (!_shouldLoad || _initializing) return;
     _initializing = true;
     _error = null;
     if (mounted) setState(() {});
@@ -146,13 +182,15 @@ class PreviewPaneState extends State<PreviewPane> {
         );
 
       final controller = WebviewManager().createWebView(
-        loading: const _PreviewLoadingIndicator(),
+        loading: const SizedBox.shrink(),
         injectUserScripts: scripts,
       );
       _controller = controller;
+      controller.addListener(_onWebViewReadyChanged);
       await controller.initialize(widget.previewUrl.toString());
       _appliedBrightness = _previewBrightness;
-      _lastReloadToken = widget.reloadToken;
+      _lastReloadToken = widget.process.previewReloadToken;
+      _onWebViewReadyChanged();
     } catch (e) {
       _error = e.toString();
       await _disposeController();
@@ -177,6 +215,7 @@ class PreviewPaneState extends State<PreviewPane> {
   }
 
   void _tearDownWebView() {
+    _revealGeneration++;
     _error = null;
     _lastReloadToken = 0;
     _appliedBrightness = null;
@@ -185,10 +224,56 @@ class PreviewPaneState extends State<PreviewPane> {
     }));
   }
 
+  void _onWebViewReadyChanged() {
+    final controller = _controller;
+    if (controller == null || !controller.value) return;
+    if (!widget.process.hasAttachedFlutter) {
+      if (mounted) setState(() {});
+      return;
+    }
+    unawaited(_revealWhenAppReady(controller));
+  }
+
+  Future<void> _revealWhenAppReady(WebViewController controller) async {
+    final revealGeneration = ++_revealGeneration;
+    await _waitForFlutterMain(
+      controller,
+      isCancelled: () =>
+          !mounted ||
+          _controller != controller ||
+          revealGeneration != _revealGeneration,
+    );
+    if (!mounted || revealGeneration != _revealGeneration) return;
+    widget.process.markPreviewLive();
+    if (mounted) setState(() {});
+  }
+
+  /// Keeps the overlay up until Flutter web has actually started (or we time out).
+  Future<void> _waitForFlutterMain(
+    WebViewController controller, {
+    required bool Function() isCancelled,
+  }) async {
+    // Bootstrap may wait ~2.5s for DWDS before calling `$dartRunMain`.
+    const maxAttempts = 40;
+    const delay = Duration(milliseconds: 200);
+    for (var i = 0; i < maxAttempts; i++) {
+      if (isCancelled()) return;
+      try {
+        final result = await controller.evaluateJavascript(
+          'window.\$dartMainExecuted === true || '
+          'document.querySelector("flt-glass-pane, flt-scene-host, flutter-view") != null',
+        );
+        if (result == true || result == 'true') return;
+      } catch (_) {}
+      await Future<void>.delayed(delay);
+    }
+  }
+
   Future<void> _disposeController() async {
     final controller = _controller;
     _controller = null;
     if (controller == null) return;
+    controller.removeListener(_onWebViewReadyChanged);
     try {
       await controller.dispose();
     } catch (_) {}
@@ -196,13 +281,13 @@ class PreviewPaneState extends State<PreviewPane> {
 
   @override
   void dispose() {
+    widget.process.removeListener(_onProcessChanged);
     unawaited(_disposeController());
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final controller = _controller;
     final viewport = previewPhoneViewport(_viewMode.orientation);
 
     return Column(
@@ -213,107 +298,71 @@ class PreviewPaneState extends State<PreviewPane> {
           viewMode: _viewMode,
           onPreviewThemeChanged: _setPreviewTheme,
           onViewModeChanged: _setViewMode,
+          onReload: reload,
+          canReload: widget.process.previewReady,
         ),
         Expanded(
           child: PreviewHeroGradient(
             animating: widget.gradientAnimating,
-            child: _buildBody(
-              controller,
-              viewport: viewport,
-            ),
+            child: _buildBody(viewport: viewport),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildBody(
-    WebViewController? controller, {
-    required Size viewport,
-  }) {
-    final theme = ShadTheme.of(context);
-    final textTheme = theme.textTheme;
+  Widget _buildBody({required Size viewport}) {
+    final controller = _controller;
+    final phase = widget.process.phase;
+    final processError = widget.process.error;
+    final overlayError = _error ?? processError;
+    final cefReady = controller != null &&
+        !_initializing &&
+        controller.value;
+    final cefLoading = _shouldLoad && !cefReady && overlayError == null;
 
-    if (_error != null) {
-      return Center(
-        child: Text(
-          'Preview error: $_error',
-          style: textTheme.small.copyWith(
-            color: AppColors.errorTextDark,
-          ),
-        ),
+    Widget surface;
+    if (cefReady) {
+      surface = ValueListenableBuilder<bool>(
+        valueListenable: controller,
+        builder: (context, ready, _) {
+          if (!ready) {
+            return const ColoredBox(color: Color(0xFF12122A));
+          }
+          final phoneViewport =
+              _viewMode.displayMode == PreviewDisplayMode.phone
+                  ? viewport
+                  : null;
+          return PreviewSurfaceSync(
+            controller: controller,
+            explicitSize: phoneViewport,
+            child: controller.webviewWidget,
+          );
+        },
       );
+    } else {
+      surface = const ColoredBox(color: Color(0xFF12122A));
     }
 
-    if (!widget.shouldLoad) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              LucideIcons.globe,
-              size: 28,
-              color: Colors.white.withValues(alpha: 0.72),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Preview will appear when the app is ready',
-              style: textTheme.small.copyWith(
-                color: Colors.white.withValues(alpha: 0.78),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    if (controller == null || _initializing || !controller.value) {
-      return const Center(child: _PreviewLoadingIndicator());
-    }
-
-    return ValueListenableBuilder<bool>(
-      valueListenable: controller,
-      builder: (context, ready, _) {
-        if (!ready) return controller.loadingWidget;
-        final phoneViewport = _viewMode.displayMode == PreviewDisplayMode.phone
-            ? viewport
-            : null;
-        final webView = PreviewSurfaceSync(
-          controller: controller,
-          explicitSize: phoneViewport,
-          child: controller.webviewWidget,
-        );
-        if (_viewMode.displayMode == PreviewDisplayMode.desktop) {
-          return webView;
-        }
-        return _PhonePreviewViewport(
-          viewport: viewport,
-          child: webView,
-        );
-      },
-    );
-  }
-}
-
-class _PreviewLoadingIndicator extends StatelessWidget {
-  const _PreviewLoadingIndicator();
-
-  @override
-  Widget build(BuildContext context) {
-    final muted = Colors.white.withValues(alpha: 0.78);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
+    final framed = Stack(
+      fit: StackFit.expand,
       children: [
-        const SizedBox(
-          width: 120,
-          child: ShadProgress(value: null, minHeight: 4),
-        ),
-        const SizedBox(height: 12),
-        Text(
-          'Loading preview…',
-          style: ShadTheme.of(context).textTheme.small.copyWith(color: muted),
+        surface,
+        PreviewStatusOverlay(
+          phase: phase,
+          errorMessage: overlayError,
+          cefLoading: cefLoading,
         ),
       ],
+    );
+
+    if (_viewMode.displayMode == PreviewDisplayMode.desktop) {
+      return framed;
+    }
+
+    return _PhonePreviewViewport(
+      viewport: viewport,
+      child: framed,
     );
   }
 }
@@ -324,12 +373,16 @@ class _PreviewHeaderBar extends StatelessWidget {
     required this.viewMode,
     required this.onPreviewThemeChanged,
     required this.onViewModeChanged,
+    required this.onReload,
+    required this.canReload,
   });
 
   final Brightness previewBrightness;
   final PreviewViewMode viewMode;
   final ValueChanged<Brightness> onPreviewThemeChanged;
   final ValueChanged<PreviewViewMode> onViewModeChanged;
+  final VoidCallback onReload;
+  final bool canReload;
 
   @override
   Widget build(BuildContext context) {
@@ -399,6 +452,13 @@ class _PreviewHeaderBar extends StatelessWidget {
               ),
             ],
           ),
+          const SizedBox(width: 8),
+          SegmentedIconButton(
+            icon: LucideIcons.refreshCw,
+            tooltip: 'Reload preview',
+            onMutedSurface: true,
+            onPressed: canReload ? onReload : null,
+          ),
         ],
       ),
     );
@@ -460,7 +520,8 @@ class _PhoneDeviceFrame extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDarkShell = ShadTheme.of(context).brightness == Brightness.dark;
-    final bezelColor = isDarkShell ? const Color(0xFF2A2A2E) : const Color(0xFF1C1C1E);
+    final bezelColor =
+        isDarkShell ? const Color(0xFF2A2A2E) : const Color(0xFF1C1C1E);
 
     return Container(
       padding: const EdgeInsets.all(previewPhoneBezel),

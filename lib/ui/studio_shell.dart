@@ -3,6 +3,7 @@ import 'package:path/path.dart' as p;
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../agent/agent_controller.dart';
+import '../preview/preview_phase.dart';
 import '../process/serverpod_process.dart';
 import '../session/project_session.dart';
 import '../terminal/studio_terminal.dart';
@@ -92,7 +93,6 @@ class _StudioShellState extends State<StudioShell> {
                       });
                     }
                   : null,
-              onReload: () => _previewKey.currentState?.reload(),
             ),
             Expanded(
               child: hasProject
@@ -106,12 +106,11 @@ class _StudioShellState extends State<StudioShell> {
                       },
                       terminal: widget.terminal,
                       agent: widget.agent,
-                      onOpenSettings: _openSettings,
                       previewKey: _previewKey,
                       previewUrl: ProjectSession.previewUri,
-                      shouldLoad: widget.process.previewReady,
-                      reloadToken: widget.process.previewReloadToken,
-                      gradientAnimating: _previewGradientAnimating,
+                      process: widget.process,
+                      gradientAnimating: _previewGradientAnimating ||
+                          widget.process.phase.showsLoadingOverlay,
                     )
                   : _EmptyState(session: widget.session),
             ),
@@ -131,7 +130,6 @@ class _Toolbar extends StatelessWidget {
     required this.previewGradientAnimating,
     required this.onToggleLeftPanel,
     required this.onTogglePreviewGradient,
-    required this.onReload,
   });
 
   final Toolchain toolchain;
@@ -141,24 +139,12 @@ class _Toolbar extends StatelessWidget {
   final bool previewGradientAnimating;
   final VoidCallback? onToggleLeftPanel;
   final VoidCallback? onTogglePreviewGradient;
-  final VoidCallback onReload;
 
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final scheme = theme.colorScheme;
     final textTheme = theme.textTheme;
-
-    final statusColor = switch (process.state) {
-      ProcessState.idle => process.previewReady
-          ? AppColors.successDot
-          : scheme.mutedForeground,
-      ProcessState.starting => AppColors.warningAmber,
-      ProcessState.running => process.previewReady
-          ? AppColors.successDot
-          : kBrandBlue,
-      ProcessState.stopping => AppColors.warningAmber,
-    };
 
     return Container(
       height: 48,
@@ -237,29 +223,6 @@ class _Toolbar extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(width: 8),
-          ShadBadge.outline(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 7,
-                  height: 7,
-                  decoration: BoxDecoration(
-                    color: statusColor,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  process.statusMessage,
-                  style: textTheme.small.copyWith(
-                    color: scheme.mutedForeground,
-                  ),
-                ),
-              ],
-            ),
-          ),
           const SizedBox(width: 4),
           _IconAction(
             icon: LucideIcons.sparkles,
@@ -268,11 +231,6 @@ class _Toolbar extends StatelessWidget {
                 : 'Animate preview background',
             highlighted: previewGradientAnimating,
             onPressed: onTogglePreviewGradient,
-          ),
-          _IconAction(
-            icon: LucideIcons.refreshCw,
-            tooltip: 'Reload preview',
-            onPressed: process.previewReady ? onReload : null,
           ),
         ],
       ),
@@ -287,11 +245,9 @@ class _Workspace extends StatelessWidget {
     required this.onSplitChanged,
     required this.terminal,
     required this.agent,
-    required this.onOpenSettings,
     required this.previewKey,
     required this.previewUrl,
-    required this.shouldLoad,
-    required this.reloadToken,
+    required this.process,
     required this.gradientAnimating,
   });
 
@@ -300,11 +256,9 @@ class _Workspace extends StatelessWidget {
   final ValueChanged<double> onSplitChanged;
   final StudioTerminal terminal;
   final AgentController agent;
-  final VoidCallback onOpenSettings;
   final GlobalKey<PreviewPaneState> previewKey;
   final Uri previewUrl;
-  final bool shouldLoad;
-  final int reloadToken;
+  final ServerpodProcessController process;
   final bool gradientAnimating;
 
   @override
@@ -327,15 +281,14 @@ class _Workspace extends StatelessWidget {
                     child: TerminalPane(
                       studioTerminal: terminal,
                       agent: agent,
-                      onOpenSettings: onOpenSettings,
+                      process: process,
                     ),
                   ),
                 Expanded(
                   child: PreviewPane(
                     key: previewKey,
                     previewUrl: previewUrl,
-                    shouldLoad: shouldLoad,
-                    reloadToken: reloadToken,
+                    process: process,
                     gradientAnimating: gradientAnimating,
                   ),
                 ),

@@ -3,6 +3,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:xterm/xterm.dart';
 
 import '../agent/agent_controller.dart';
+import '../process/serverpod_process.dart';
 import '../terminal/studio_terminal.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -16,12 +17,12 @@ class TerminalPane extends StatefulWidget {
     super.key,
     required this.studioTerminal,
     required this.agent,
-    this.onOpenSettings,
+    required this.process,
   });
 
   final StudioTerminal studioTerminal;
   final AgentController agent;
-  final VoidCallback? onOpenSettings;
+  final ServerpodProcessController process;
 
   static TerminalTheme terminalTheme(ShadThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
@@ -125,7 +126,7 @@ class _TerminalPaneState extends State<TerminalPane> {
             child: switch (_selectedTab) {
               _TerminalTab.agent => AgentPane(
                   controller: widget.agent,
-                  onOpenSettings: widget.onOpenSettings,
+                  process: widget.process,
                 ),
               _TerminalTab.serverLogs => TerminalView(
                   widget.studioTerminal.terminal,

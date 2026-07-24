@@ -5,6 +5,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../../agent/agent_controller.dart';
 import '../../agent/agent_transcript.dart';
+import '../../process/serverpod_process.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
 
@@ -12,11 +13,11 @@ class AgentPane extends StatefulWidget {
   const AgentPane({
     super.key,
     required this.controller,
-    this.onOpenSettings,
+    required this.process,
   });
 
   final AgentController controller;
-  final VoidCallback? onOpenSettings;
+  final ServerpodProcessController process;
 
   @override
   State<AgentPane> createState() => _AgentPaneState();
@@ -83,27 +84,29 @@ class _AgentPaneState extends State<AgentPane> {
     final theme = ShadTheme.of(context);
     final scheme = theme.colorScheme;
     final c = widget.controller;
+    final serverUp = widget.process.previewReady;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
-          child: _buildBody(context, scheme, theme, c),
+          child: _buildBody(context, scheme, theme, c, widget.process),
         ),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: scheme.background,
-            border: Border(top: paneBorderSide(scheme.border)),
+        if (serverUp)
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: scheme.background,
+              border: Border(top: paneBorderSide(scheme.border)),
+            ),
+            child: _Composer(
+              controller: _inputController,
+              focusNode: _inputFocus,
+              enabled: c.canSend || c.isBusy,
+              isBusy: c.isBusy,
+              onSend: c.canSend ? _send : null,
+              onStop: c.isBusy ? () => c.abort() : null,
+            ),
           ),
-          child: _Composer(
-            controller: _inputController,
-            focusNode: _inputFocus,
-            enabled: c.canSend || c.isBusy,
-            isBusy: c.isBusy,
-            onSend: c.canSend ? _send : null,
-            onStop: c.isBusy ? () => c.abort() : null,
-          ),
-        ),
       ],
     );
   }
@@ -113,6 +116,7 @@ class _AgentPaneState extends State<AgentPane> {
     ShadColorScheme scheme,
     ShadThemeData theme,
     AgentController c,
+    ServerpodProcessController process,
   ) {
     if (!c.projectSession.hasProject) {
       return _EmptyHint(
@@ -122,11 +126,18 @@ class _AgentPaneState extends State<AgentPane> {
       );
     }
 
-    if (c.connection == AgentConnectionState.starting) {
-      return _EmptyHint(
-        icon: LucideIcons.loaderCircle,
-        title: 'Starting agent…',
-        subtitle: c.statusMessage ?? '',
+    if (!process.previewReady) {
+      final starting = switch (process.state) {
+        ProcessState.starting ||
+        ProcessState.stopping ||
+        ProcessState.running =>
+          true,
+        ProcessState.idle => false,
+      };
+      return _GateMessage(
+        text: starting
+            ? 'Serverpod is starting'
+            : 'Serverpod is not running',
       );
     }
 
@@ -139,22 +150,11 @@ class _AgentPaneState extends State<AgentPane> {
     }
 
     if (!c.hasProviders && c.messages.isEmpty) {
-      return _EmptyHint(
-        icon: LucideIcons.keyRound,
-        title: 'Add an API key',
-        subtitle: 'Connect a provider in Settings to start chatting.',
-        actionLabel: 'Open Settings',
-        onAction: widget.onOpenSettings,
-      );
+      return _AgentIdleArt(caption: _agentCaption(c));
     }
 
     if (c.messages.isEmpty) {
-      return _EmptyHint(
-        icon: LucideIcons.sparkles,
-        title: 'Ask anything',
-        subtitle: c.statusMessage ??
-            'Describe a change or ask a question about this project.',
-      );
+      return _AgentIdleArt(caption: _agentCaption(c));
     }
 
     return ListView.builder(
@@ -188,6 +188,83 @@ class _AgentPaneState extends State<AgentPane> {
       },
     );
   }
+
+  String _agentCaption(AgentController c) {
+    return switch (c.connection) {
+      AgentConnectionState.starting => 'Starting agent',
+      AgentConnectionState.ready ||
+      AgentConnectionState.busy =>
+        'Ready',
+      AgentConnectionState.idle || AgentConnectionState.error => 'Starting agent',
+    };
+  }
+}
+
+class _GateMessage extends StatelessWidget {
+  const _GateMessage({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Text(
+          text,
+          style: theme.textTheme.muted,
+          textAlign: TextAlign.center,
+        ),
+      ),
+    );
+  }
+}
+
+class _AgentIdleArt extends StatelessWidget {
+  const _AgentIdleArt({required this.caption});
+
+  final String caption;
+
+  static const _asset = 'assets/robot.webp';
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final artSize =
+            ((constraints.maxWidth * 0.45).clamp(96.0, 220.0)) / 2;
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: artSize,
+                  height: artSize,
+                  child: Image.asset(
+                    _asset,
+                    fit: BoxFit.contain,
+                    alignment: Alignment.center,
+                    filterQuality: FilterQuality.medium,
+                    gaplessPlayback: true,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  caption,
+                  style: theme.textTheme.muted,
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _EmptyHint extends StatelessWidget {
@@ -195,15 +272,11 @@ class _EmptyHint extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
-    this.actionLabel,
-    this.onAction,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
-  final String? actionLabel;
-  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -228,14 +301,6 @@ class _EmptyHint extends StatelessWidget {
                 subtitle,
                 style: theme.textTheme.muted,
                 textAlign: TextAlign.center,
-              ),
-            ],
-            if (actionLabel != null && onAction != null) ...[
-              const SizedBox(height: 14),
-              ShadButton(
-                onPressed: onAction,
-                size: ShadButtonSize.sm,
-                child: Text(actionLabel!),
               ),
             ],
           ],
@@ -548,7 +613,7 @@ class _Composer extends StatelessWidget {
                 controller: controller,
                 focusNode: focusNode,
                 enabled: enabled && !isBusy,
-                placeholder: const Text('Message the agent…'),
+                placeholder: const Text('What do you want to build?'),
                 minHeight: 40,
                 maxHeight: 140,
               ),

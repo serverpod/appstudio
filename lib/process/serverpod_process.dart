@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../preview/preview_phase.dart';
 import '../process/dev_session_cleanup.dart';
 import '../session/project_session.dart';
 import '../terminal/studio_terminal.dart';
@@ -34,9 +35,10 @@ class ServerpodProcessController extends ChangeNotifier {
   final StudioTerminal terminal;
 
   ProcessState _state = ProcessState.idle;
+  PreviewPhase _phase = PreviewPhase.idle;
   bool _previewReady = false;
   int _previewReloadToken = 0;
-  String _statusMessage = 'Idle';
+  String? _error;
   String? _boundProjectPath;
   int _epoch = 0;
   Timer? _pollTimer;
@@ -46,11 +48,20 @@ class ServerpodProcessController extends ChangeNotifier {
   bool _scheduledVmServiceReload = false;
 
   ProcessState get state => _state;
+  PreviewPhase get phase => _phase;
+
   /// Web server is accepting connections on :9998 (CEF may load).
   bool get previewReady => _previewReady;
+
   /// Increments when the preview should reload (DWDS/VM service attach).
   int get previewReloadToken => _previewReloadToken;
-  String get statusMessage => _statusMessage;
+
+  /// True after Serverpod has started connecting to the Flutter VM service.
+  bool get hasAttachedFlutter => _scheduledVmServiceReload;
+
+  /// Last process failure message, if any.
+  String? get error => _error;
+
   bool get canStart => session.hasProject && _state == ProcessState.idle;
   bool get canStop =>
       _state == ProcessState.running || _state == ProcessState.starting;
@@ -87,11 +98,11 @@ class ServerpodProcessController extends ChangeNotifier {
       return;
     }
 
-    _setState(ProcessState.starting, 'Starting serverpod…');
+    _error = null;
     _previewReady = false;
     _scheduledVmServiceReload = false;
     _outputBuffer.clear();
-    notifyListeners();
+    _setPhase(ProcessState.starting, PreviewPhase.startingServerpod);
 
     _terminalListener ??= () {
       if (!terminal.isRunning &&
@@ -111,31 +122,53 @@ class ServerpodProcessController extends ChangeNotifier {
         workingDirectory: projectPath,
         environment: toolchain.processEnvironment(),
       );
-      _setState(ProcessState.running, 'Running · probing :9998');
+      _setPhase(ProcessState.running, PreviewPhase.waitingForServer);
       _startPolling();
     } catch (e) {
-      _setState(ProcessState.idle, 'Failed to start: $e');
+      _error = e.toString();
       _previewReady = false;
-      notifyListeners();
+      _setPhase(ProcessState.idle, PreviewPhase.failed);
     }
   }
 
   Future<void> stop() async {
     if (_state == ProcessState.idle || _state == ProcessState.stopping) return;
-    _setState(ProcessState.stopping, 'Stopping…');
+    _setPhase(ProcessState.stopping, PreviewPhase.stopping);
     _stopPolling();
     await terminal.stop();
     _onProcessExited();
   }
 
+  /// Called by the preview pane once the Flutter web app is actually running.
+  ///
+  /// Ignored until DWDS has attached at least once — the first CEF load is
+  /// usually a blank page until the VM-service reload completes.
+  void markPreviewLive() {
+    if (_state != ProcessState.running || !_previewReady) return;
+    if (_phase == PreviewPhase.ready) return;
+    // Stay on loading/connecting overlay until attach + reload have happened.
+    if (!_scheduledVmServiceReload) return;
+    _phase = PreviewPhase.ready;
+    _error = null;
+    notifyListeners();
+  }
+
   void _onProcessExited() {
+    final wasStopping = _state == ProcessState.stopping;
     _stopPolling();
     unawaited(_outputSub?.cancel());
     _outputSub = null;
     _previewReady = false;
     _scheduledVmServiceReload = false;
     _outputBuffer.clear();
-    _setState(ProcessState.idle, 'Idle');
+    if (wasStopping) {
+      _error = null;
+      _setPhase(ProcessState.idle, PreviewPhase.idle);
+      return;
+    }
+    // Unexpected exit while starting/running.
+    _error ??= 'Serverpod stopped unexpectedly';
+    _setPhase(ProcessState.idle, PreviewPhase.failed);
   }
 
   void _onTerminalOutput(String chunk) {
@@ -147,7 +180,7 @@ class ServerpodProcessController extends ChangeNotifier {
 
     _scheduledVmServiceReload = true;
     _previewReloadToken++;
-    _statusMessage = 'Preview · VM service attaching · reloading';
+    _phase = PreviewPhase.connecting;
     notifyListeners();
   }
 
@@ -158,7 +191,7 @@ class ServerpodProcessController extends ChangeNotifier {
       final ready = await _tcpReady(kPreviewPort);
       if (ready && !_previewReady) {
         _previewReady = true;
-        _statusMessage = 'Preview · :9998 up · waiting for Flutter attach';
+        _phase = PreviewPhase.loadingApp;
         notifyListeners();
       }
     });
@@ -183,9 +216,9 @@ class ServerpodProcessController extends ChangeNotifier {
     }
   }
 
-  void _setState(ProcessState state, String message) {
+  void _setPhase(ProcessState state, PreviewPhase phase) {
     _state = state;
-    _statusMessage = message;
+    _phase = phase;
     notifyListeners();
   }
 
