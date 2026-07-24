@@ -21,6 +21,45 @@ enum AgentConnectionState {
   error,
 }
 
+/// Chat mode shown in the composer; maps to OpenCode agent names.
+enum AgentChatMode {
+  agent,
+  plan;
+
+  String get label => switch (this) {
+        agent => 'Agent',
+        plan => 'Plan or Ask',
+      };
+
+  /// OpenCode agent id (`build` is the default full-access agent).
+  String get apiName => switch (this) {
+        agent => 'build',
+        plan => 'plan',
+      };
+
+  static AgentChatMode? tryParse(String? value) {
+    return switch (value) {
+      'agent' => AgentChatMode.agent,
+      'plan' => AgentChatMode.plan,
+      _ => null,
+    };
+  }
+}
+
+class AgentModelOption {
+  const AgentModelOption({
+    required this.providerId,
+    required this.modelId,
+    required this.label,
+  });
+
+  final String providerId;
+  final String modelId;
+  final String label;
+
+  String get value => '$providerId/$modelId';
+}
+
 /// Owns OpenCode serve lifecycle, SSE transcript, and chat actions.
 class AgentController extends ChangeNotifier {
   AgentController({
@@ -47,6 +86,7 @@ class AgentController extends ChangeNotifier {
   final OpenCodeSse _sse;
 
   static const _prefsModelKey = 'agent.default_model';
+  static const _prefsModeKey = 'agent.chat_mode';
 
   AgentConnectionState _connection = AgentConnectionState.idle;
   String? _statusMessage;
@@ -56,7 +96,9 @@ class AgentController extends ChangeNotifier {
   final List<AgentChatMessage> _messages = [];
   final List<AgentPermissionPart> _pendingPermissions = [];
   List<String> _connectedProviders = [];
+  List<AgentModelOption> _availableModels = [];
   String? _defaultModel; // provider/model
+  AgentChatMode _mode = AgentChatMode.agent;
   StreamSubscription<Map<String, dynamic>>? _sseSub;
   int _epoch = 0;
   VoidCallback? _onOpenSettings;
@@ -69,7 +111,10 @@ class AgentController extends ChangeNotifier {
       List.unmodifiable(_pendingPermissions);
   List<String> get connectedProviders =>
       List.unmodifiable(_connectedProviders);
+  List<AgentModelOption> get availableModels =>
+      List.unmodifiable(_availableModels);
   String? get defaultModel => _defaultModel;
+  AgentChatMode get mode => _mode;
   bool get isBusy => _connection == AgentConnectionState.busy;
   bool get canSend =>
       session.hasProject &&
@@ -82,6 +127,19 @@ class AgentController extends ChangeNotifier {
   bool get isServeRunning => _serve.isRunning;
   ProjectSession get projectSession => session;
 
+  String? get defaultModelLabel {
+    final value = _defaultModel;
+    if (value == null) return null;
+    for (final m in _availableModels) {
+      if (m.value == value) return m.label;
+    }
+    final slash = value.indexOf('/');
+    if (slash >= 0 && slash < value.length - 1) {
+      return value.substring(slash + 1);
+    }
+    return value;
+  }
+
   void setOpenSettingsHandler(VoidCallback? handler) {
     _onOpenSettings = handler;
   }
@@ -91,7 +149,17 @@ class AgentController extends ChangeNotifier {
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     _defaultModel = prefs.getString(_prefsModelKey);
+    _mode = AgentChatMode.tryParse(prefs.getString(_prefsModeKey)) ??
+        AgentChatMode.agent;
     notifyListeners();
+  }
+
+  Future<void> setMode(AgentChatMode mode) async {
+    if (_mode == mode) return;
+    _mode = mode;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefsModeKey, mode.name);
   }
 
   Future<void> setDefaultModel(String? providerModel) async {
@@ -221,7 +289,33 @@ class AgentController extends ChangeNotifier {
       _connectedProviders =
           (await _authStore.connectedProviderIds()).toList()..sort();
     }
+    await _refreshModels();
     notifyListeners();
+  }
+
+  Future<void> _refreshModels() async {
+    if (_client.baseUrl == null) {
+      _availableModels = [];
+      return;
+    }
+    try {
+      final models = await _client.listModels();
+      final connected = _connectedProviders.toSet();
+      _availableModels = [
+        for (final m in models)
+          if (connected.contains(m.providerId))
+            AgentModelOption(
+              providerId: m.providerId,
+              modelId: m.modelId,
+              label: m.label,
+            ),
+      ];
+      if (_defaultModel == null && _availableModels.isNotEmpty) {
+        _defaultModel = _availableModels.first.value;
+      }
+    } catch (_) {
+      _availableModels = [];
+    }
   }
 
   Future<void> saveApiKey(String providerId, String key) async {
@@ -318,6 +412,7 @@ class AgentController extends ChangeNotifier {
         text: trimmed,
         providerId: providerId,
         modelId: modelId,
+        agent: _mode.apiName,
       );
     } catch (e) {
       _messages.add(
@@ -694,6 +789,7 @@ class AgentController extends ChangeNotifier {
     _sessionId = null;
     _boundProjectPath = null;
     _pendingPermissions.clear();
+    _availableModels = [];
     if (clearMessages) _messages.clear();
     _connection = AgentConnectionState.idle;
     _statusMessage = null;

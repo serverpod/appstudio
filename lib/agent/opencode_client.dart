@@ -74,12 +74,16 @@ class OpenCodeClient {
     required String text,
     String? providerId,
     String? modelId,
+    String? agent,
   }) async {
     final body = <String, dynamic>{
       'parts': [
         {'type': 'text', 'text': text},
       ],
     };
+    if (agent != null && agent.isNotEmpty) {
+      body['agent'] = agent;
+    }
     if (providerId != null &&
         providerId.isNotEmpty &&
         modelId != null &&

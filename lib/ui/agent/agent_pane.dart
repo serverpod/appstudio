@@ -8,6 +8,7 @@ import '../../agent/agent_transcript.dart';
 import '../../process/serverpod_process.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/menu_item_tile.dart';
 
 class AgentPane extends StatefulWidget {
   const AgentPane({
@@ -99,10 +100,9 @@ class _AgentPaneState extends State<AgentPane> {
               border: Border(top: paneBorderSide(scheme.border)),
             ),
             child: _Composer(
+              agent: c,
               controller: _inputController,
               focusNode: _inputFocus,
-              enabled: c.canSend || c.isBusy,
-              isBusy: c.isBusy,
               onSend: c.canSend ? _send : null,
               onStop: c.isBusy ? () => c.abort() : null,
             ),
@@ -578,63 +578,440 @@ class _PermissionCard extends StatelessWidget {
   }
 }
 
-class _Composer extends StatelessWidget {
+class _Composer extends StatefulWidget {
   const _Composer({
+    required this.agent,
     required this.controller,
     required this.focusNode,
-    required this.enabled,
-    required this.isBusy,
     required this.onSend,
     required this.onStop,
   });
 
+  final AgentController agent;
   final TextEditingController controller;
   final FocusNode focusNode;
-  final bool enabled;
-  final bool isBusy;
   final VoidCallback? onSend;
   final VoidCallback? onStop;
 
   @override
+  State<_Composer> createState() => _ComposerState();
+}
+
+class _ComposerState extends State<_Composer> {
+  static const _maxLines = 15;
+  static const _addModelSentinel = '__add_model__';
+
+  late final ShadPopoverController _modePopover;
+  late final ShadPopoverController _modelPopover;
+  bool _hasText = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _modePopover = ShadPopoverController();
+    _modelPopover = ShadPopoverController();
+    _hasText = widget.controller.text.trim().isNotEmpty;
+    widget.controller.addListener(_onTextChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onTextChanged);
+    _modePopover.dispose();
+    _modelPopover.dispose();
+    super.dispose();
+  }
+
+  void _onTextChanged() {
+    final next = widget.controller.text.trim().isNotEmpty;
+    if (next != _hasText) setState(() => _hasText = next);
+  }
+
+  IconData _modeIcon(AgentChatMode mode) => switch (mode) {
+        AgentChatMode.agent => LucideIcons.infinity,
+        AgentChatMode.plan => LucideIcons.listChecks,
+      };
+
+  String _shortModelLabel(AgentModelOption model) {
+    final slash = model.label.lastIndexOf('/');
+    if (slash >= 0 && slash < model.label.length - 1) {
+      return model.label.substring(slash + 1).trim();
+    }
+    return model.label;
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final scheme = theme.colorScheme;
+    final agent = widget.agent;
+    final canSend = widget.onSend != null && _hasText;
+    final isBusy = agent.isBusy;
+    final textStyle = theme.textTheme.small.copyWith(height: 1.4);
+    final hintStyle = theme.textTheme.muted.copyWith(
+      height: 1.4,
+      color: scheme.mutedForeground,
+    );
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Expanded(
-            child: CallbackShortcuts(
-              bindings: {
-                const SingleActivator(LogicalKeyboardKey.enter): () {
-                  if (onSend != null) onSend!();
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: scheme.card,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: scheme.border),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CallbackShortcuts(
+                bindings: {
+                  const SingleActivator(LogicalKeyboardKey.enter): () {
+                    if (canSend) widget.onSend!();
+                  },
                 },
-              },
-              child: ShadTextarea(
-                controller: controller,
-                focusNode: focusNode,
-                enabled: enabled && !isBusy,
-                placeholder: const Text('What do you want to build?'),
-                minHeight: 40,
-                maxHeight: 140,
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: TextField(
+                    controller: widget.controller,
+                    focusNode: widget.focusNode,
+                    enabled: agent.canSend,
+                    minLines: 1,
+                    maxLines: _maxLines,
+                    style: textStyle,
+                    cursorColor: scheme.foreground,
+                    keyboardType: TextInputType.multiline,
+                    textInputAction: TextInputAction.newline,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      disabledBorder: InputBorder.none,
+                      filled: false,
+                      hintText: 'What do you want to build?',
+                      hintStyle: hintStyle,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        _ModeChip(
+                          popover: _modePopover,
+                          mode: agent.mode,
+                          icon: _modeIcon(agent.mode),
+                          onSelect: (mode) {
+                            _modePopover.setOpen(false);
+                            agent.setMode(mode);
+                          },
+                          modeIcon: _modeIcon,
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: _ModelPicker(
+                            popover: _modelPopover,
+                            label: agent.defaultModelLabel ?? 'Select model',
+                            models: agent.availableModels,
+                            selectedValue: agent.defaultModel,
+                            shortLabel: _shortModelLabel,
+                            onSelect: (value) {
+                              _modelPopover.setOpen(false);
+                              if (value == _addModelSentinel) {
+                                agent.openSettings();
+                                return;
+                              }
+                              agent.setDefaultModel(value);
+                            },
+                            addModelValue: _addModelSentinel,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (isBusy)
+                    _CircleAction(
+                      background: AppColors.errorRed,
+                      foreground: Colors.white,
+                      icon: LucideIcons.square,
+                      iconSize: 11,
+                      onPressed: widget.onStop,
+                    )
+                  else
+                    _CircleAction(
+                      background: canSend
+                          ? scheme.foreground
+                          : scheme.mutedForeground.withValues(alpha: 0.35),
+                      foreground: scheme.background,
+                      icon: LucideIcons.arrowUp,
+                      iconSize: 13,
+                      onPressed: canSend ? widget.onSend : null,
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ModeChip extends StatelessWidget {
+  const _ModeChip({
+    required this.popover,
+    required this.mode,
+    required this.icon,
+    required this.onSelect,
+    required this.modeIcon,
+  });
+
+  final ShadPopoverController popover;
+  final AgentChatMode mode;
+  final IconData icon;
+  final ValueChanged<AgentChatMode> onSelect;
+  final IconData Function(AgentChatMode mode) modeIcon;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final scheme = theme.colorScheme;
+
+    return ShadPopover(
+      controller: popover,
+      padding: const EdgeInsets.all(4),
+      popover: (context) => SizedBox(
+        width: 160,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final option in AgentChatMode.values)
+              MenuItemTile(
+                icon: modeIcon(option),
+                label: option.label,
+                onTap: () => onSelect(option),
+              ),
+          ],
+        ),
+      ),
+      child: _ComposerChipButton(
+        onPressed: popover.toggle,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 13, color: scheme.foreground),
+            const SizedBox(width: 5),
+            Text(
+              mode.label,
+              style: theme.textTheme.small.copyWith(
+                fontWeight: FontWeight.w500,
+                fontSize: 12,
               ),
             ),
-          ),
-          const SizedBox(width: 8),
-          if (isBusy)
-            ShadIconButton.destructive(
-              icon: const Icon(LucideIcons.square, size: 16),
-              onPressed: onStop,
-              width: 36,
-              height: 36,
-            )
-          else
-            ShadIconButton(
-              icon: const Icon(LucideIcons.send, size: 16),
-              onPressed: onSend,
-              width: 36,
-              height: 36,
+            const SizedBox(width: 2),
+            Icon(
+              LucideIcons.chevronDown,
+              size: 12,
+              color: scheme.mutedForeground,
             ),
-        ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ModelPicker extends StatelessWidget {
+  const _ModelPicker({
+    required this.popover,
+    required this.label,
+    required this.models,
+    required this.selectedValue,
+    required this.shortLabel,
+    required this.onSelect,
+    required this.addModelValue,
+  });
+
+  final ShadPopoverController popover;
+  final String label;
+  final List<AgentModelOption> models;
+  final String? selectedValue;
+  final String Function(AgentModelOption model) shortLabel;
+  final ValueChanged<String> onSelect;
+  final String addModelValue;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final scheme = theme.colorScheme;
+    final display = () {
+      final value = selectedValue;
+      if (value == null) return label;
+      for (final m in models) {
+        if (m.value == value) return shortLabel(m);
+      }
+      final slash = value.indexOf('/');
+      if (slash >= 0 && slash < value.length - 1) {
+        return value.substring(slash + 1);
+      }
+      return label;
+    }();
+
+    return ShadPopover(
+      controller: popover,
+      padding: const EdgeInsets.all(4),
+      popover: (context) => ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 220, maxWidth: 320, maxHeight: 280),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final model in models)
+                MenuItemTile(
+                  icon: model.value == selectedValue
+                      ? LucideIcons.check
+                      : null,
+                  reserveIconSpace: true,
+                  label: shortLabel(model),
+                  subtitle: model.providerId,
+                  onTap: () => onSelect(model.value),
+                ),
+              if (models.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Divider(height: 1, color: scheme.border),
+                ),
+              MenuItemTile(
+                icon: LucideIcons.plus,
+                reserveIconSpace: true,
+                label: 'Add model...',
+                onTap: () => onSelect(addModelValue),
+              ),
+            ],
+          ),
+        ),
+      ),
+      child: _ComposerChipButton(
+        filled: false,
+        onPressed: popover.toggle,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 180),
+              child: Text(
+                display,
+                style: theme.textTheme.small.copyWith(
+                  fontSize: 12,
+                  color: scheme.foreground,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 2),
+            Icon(
+              LucideIcons.chevronDown,
+              size: 12,
+              color: scheme.mutedForeground,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ComposerChipButton extends StatefulWidget {
+  const _ComposerChipButton({
+    required this.onPressed,
+    required this.child,
+    this.filled = true,
+  });
+
+  final VoidCallback onPressed;
+  final Widget child;
+  final bool filled;
+
+  @override
+  State<_ComposerChipButton> createState() => _ComposerChipButtonState();
+}
+
+class _ComposerChipButtonState extends State<_ComposerChipButton> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = ShadTheme.of(context).colorScheme;
+    final bg = widget.filled
+        ? (_hovered ? scheme.muted.withValues(alpha: 0.9) : scheme.muted)
+        : (_hovered ? scheme.muted.withValues(alpha: 0.45) : Colors.transparent);
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onPressed,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 100),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: widget.child,
+        ),
+      ),
+    );
+  }
+}
+
+class _CircleAction extends StatelessWidget {
+  const _CircleAction({
+    required this.background,
+    required this.foreground,
+    required this.icon,
+    required this.onPressed,
+    this.iconSize = 15,
+  });
+
+  final Color background;
+  final Color foreground;
+  final IconData icon;
+  final VoidCallback? onPressed;
+  final double iconSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPressed != null;
+    return MouseRegion(
+      cursor:
+          enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+      child: GestureDetector(
+        onTap: onPressed,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 100),
+          opacity: enabled ? 1 : 0.55,
+          child: Container(
+            width: 24,
+            height: 24,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: background,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, size: iconSize, color: foreground),
+          ),
+        ),
       ),
     );
   }

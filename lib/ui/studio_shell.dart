@@ -42,7 +42,6 @@ class _StudioShellState extends State<StudioShell> {
   final _previewKey = GlobalKey<PreviewPaneState>();
   double _splitRatio = 0.42;
   bool _leftPanelVisible = true;
-  bool _previewGradientAnimating = false;
 
   @override
   void initState() {
@@ -78,18 +77,10 @@ class _StudioShellState extends State<StudioShell> {
               session: widget.session,
               process: widget.process,
               leftPanelVisible: _leftPanelVisible,
-              previewGradientAnimating: _previewGradientAnimating,
               onToggleLeftPanel: widget.session.hasProject
                   ? () {
                       setState(() {
                         _leftPanelVisible = !_leftPanelVisible;
-                      });
-                    }
-                  : null,
-              onTogglePreviewGradient: widget.session.hasProject
-                  ? () {
-                      setState(() {
-                        _previewGradientAnimating = !_previewGradientAnimating;
                       });
                     }
                   : null,
@@ -109,7 +100,7 @@ class _StudioShellState extends State<StudioShell> {
                       previewKey: _previewKey,
                       previewUrl: ProjectSession.previewUri,
                       process: widget.process,
-                      gradientAnimating: _previewGradientAnimating ||
+                      gradientAnimating:
                           widget.process.phase.showsLoadingOverlay,
                     )
                   : _EmptyState(session: widget.session),
@@ -127,18 +118,14 @@ class _Toolbar extends StatelessWidget {
     required this.session,
     required this.process,
     required this.leftPanelVisible,
-    required this.previewGradientAnimating,
     required this.onToggleLeftPanel,
-    required this.onTogglePreviewGradient,
   });
 
   final Toolchain toolchain;
   final ProjectSession session;
   final ServerpodProcessController process;
   final bool leftPanelVisible;
-  final bool previewGradientAnimating;
   final VoidCallback? onToggleLeftPanel;
-  final VoidCallback? onTogglePreviewGradient;
 
   @override
   Widget build(BuildContext context) {
@@ -161,17 +148,6 @@ class _Toolbar extends StatelessWidget {
                 ? 'Hide Agent & logs panel'
                 : 'Show Agent & logs panel',
             onPressed: onToggleLeftPanel,
-          ),
-          const SizedBox(width: 4),
-          _IconAction(
-            icon: LucideIcons.play,
-            tooltip: 'Start',
-            onPressed: process.canStart ? process.start : null,
-          ),
-          _IconAction(
-            icon: LucideIcons.square,
-            tooltip: 'Stop',
-            onPressed: process.canStop ? process.stop : null,
           ),
           const SizedBox(width: 12),
           if (session.hasProject)
@@ -225,12 +201,18 @@ class _Toolbar extends StatelessWidget {
           ),
           const SizedBox(width: 4),
           _IconAction(
-            icon: LucideIcons.sparkles,
-            tooltip: previewGradientAnimating
-                ? 'Stop preview background animation'
-                : 'Animate preview background',
-            highlighted: previewGradientAnimating,
-            onPressed: onTogglePreviewGradient,
+            icon: LucideIcons.play,
+            tooltip: 'Start',
+            onPressed: session.hasProject && process.canStart
+                ? process.start
+                : null,
+          ),
+          _IconAction(
+            icon: LucideIcons.square,
+            tooltip: 'Stop',
+            onPressed: session.hasProject && process.canStop
+                ? process.stop
+                : null,
           ),
         ],
       ),
@@ -424,25 +406,18 @@ class _IconAction extends StatelessWidget {
     required this.icon,
     required this.tooltip,
     required this.onPressed,
-    this.highlighted = false,
   });
 
   final IconData icon;
   final String tooltip;
   final VoidCallback? onPressed;
-  final bool highlighted;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = ShadTheme.of(context).colorScheme;
     return ShadTooltip(
       builder: (context) => Text(tooltip),
       child: ShadIconButton.ghost(
-        icon: Icon(
-          icon,
-          size: 16,
-          color: highlighted ? scheme.primary : null,
-        ),
+        icon: Icon(icon, size: 16),
         onPressed: onPressed,
         width: 34,
         height: 34,
