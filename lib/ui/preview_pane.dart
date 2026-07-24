@@ -6,6 +6,7 @@ import 'package:webview_cef/webview_cef.dart';
 
 import '../preview/preview_bootstrap.dart';
 import '../preview/preview_device.dart';
+import '../preview/preview_hero_gradient.dart';
 import '../preview/preview_surface_sync.dart';
 import '../preview/preview_theme.dart';
 import '../theme/app_colors.dart';
@@ -21,11 +22,13 @@ class PreviewPane extends StatefulWidget {
     required this.previewUrl,
     required this.shouldLoad,
     this.reloadToken = 0,
+    this.gradientAnimating = false,
   });
 
   final Uri previewUrl;
   final bool shouldLoad;
   final int reloadToken;
+  final bool gradientAnimating;
 
   @override
   State<PreviewPane> createState() => PreviewPaneState();
@@ -212,8 +215,8 @@ class PreviewPaneState extends State<PreviewPane> {
           onViewModeChanged: _setViewMode,
         ),
         Expanded(
-          child: ColoredBox(
-            color: ShadTheme.of(context).colorScheme.background,
+          child: PreviewHeroGradient(
+            animating: widget.gradientAnimating,
             child: _buildBody(
               controller,
               viewport: viewport,
@@ -229,16 +232,14 @@ class PreviewPaneState extends State<PreviewPane> {
     required Size viewport,
   }) {
     final theme = ShadTheme.of(context);
-    final scheme = theme.colorScheme;
     final textTheme = theme.textTheme;
-    final isDark = theme.brightness == Brightness.dark;
 
     if (_error != null) {
       return Center(
         child: Text(
           'Preview error: $_error',
           style: textTheme.small.copyWith(
-            color: isDark ? AppColors.errorTextDark : AppColors.errorText,
+            color: AppColors.errorTextDark,
           ),
         ),
       );
@@ -249,11 +250,17 @@ class PreviewPaneState extends State<PreviewPane> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(LucideIcons.globe, size: 28, color: scheme.mutedForeground),
+            Icon(
+              LucideIcons.globe,
+              size: 28,
+              color: Colors.white.withValues(alpha: 0.72),
+            ),
             const SizedBox(height: 12),
             Text(
               'Preview will appear when the app is ready',
-              style: textTheme.muted,
+              style: textTheme.small.copyWith(
+                color: Colors.white.withValues(alpha: 0.78),
+              ),
             ),
           ],
         ),
@@ -293,6 +300,7 @@ class _PreviewLoadingIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final muted = Colors.white.withValues(alpha: 0.78);
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -303,7 +311,7 @@ class _PreviewLoadingIndicator extends StatelessWidget {
         const SizedBox(height: 12),
         Text(
           'Loading preview…',
-          style: ShadTheme.of(context).textTheme.muted,
+          style: ShadTheme.of(context).textTheme.small.copyWith(color: muted),
         ),
       ],
     );
@@ -408,32 +416,28 @@ class _PhonePreviewViewport extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = ShadTheme.of(context).colorScheme;
     final frameSize = previewPhoneFrameSize(
       viewport.width > viewport.height
           ? PreviewOrientation.landscape
           : PreviewOrientation.portrait,
     );
 
-    return ColoredBox(
-      color: scheme.background,
-      child: Padding(
-        padding: const EdgeInsets.all(previewPhonePreviewPadding),
-        child: Center(
-          child: AspectRatio(
-            aspectRatio: frameSize.width / frameSize.height,
-            child: FittedBox(
-              fit: BoxFit.contain,
-              child: SizedBox(
-                width: frameSize.width,
-                height: frameSize.height,
-                child: _PhoneDeviceFrame(
-                  viewport: viewport,
-                  child: SizedBox(
-                    width: viewport.width,
-                    height: viewport.height,
-                    child: child,
-                  ),
+    return Padding(
+      padding: const EdgeInsets.all(previewPhonePreviewPadding),
+      child: Center(
+        child: AspectRatio(
+          aspectRatio: frameSize.width / frameSize.height,
+          child: FittedBox(
+            fit: BoxFit.contain,
+            child: SizedBox(
+              width: frameSize.width,
+              height: frameSize.height,
+              child: _PhoneDeviceFrame(
+                viewport: viewport,
+                child: SizedBox(
+                  width: viewport.width,
+                  height: viewport.height,
+                  child: child,
                 ),
               ),
             ),

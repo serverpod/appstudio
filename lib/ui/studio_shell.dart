@@ -41,6 +41,7 @@ class _StudioShellState extends State<StudioShell> {
   final _previewKey = GlobalKey<PreviewPaneState>();
   double _splitRatio = 0.42;
   bool _leftPanelVisible = true;
+  bool _previewGradientAnimating = false;
 
   @override
   void initState() {
@@ -76,10 +77,18 @@ class _StudioShellState extends State<StudioShell> {
               session: widget.session,
               process: widget.process,
               leftPanelVisible: _leftPanelVisible,
+              previewGradientAnimating: _previewGradientAnimating,
               onToggleLeftPanel: widget.session.hasProject
                   ? () {
                       setState(() {
                         _leftPanelVisible = !_leftPanelVisible;
+                      });
+                    }
+                  : null,
+              onTogglePreviewGradient: widget.session.hasProject
+                  ? () {
+                      setState(() {
+                        _previewGradientAnimating = !_previewGradientAnimating;
                       });
                     }
                   : null,
@@ -102,6 +111,7 @@ class _StudioShellState extends State<StudioShell> {
                       previewUrl: ProjectSession.previewUri,
                       shouldLoad: widget.process.previewReady,
                       reloadToken: widget.process.previewReloadToken,
+                      gradientAnimating: _previewGradientAnimating,
                     )
                   : _EmptyState(session: widget.session),
             ),
@@ -118,7 +128,9 @@ class _Toolbar extends StatelessWidget {
     required this.session,
     required this.process,
     required this.leftPanelVisible,
+    required this.previewGradientAnimating,
     required this.onToggleLeftPanel,
+    required this.onTogglePreviewGradient,
     required this.onReload,
   });
 
@@ -126,7 +138,9 @@ class _Toolbar extends StatelessWidget {
   final ProjectSession session;
   final ServerpodProcessController process;
   final bool leftPanelVisible;
+  final bool previewGradientAnimating;
   final VoidCallback? onToggleLeftPanel;
+  final VoidCallback? onTogglePreviewGradient;
   final VoidCallback onReload;
 
   @override
@@ -248,6 +262,14 @@ class _Toolbar extends StatelessWidget {
           ),
           const SizedBox(width: 4),
           _IconAction(
+            icon: LucideIcons.sparkles,
+            tooltip: previewGradientAnimating
+                ? 'Stop preview background animation'
+                : 'Animate preview background',
+            highlighted: previewGradientAnimating,
+            onPressed: onTogglePreviewGradient,
+          ),
+          _IconAction(
             icon: LucideIcons.refreshCw,
             tooltip: 'Reload preview',
             onPressed: process.previewReady ? onReload : null,
@@ -270,6 +292,7 @@ class _Workspace extends StatelessWidget {
     required this.previewUrl,
     required this.shouldLoad,
     required this.reloadToken,
+    required this.gradientAnimating,
   });
 
   final double splitRatio;
@@ -282,6 +305,7 @@ class _Workspace extends StatelessWidget {
   final Uri previewUrl;
   final bool shouldLoad;
   final int reloadToken;
+  final bool gradientAnimating;
 
   @override
   Widget build(BuildContext context) {
@@ -312,6 +336,7 @@ class _Workspace extends StatelessWidget {
                     previewUrl: previewUrl,
                     shouldLoad: shouldLoad,
                     reloadToken: reloadToken,
+                    gradientAnimating: gradientAnimating,
                   ),
                 ),
               ],
@@ -446,18 +471,25 @@ class _IconAction extends StatelessWidget {
     required this.icon,
     required this.tooltip,
     required this.onPressed,
+    this.highlighted = false,
   });
 
   final IconData icon;
   final String tooltip;
   final VoidCallback? onPressed;
+  final bool highlighted;
 
   @override
   Widget build(BuildContext context) {
+    final scheme = ShadTheme.of(context).colorScheme;
     return ShadTooltip(
       builder: (context) => Text(tooltip),
       child: ShadIconButton.ghost(
-        icon: Icon(icon, size: 16),
+        icon: Icon(
+          icon,
+          size: 16,
+          color: highlighted ? scheme.primary : null,
+        ),
         onPressed: onPressed,
         width: 34,
         height: 34,

@@ -24,7 +24,10 @@ class ServerpodProcessController extends ChangeNotifier {
     required this.toolchain,
     required this.session,
     required this.terminal,
-  });
+  }) {
+    session.addListener(_onSessionChanged);
+    _onSessionChanged();
+  }
 
   final Toolchain toolchain;
   final ProjectSession session;
@@ -34,6 +37,8 @@ class ServerpodProcessController extends ChangeNotifier {
   bool _previewReady = false;
   int _previewReloadToken = 0;
   String _statusMessage = 'Idle';
+  String? _boundProjectPath;
+  int _epoch = 0;
   Timer? _pollTimer;
   VoidCallback? _terminalListener;
   StreamSubscription<String>? _outputSub;
@@ -49,6 +54,31 @@ class ServerpodProcessController extends ChangeNotifier {
   bool get canStart => session.hasProject && _state == ProcessState.idle;
   bool get canStop =>
       _state == ProcessState.running || _state == ProcessState.starting;
+
+  void _onSessionChanged() {
+    final path = session.projectPath;
+    if (path == null) {
+      _boundProjectPath = null;
+      unawaited(stop());
+      return;
+    }
+    if (path == _boundProjectPath &&
+        (_state == ProcessState.running || _state == ProcessState.starting)) {
+      return;
+    }
+    unawaited(_startForProject(path));
+  }
+
+  Future<void> _startForProject(String projectPath) async {
+    final epoch = ++_epoch;
+    if (canStop) {
+      await stop();
+    }
+    if (epoch != _epoch || session.projectPath != projectPath) return;
+
+    _boundProjectPath = projectPath;
+    await start();
+  }
 
   Future<void> start() async {
     final projectPath = session.projectPath;
@@ -161,6 +191,7 @@ class ServerpodProcessController extends ChangeNotifier {
 
   @override
   void dispose() {
+    session.removeListener(_onSessionChanged);
     _stopPolling();
     unawaited(_outputSub?.cancel());
     if (_terminalListener != null) {
