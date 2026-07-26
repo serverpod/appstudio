@@ -9,7 +9,7 @@ class ProjectSession extends ChangeNotifier {
   ProjectSession();
 
   static const _recentsKey = 'recent_projects';
-  static const _maxRecents = 8;
+  static const _maxRecents = 5;
   static final previewUri = Uri.parse('http://localhost:9998');
 
   String? _projectPath;
@@ -34,6 +34,14 @@ class ProjectSession extends ChangeNotifier {
   Future<void> loadRecents() async {
     final prefs = await SharedPreferences.getInstance();
     _recents = prefs.getStringList(_recentsKey) ?? [];
+    notifyListeners();
+  }
+
+  Future<void> clearRecents() async {
+    if (_recents.isEmpty) return;
+    _recents = [];
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_recentsKey, _recents);
     notifyListeners();
   }
 

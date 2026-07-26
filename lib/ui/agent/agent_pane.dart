@@ -36,6 +36,7 @@ class _AgentPaneState extends State<AgentPane> {
     super.initState();
     widget.controller.addListener(_onController);
     _scrollController.addListener(_onScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
   }
 
   @override
@@ -44,6 +45,8 @@ class _AgentPaneState extends State<AgentPane> {
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onController);
       widget.controller.addListener(_onController);
+      _stickToBottom = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     }
   }
 
@@ -63,13 +66,15 @@ class _AgentPaneState extends State<AgentPane> {
     _stickToBottom = pos.pixels >= pos.maxScrollExtent - 48;
   }
 
+  void _scrollToBottom() {
+    if (!_stickToBottom || !_scrollController.hasClients) return;
+    _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+  }
+
   void _onController() {
     setState(() {});
     if (_stickToBottom) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!_scrollController.hasClients) return;
-        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
-      });
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     }
   }
 
@@ -233,7 +238,7 @@ class _AgentPaneState extends State<AgentPane> {
       AgentConnectionState.starting => 'Starting agent',
       AgentConnectionState.ready ||
       AgentConnectionState.busy =>
-        'Ready',
+        'Ready when you are',
       AgentConnectionState.idle || AgentConnectionState.error => 'Starting agent',
     };
   }

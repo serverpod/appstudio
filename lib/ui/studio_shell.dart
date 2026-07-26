@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:path/path.dart' as p;
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import '../agent/agent_controller.dart';
@@ -7,13 +6,12 @@ import '../preview/preview_phase.dart';
 import '../process/serverpod_process.dart';
 import '../session/project_session.dart';
 import '../terminal/studio_terminal.dart';
-import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import '../toolchain/toolchain.dart';
-import '../widgets/menu_item_tile.dart';
 import 'preview_pane.dart';
 import 'settings/providers_settings_dialog.dart';
+import 'start_page.dart';
 import 'terminal_pane.dart';
 
 class StudioShell extends StatefulWidget {
@@ -70,6 +68,10 @@ class _StudioShellState extends State<StudioShell> {
       ]),
       builder: (context, _) {
         final hasProject = widget.session.hasProject;
+        if (!hasProject) {
+          return StartPage(session: widget.session);
+        }
+
         return Column(
           children: [
             _Toolbar(
@@ -77,33 +79,28 @@ class _StudioShellState extends State<StudioShell> {
               session: widget.session,
               process: widget.process,
               leftPanelVisible: _leftPanelVisible,
-              onToggleLeftPanel: widget.session.hasProject
-                  ? () {
-                      setState(() {
-                        _leftPanelVisible = !_leftPanelVisible;
-                      });
-                    }
-                  : null,
+              onToggleLeftPanel: () {
+                setState(() {
+                  _leftPanelVisible = !_leftPanelVisible;
+                });
+              },
             ),
             Expanded(
-              child: hasProject
-                  ? _Workspace(
-                      splitRatio: _splitRatio,
-                      leftPanelVisible: _leftPanelVisible,
-                      onSplitChanged: (value) {
-                        setState(() {
-                          _splitRatio = value.clamp(0.25, 0.70);
-                        });
-                      },
-                      terminal: widget.terminal,
-                      agent: widget.agent,
-                      previewKey: _previewKey,
-                      previewUrl: ProjectSession.previewUri,
-                      process: widget.process,
-                      gradientAnimating:
-                          widget.process.phase.showsLoadingOverlay,
-                    )
-                  : _EmptyState(session: widget.session),
+              child: _Workspace(
+                splitRatio: _splitRatio,
+                leftPanelVisible: _leftPanelVisible,
+                onSplitChanged: (value) {
+                  setState(() {
+                    _splitRatio = value.clamp(0.25, 0.70);
+                  });
+                },
+                terminal: widget.terminal,
+                agent: widget.agent,
+                previewKey: _previewKey,
+                previewUrl: ProjectSession.previewUri,
+                process: widget.process,
+                gradientAnimating: widget.process.phase.showsLoadingOverlay,
+              ),
             ),
           ],
         );
@@ -303,100 +300,6 @@ class _Workspace extends StatelessWidget {
           ],
         );
       },
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.session});
-
-  final ProjectSession session;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    final scheme = theme.colorScheme;
-    final textTheme = theme.textTheme;
-    final isDark = theme.brightness == Brightness.dark;
-
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(LucideIcons.boxes, size: 40, color: scheme.primary),
-              const SizedBox(height: 16),
-              Text(
-                'App Studio',
-                style: textTheme.h3.copyWith(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Open a Serverpod project to get started',
-                textAlign: TextAlign.center,
-                style: textTheme.muted,
-              ),
-              if (session.error != null) ...[
-                const SizedBox(height: 12),
-                Text(
-                  session.error!,
-                  textAlign: TextAlign.center,
-                  style: textTheme.small.copyWith(
-                    color: isDark
-                        ? AppColors.errorTextDark
-                        : AppColors.errorText,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 24),
-              ShadButton(
-                onPressed: session.openProjectPicker,
-                size: ShadButtonSize.sm,
-                leading: const Icon(LucideIcons.folderOpen, size: 16),
-                child: const Text('Open project'),
-              ),
-              if (session.recents.isNotEmpty) ...[
-                const SizedBox(height: 32),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Recent',
-                    style: textTheme.small.copyWith(
-                      fontWeight: FontWeight.w500,
-                      color: scheme.mutedForeground,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  decoration: BoxDecoration(
-                    borderRadius: theme.radius,
-                    border: Border.all(color: scheme.border),
-                    color: scheme.card,
-                  ),
-                  child: Column(
-                    children: [
-                      for (var i = 0; i < session.recents.length; i++) ...[
-                        if (i > 0)
-                          Divider(height: 1, color: scheme.border),
-                        MenuItemTile(
-                          icon: LucideIcons.folder,
-                          label: p.basename(session.recents[i]),
-                          subtitle: session.recents[i],
-                          onTap: () => session.openPath(session.recents[i]),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
     );
   }
 }

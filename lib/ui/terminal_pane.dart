@@ -123,12 +123,15 @@ class _TerminalPaneState extends State<TerminalPane> {
         Expanded(
           child: ColoredBox(
             color: scheme.background,
-            child: switch (_selectedTab) {
-              _TerminalTab.agent => AgentPane(
+            child: IndexedStack(
+              index: _selectedTab == _TerminalTab.agent ? 0 : 1,
+              sizing: StackFit.expand,
+              children: [
+                AgentPane(
                   controller: widget.agent,
                   process: widget.process,
                 ),
-              _TerminalTab.serverLogs => TerminalView(
+                TerminalView(
                   widget.studioTerminal.terminal,
                   theme: xtermTheme,
                   textStyle: TerminalStyle(
@@ -136,10 +139,11 @@ class _TerminalPaneState extends State<TerminalPane> {
                     fontFamily: kMacMonoFont,
                   ),
                   padding: const EdgeInsets.all(8),
-                  autofocus: true,
+                  autofocus: _selectedTab == _TerminalTab.serverLogs,
                   hardwareKeyboardOnly: true,
                 ),
-            },
+              ],
+            ),
           ),
         ),
       ],
