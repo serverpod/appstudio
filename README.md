@@ -13,10 +13,11 @@ Prerequisites:
 - For CEF: `brew install cmake ninja`
 
 ```bash
-flutter pub get
-cd macos && pod install && cd ..
-flutter run -d macos
+make build_toolchain   # pub get + CEF/pods + toolchain/ (once)
+make start             # ensure toolchain, then flutter run -d macos
 ```
+
+Or manually: `flutter pub get && cd macos && pod install && cd .. && flutter run -d macos`.
 
 Without a bundled toolchain, the app uses host `flutter` / `dart` / `serverpod` /
 `opencode`.
@@ -41,11 +42,13 @@ toolchain/serverpod_cli/4.0.0-beta.0/
   lib/                 # sqlite dylibs — required
 ```
 
-2. Download Flutter (web-stripped), OpenCode (darwin-arm64), and portable Git:
+2. Download Flutter (web-stripped), OpenCode (darwin-arm64), and portable Git
+   (also done by `make build_toolchain`):
 
 ```bash
-./tool/bundle_toolchain.sh
-# optional: --force --flutter=3.44.2 --serverpod=4.0.0-beta.0 --opencode=1.18.4 --git=2.53.0-3
+make build_toolchain
+# or: ./tool/bundle_toolchain.sh
+# optional flags: --force --flutter=3.44.2 --serverpod=4.0.0-beta.0 --opencode=1.18.4 --git=2.53.0-3
 ```
 
 Release builds embed the entire `toolchain/` tree (including Serverpod `lib/`,
@@ -60,11 +63,9 @@ Xcode Command Line Tools on machines without developer tools installed.
 Bundle ID: `dev.serverpod.appstudio` · Team: Serverpod AB (`WK2NRY4GS4`).
 
 ```bash
-./tool/bundle_toolchain.sh
-# Signed DMG (Developer ID Application: Serverpod AB):
-./tool/distribute_macos.sh
-# Signed + notarized (requires notarytool profile "appstudio"):
-NOTARIZE=1 ./tool/distribute_macos.sh
+make dist              # ensure toolchain, signed + notarized DMG
+make dist_debug        # ensure toolchain, unsigned DMG (no notarization)
+# or: NOTARIZE=1 ./tool/distribute_macos.sh
 ```
 
 Defaults (override via env):

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../platform/studio_notifications.dart';
 import '../process/serverpod_process.dart';
 import '../session/project_session.dart';
 import '../toolchain/toolchain.dart';
@@ -748,6 +749,7 @@ class AgentController extends ChangeNotifier {
         _connection = AgentConnectionState.ready;
         _statusMessage = 'Ready';
         notifyListeners();
+        _notifyAgentFinished();
       }
       return;
     }
@@ -761,12 +763,41 @@ class AgentController extends ChangeNotifier {
         _connection = AgentConnectionState.ready;
         _statusMessage = 'Ready';
         notifyListeners();
+        _notifyAgentFinished();
       }
     } else if (statusStr == 'busy' || statusStr == 'running') {
       _connection = AgentConnectionState.busy;
       _statusMessage = 'Working…';
       notifyListeners();
     }
+  }
+
+  void _notifyAgentFinished() {
+    final summary = _latestAssistantSummary();
+    unawaited(StudioNotifications.agentTaskCompleted(summary: summary));
+  }
+
+  /// Short plain-text snippet from the latest assistant message, if any.
+  String? _latestAssistantSummary() {
+    for (var i = _messages.length - 1; i >= 0; i--) {
+      final msg = _messages[i];
+      if (msg.role != AgentMessageRole.assistant) continue;
+      final buf = StringBuffer();
+      for (final part in msg.parts) {
+        if (part is AgentTextPart) {
+          final t = part.text.trim();
+          if (t.isNotEmpty) {
+            if (buf.isNotEmpty) buf.write(' ');
+            buf.write(t);
+          }
+        }
+      }
+      final text = buf.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+      if (text.isEmpty) return null;
+      if (text.length <= 120) return text;
+      return '${text.substring(0, 117)}…';
+    }
+    return null;
   }
 
   AgentChatMessage? _findMessage(String id) {

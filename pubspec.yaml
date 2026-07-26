@@ -15,7 +15,8 @@ dependencies:
   shadcn_ui: ^0.54.0
   xterm: ^4.0.0
   kyroon_pty: ^1.0.4
-  webview_cef: ^0.5.1
+  webview_cef:
+    path: packages/webview_cef
   file_selector: ^1.0.3
   shared_preferences: ^2.5.3
   path: ^1.9.1

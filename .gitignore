@@ -85,7 +85,8 @@ app.*.map.json
 *.perspectivev3
 !default.perspectivev3
 
-# CEF / webview_cef local build cache (if present under the project)
+# CEF binaries downloaded by packages/webview_cef (pod install / download_cef.sh)
 **/third/cef/
+/packages/webview_cef/pubspec.lock
 .cursor/skills
 .dart_skills

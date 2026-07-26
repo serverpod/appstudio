@@ -1,0 +1,6 @@
+# CEF is downloaded by macos/scripts/download_cef.sh during pod install.
+macos/third/cef/
+.dart_tool/
+build/
+.packages
+pubspec.lock

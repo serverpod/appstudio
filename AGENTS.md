@@ -18,9 +18,8 @@ lib/
   widgets/               # Shared UI (IconSegmentedControl, MenuItemTile)
 packages/
   mac_menu_bar/            # Local fork — SF Symbol icons + menu separators
+  webview_cef/             # Local fork — CEF resize + skip Helper (Alerts)
 tool/
-  apply_webview_cef_patch.sh   # Run after flutter pub get
-  webview_cef_patches/         # CEF resize fix for webview_cef
   bundle_toolchain.sh, distribute_macos.sh
 toolchain/               # Release bundle (see README)
 ```
@@ -40,16 +39,19 @@ UI reference for design patterns: `../cloudui/cloudui_flutter/`.
 
 - **Flutter 3.44+** / **Dart 3.12+** (host SDK for building App Studio itself)
 - **Serverpod CLI 4.0.0-beta.0** — `dart install serverpod_cli 4.0.0-beta.0` (used when no bundled toolchain)
-- **CEF / webview_cef:** `brew install cmake ninja`; then `cd macos && pod install`
+- **CEF / webview_cef:** `brew install cmake ninja`; then `cd macos && pod install`  
+  (CEF binaries download into `packages/webview_cef/macos/third/cef/` — gitignored)
 
-### First-time dev setup
+### First-time / day-to-day (Makefile)
 
 ```bash
-flutter pub get
-./tool/apply_webview_cef_patch.sh   # required after pub get — patches webview_cef resize
-cd macos && pod install && cd ..
-flutter run -d macos
+make build_toolchain   # pub get + CEF/pods + toolchain/ (once, or when incomplete)
+make start             # ensure toolchain, then flutter run -d macos
+make dist_debug        # unsigned DMG
+make dist              # Developer ID + notarized DMG
 ```
+
+`start` / `dist` / `dist_debug` call `ensure_toolchain` first and run `build_toolchain` if pins, git, cctools, or CEF are missing.
 
 ### Bundled runtime (shipped in release builds)
 
@@ -101,7 +103,7 @@ Defaults: bundle id `dev.serverpod.appstudio`,
 - **Shell theme ≠ preview theme.** Preview light/dark toggles a JS shim (`preview_theme.dart`) that fakes `prefers-color-scheme` inside CEF.
 - **View modes:** `PreviewViewMode` — portrait phone (default), landscape phone, desktop. Defined in `preview_device.dart`.
 - **CEF sizing:** `PreviewSurfaceSync` + `burstSyncPreviewSurface` keep the webview sized on panel/mode changes. Defer layout reads to post-frame callbacks; avoid `MediaQuery` in `initState`.
-- **webview_cef patch:** run `./tool/apply_webview_cef_patch.sh` after `flutter pub get` — needed for reliable resize.
+- **webview_cef:** path dependency `packages/webview_cef` (fork of 0.5.1). Includes CEF resize surface sync and skips embedding `Helper (Alerts)`. CEF itself is fetched by `pod install` into `macos/third/cef/` (gitignored).
 
 ## Architecture notes
 
