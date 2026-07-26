@@ -14,8 +14,11 @@ class Toolchain {
     required this.flutterVersion,
     required this.serverpodCliVersion,
     required this.opencodeVersion,
+    required this.gitVersion,
     required this.binPathPrefix,
     required this.serverpodLibDir,
+    required this.gitHome,
+    required this.flutterPrebuiltEngineVersion,
   });
 
   final bool isBundled;
@@ -27,8 +30,11 @@ class Toolchain {
   final String? flutterVersion;
   final String? serverpodCliVersion;
   final String? opencodeVersion;
+  final String? gitVersion;
   final List<String> binPathPrefix;
   final String? serverpodLibDir;
+  final String? gitHome;
+  final String? flutterPrebuiltEngineVersion;
 
   String get badgeLabel {
     if (!isBundled) return 'host';
@@ -46,6 +52,24 @@ class Toolchain {
     env['PATH'] = pathParts.where((e) => e.isNotEmpty).join(':');
     if (flutterRoot != null) {
       env['FLUTTER_ROOT'] = flutterRoot!;
+      // serverpod_cli (AOT) resolves the SDK via DART_SDK or by probing `dart`
+      // on PATH. Pin explicitly so compile/run never pick a host stub.
+      final dartSdk = p.join(flutterRoot!, 'bin', 'cache', 'dart-sdk');
+      if (Directory(dartSdk).existsSync()) {
+        env['DART_SDK'] = dartSdk;
+      }
+    }
+    // Prefer pinned engine artifacts over git triangulation (needs real git,
+    // and avoids Apple's /usr/bin/git CLT stub on target Macs).
+    if (flutterPrebuiltEngineVersion != null &&
+        flutterPrebuiltEngineVersion!.isNotEmpty) {
+      env['FLUTTER_PREBUILT_ENGINE_VERSION'] = flutterPrebuiltEngineVersion!;
+    }
+    if (gitHome != null) {
+      final execPath = p.join(gitHome!, 'libexec', 'git-core');
+      if (Directory(execPath).existsSync()) {
+        env['GIT_EXEC_PATH'] = execPath;
+      }
     }
     // Full Serverpod CLI bundle ships sqlite dylibs next to the binary.
     if (serverpodLibDir != null) {
@@ -53,6 +77,20 @@ class Toolchain {
       env['DYLD_LIBRARY_PATH'] = existing == null || existing.isEmpty
           ? serverpodLibDir!
           : '$serverpodLibDir:$existing';
+    }
+    // Isolate pub downloads from a host Flutter install (or missing cache on
+    // a clean Mac). Only when running the bundled toolchain.
+    if (isBundled) {
+      final home = env['HOME'];
+      if (home != null && home.isNotEmpty) {
+        env['PUB_CACHE'] = p.join(
+          home,
+          'Library',
+          'Application Support',
+          'AppStudio',
+          'pub-cache',
+        );
+      }
     }
     env['TERM'] = 'xterm-256color';
     env['COLORTERM'] = 'truecolor';
@@ -83,6 +121,7 @@ class Toolchain {
     final flutterVersion = active['flutter'] as String?;
     final serverpodCliVersion = active['serverpod_cli'] as String?;
     final opencodeVersion = active['opencode'] as String?;
+    final gitVersion = active['git'] as String?;
     if (flutterVersion == null || serverpodCliVersion == null) return null;
 
     final flutterRoot = p.join(root, 'flutter', flutterVersion);
@@ -92,23 +131,35 @@ class Toolchain {
     final serverpodBin = p.join(serverpodHome, 'bin');
     final serverpodLib = p.join(serverpodHome, 'lib');
 
-    final flutterExe = File(p.join(wrapperBin, 'flutter')).existsSync()
-        ? p.join(wrapperBin, 'flutter')
-        : p.join(flutterBin, 'flutter');
-    final dartExe = File(p.join(wrapperBin, 'dart')).existsSync()
-        ? p.join(wrapperBin, 'dart')
-        : p.join(flutterBin, 'dart');
-    final serverpodExe = File(p.join(wrapperBin, 'serverpod')).existsSync()
-        ? p.join(wrapperBin, 'serverpod')
-        : p.join(serverpodBin, 'serverpod');
+    String? gitHome;
+    String? gitBin;
+    if (gitVersion != null && gitVersion.isNotEmpty) {
+      final candidate = p.join(root, 'git', gitVersion);
+      if (File(p.join(candidate, 'bin', 'git')).existsSync()) {
+        gitHome = candidate;
+        gitBin = p.join(candidate, 'bin');
+      }
+    }
+
+    // Real otool / install_name_tool — /usr/bin stubs trigger CLT install.
+    String? cctoolsBin;
+    final cctoolsCandidate = p.join(root, 'cctools', 'bin');
+    if (File(p.join(cctoolsCandidate, 'otool')).existsSync() &&
+        File(p.join(cctoolsCandidate, 'install_name_tool')).existsSync()) {
+      cctoolsBin = cctoolsCandidate;
+    }
+
+    // Prefer versioned binaries directly. Wrappers are fine for PATH use, but
+    // App Studio spawns tools with [processEnvironment] which already sets
+    // FLUTTER_ROOT / PATH / GIT_EXEC_PATH.
+    final flutterExe = p.join(flutterBin, 'flutter');
+    final dartExe = p.join(flutterBin, 'dart');
+    final serverpodExe = p.join(serverpodBin, 'serverpod');
 
     String? opencodeExe;
     if (opencodeVersion != null && opencodeVersion.isNotEmpty) {
-      final wrapper = p.join(wrapperBin, 'opencode');
       final bundled = p.join(root, 'opencode', opencodeVersion, 'opencode');
-      if (File(wrapper).existsSync()) {
-        opencodeExe = wrapper;
-      } else if (File(bundled).existsSync()) {
+      if (File(bundled).existsSync()) {
         opencodeExe = bundled;
       }
     }
@@ -127,6 +178,13 @@ class Toolchain {
     // OpenCode is optional for bundled resolution — fall back to host PATH.
     opencodeExe ??= await _which('opencode') ?? 'opencode';
 
+    String? engineVersion;
+    final engineFile = File(p.join(flutterRoot, 'bin', 'internal', 'engine.version'));
+    if (await engineFile.exists()) {
+      engineVersion = (await engineFile.readAsString()).trim();
+      if (engineVersion.isEmpty) engineVersion = null;
+    }
+
     return Toolchain._(
       isBundled: true,
       flutterRoot: flutterRoot,
@@ -137,12 +195,19 @@ class Toolchain {
       flutterVersion: flutterVersion,
       serverpodCliVersion: serverpodCliVersion,
       opencodeVersion: opencodeVersion,
+      gitVersion: gitVersion,
       binPathPrefix: [
+        // Real otool / install_name_tool before /usr/bin CLT stubs.
+        ?cctoolsBin,
+        // Portable git must precede /usr/bin so Apple's CLT stub is never used.
+        ?gitBin,
         wrapperBin,
         flutterBin,
         serverpodBin,
       ],
       serverpodLibDir: serverpodLib,
+      gitHome: gitHome,
+      flutterPrebuiltEngineVersion: engineVersion,
     );
   }
 
@@ -161,8 +226,11 @@ class Toolchain {
       flutterVersion: null,
       serverpodCliVersion: null,
       opencodeVersion: null,
+      gitVersion: null,
       binPathPrefix: const [],
       serverpodLibDir: null,
+      gitHome: null,
+      flutterPrebuiltEngineVersion: null,
     );
   }
 

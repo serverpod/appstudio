@@ -37,9 +37,12 @@ class StudioTerminal extends ChangeNotifier {
     List<String> arguments = const [],
     required String workingDirectory,
     required Map<String, String> environment,
+    bool clearScreen = true,
   }) async {
     await stop();
-    terminal.write('\x1bc');
+    if (clearScreen) {
+      terminal.write('\x1bc');
+    }
 
     final pty = Pty.start(
       executable,
@@ -103,6 +106,14 @@ class StudioTerminal extends ChangeNotifier {
     _running = false;
     await clearDevSessionPid();
     notifyListeners();
+  }
+
+  /// Append text to the terminal UI (and broadcast stream) without a PTY.
+  void writeLocal(String text) {
+    terminal.write(text);
+    if (!_outputController.isClosed) {
+      _outputController.add(text);
+    }
   }
 
   void _writeToPty(String data) {

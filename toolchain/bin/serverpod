@@ -1,13 +1,40 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ACTIVE="$ROOT/active.json"
-FLUTTER_VER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["flutter"])' "$ACTIVE")"
-CLI_VER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["serverpod_cli"])' "$ACTIVE")"
+FLUTTER_VER="$(tr -d '[:space:]' < "$ROOT/pins/flutter")"
+GIT_VER="$(tr -d '[:space:]' < "$ROOT/pins/git" 2>/dev/null || true)"
 export FLUTTER_ROOT="$ROOT/flutter/$FLUTTER_VER"
+ENGINE_VERSION_FILE="$FLUTTER_ROOT/bin/internal/engine.version"
+if [[ -f "$ENGINE_VERSION_FILE" ]]; then
+  export FLUTTER_PREBUILT_ENGINE_VERSION="$(tr -d '[:space:]' < "$ENGINE_VERSION_FILE")"
+fi
+if [[ -d "$FLUTTER_ROOT/bin/cache/dart-sdk" ]]; then
+  export DART_SDK="$FLUTTER_ROOT/bin/cache/dart-sdk"
+fi
+export PATH="$FLUTTER_ROOT/bin:$PATH"
+GIT_HOME=""
+if [[ -n "$GIT_VER" && -x "$ROOT/git/$GIT_VER/bin/git" ]]; then
+  GIT_HOME="$ROOT/git/$GIT_VER"
+  if [[ -d "$GIT_HOME/libexec/git-core" ]]; then
+    export GIT_EXEC_PATH="$GIT_HOME/libexec/git-core"
+  fi
+  export PATH="$GIT_HOME/bin:$PATH"
+fi
+# Real otool / install_name_tool ahead of /usr/bin CLT stubs.
+if [[ -x "$ROOT/cctools/bin/otool" ]]; then
+  export PATH="$ROOT/cctools/bin:$PATH"
+fi
+CLI_VER="$(tr -d '[:space:]' < "$ROOT/pins/serverpod_cli")"
 CLI_HOME="$ROOT/serverpod_cli/$CLI_VER"
 SERVERPOD="$CLI_HOME/bin/serverpod"
 # Ensure sqlite dylibs from the full CLI bundle are loadable.
 export DYLD_LIBRARY_PATH="$CLI_HOME/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
-export PATH="$FLUTTER_ROOT/bin:$CLI_HOME/bin:$PATH"
+export PATH="$CLI_HOME/bin:$PATH"
+# Keep portable tools ahead of /usr/bin after CLI prepend.
+if [[ -n "${GIT_HOME:-}" ]]; then
+  export PATH="$GIT_HOME/bin:$PATH"
+fi
+if [[ -x "$ROOT/cctools/bin/otool" ]]; then
+  export PATH="$ROOT/cctools/bin:$PATH"
+fi
 exec "$SERVERPOD" "$@"

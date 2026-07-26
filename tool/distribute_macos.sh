@@ -25,6 +25,13 @@ if [[ "$SKIP_BUNDLE_CHECK" != "1" ]]; then
     echo "  $TOOLCHAIN_DIR/serverpod_cli/$CLI_VER/lib/" >&2
     exit 1
   fi
+  GIT_VER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("git",""))' "$TOOLCHAIN_DIR/active.json")"
+  if [[ -z "$GIT_VER" || ! -x "$TOOLCHAIN_DIR/git/$GIT_VER/bin/git" ]]; then
+    echo "Portable Git missing. Run ./tool/bundle_toolchain.sh to download dugite-native," >&2
+    echo "or set SKIP_BUNDLE_CHECK=1 to continue without it." >&2
+    echo "  Expected: $TOOLCHAIN_DIR/git/<version>/bin/git" >&2
+    exit 1
+  fi
 fi
 
 echo "==> Building macOS release (host arch)"
@@ -39,11 +46,8 @@ fi
 
 echo "==> App: $APP_PATH"
 
-# Ensure toolchain is inside the app (Embed phase should have done this).
 if [[ -f "$TOOLCHAIN_DIR/active.json" ]]; then
-  DEST_TC="$APP_PATH/Contents/Resources/toolchain"
-  mkdir -p "$(dirname "$DEST_TC")"
-  rsync -a --delete "$TOOLCHAIN_DIR/" "$DEST_TC/"
+  bash "$ROOT_DIR/tool/copy_toolchain_into_app.sh" "$APP_PATH" "$TOOLCHAIN_DIR"
 fi
 
 sign_item() {
@@ -87,6 +91,8 @@ if [[ -n "$SIGN_IDENTITY" ]]; then
   codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 else
   echo "==> SIGN_IDENTITY not set — skipping codesign"
+  echo "==> On other Macs, run: xattr -cr /Applications/AppStudio.app"
+  echo "==> For clean installs: SIGN_IDENTITY=\"Developer ID Application: …\" ./tool/distribute_macos.sh"
 fi
 
 mkdir -p "$DIST_DIR"

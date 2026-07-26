@@ -57,19 +57,17 @@ App Studio embeds a **web-focused Flutter SDK**, a **full Serverpod CLI bundle**
 
 ```
 toolchain/
-  active.json                          # pins versions (flutter, serverpod_cli, opencode)
+  active.json                          # pins versions (flutter, serverpod_cli, opencode, git)
   flutter/<version>/                   # stripped macOS + web engine only
   serverpod_cli/<version>/{bin,lib}/   # full CLI bundle — lib/ has sqlite dylibs (required)
   opencode/<version>/opencode          # darwin-arm64 CLI binary
-  bin/{flutter,dart,serverpod,opencode}
-```
-  flutter/<version>/                   # stripped macOS + web engine only
-  serverpod_cli/<version>/{bin,lib}/   # full CLI bundle — lib/ has sqlite dylibs (required)
-  bin/{flutter,dart,serverpod}         # wrappers read active.json
+  git/<version>/{bin,libexec}/         # portable Git (dugite-native) — avoids Xcode CLT stub
+  cctools/{bin,lib}/                   # real otool + install_name_tool (no CLT stubs)
+  bin/{flutter,dart,serverpod,opencode,git}
 ```
 
-- **`./tool/bundle_toolchain.sh`** — downloads Flutter, runs `flutter precache --web`, strips iOS/Android/other engine artifacts. Does **not** download Serverpod; copy the full CLI bundle into `toolchain/serverpod_cli/<version>/` first. Flags: `--force`, `--flutter=VERSION`, `--serverpod=VERSION`.
-- **`Toolchain.resolve()`** (`lib/toolchain/toolchain.dart`) — uses bundled toolchain if `active.json` exists (repo `toolchain/` in dev, `AppStudio.app/Contents/Resources/toolchain` in release), otherwise falls back to host `PATH`.
+- **`./tool/bundle_toolchain.sh`** — downloads Flutter, runs `flutter precache --web`, strips iOS/Android/other engine artifacts; downloads OpenCode + portable Git; copies real `otool` / `install_name_tool` from Xcode into `cctools/`. Does **not** download Serverpod; copy the full CLI bundle into `toolchain/serverpod_cli/<version>/` first. Flags: `--force`, `--flutter=VERSION`, `--serverpod=VERSION`, `--opencode=VERSION`, `--git=VERSION`.
+- **`Toolchain.resolve()`** (`lib/toolchain/toolchain.dart`) — uses bundled toolchain if `active.json` exists (repo `toolchain/` in dev, `AppStudio.app/Contents/Resources/toolchain` in release), otherwise falls back to host `PATH`. Prepends portable `git` + `cctools` to `PATH` and sets `FLUTTER_PREBUILT_ENGINE_VERSION` so target Macs don't need Xcode / CLT for web preview.
 - **Debug builds** skip embedding (`tool/embed_toolchain.sh`) and use host `flutter`/`dart`/`serverpod`. **Release** embeds the full `toolchain/` tree into the `.app`.
 
 Opened Serverpod projects must launch Flutter in **`web-server`** mode on port **9998** (Serverpod `flutter_apps` config).

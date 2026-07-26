@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shimmer/shimmer.dart';
 
 import '../../agent/agent_controller.dart';
 import '../../agent/agent_transcript.dart';
@@ -160,33 +161,71 @@ class _AgentPaneState extends State<AgentPane> {
     return ListView.builder(
       controller: _scrollController,
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
-      itemCount: c.messages.length + c.pendingPermissions.length,
+      itemCount: c.messages.length +
+          c.pendingPermissions.length +
+          (_showTrailingThinking(c) ? 1 : 0),
       itemBuilder: (context, index) {
         if (index < c.messages.length) {
+          final message = c.messages[index];
+          if (_isVisuallyEmptyAssistant(message)) {
+            return c.isBusy
+                ? _ThinkingStatus(label: _thinkingLabel(c))
+                : const SizedBox.shrink();
+          }
           return _MessageBubble(
-            message: c.messages[index],
+            message: message,
             onPermission: (part, allow) {
               c.respondPermission(part: part, allow: allow);
             },
           );
         }
-        final perm = c.pendingPermissions[index - c.messages.length];
-        // Avoid duplicating permissions already shown inline.
-        if (c.messages.any(
-          (m) => m.parts.any((p) => p is AgentPermissionPart && p.id == perm.id),
-        )) {
-          return const SizedBox.shrink();
+        final permIndex = index - c.messages.length;
+        if (permIndex < c.pendingPermissions.length) {
+          final perm = c.pendingPermissions[permIndex];
+          // Avoid duplicating permissions already shown inline.
+          if (c.messages.any(
+            (m) => m.parts.any(
+              (p) => p is AgentPermissionPart && p.id == perm.id,
+            ),
+          )) {
+            return const SizedBox.shrink();
+          }
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _PermissionCard(
+              part: perm,
+              onAllow: () => c.respondPermission(part: perm, allow: true),
+              onDeny: () => c.respondPermission(part: perm, allow: false),
+            ),
+          );
         }
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: _PermissionCard(
-            part: perm,
-            onAllow: () => c.respondPermission(part: perm, allow: true),
-            onDeny: () => c.respondPermission(part: perm, allow: false),
-          ),
-        );
+        return _ThinkingStatus(label: _thinkingLabel(c));
       },
     );
+  }
+
+  bool _showTrailingThinking(AgentController c) {
+    if (!c.isBusy || c.messages.isEmpty) return false;
+    final last = c.messages.last;
+    return last.role == AgentMessageRole.user;
+  }
+
+  bool _isVisuallyEmptyAssistant(AgentChatMessage message) {
+    if (message.role != AgentMessageRole.assistant) return false;
+    for (final part in message.parts) {
+      if (part is AgentTextPart && part.text.trim().isNotEmpty) return false;
+      if (part is AgentToolPart) return false;
+      if (part is AgentPermissionPart && !part.resolved) return false;
+      if (part is AgentErrorPart) return false;
+    }
+    return true;
+  }
+
+  String _thinkingLabel(AgentController c) {
+    return switch (c.mode) {
+      AgentChatMode.plan => 'Planning next moves',
+      AgentChatMode.agent => 'Thinking',
+    };
   }
 
   String _agentCaption(AgentController c) {
@@ -310,6 +349,43 @@ class _EmptyHint extends StatelessWidget {
   }
 }
 
+class _ThinkingStatus extends StatelessWidget {
+  const _ThinkingStatus({required this.label});
+
+  final String label;
+
+  /// Matches assistant bubble text inset: 1px border + 12px padding.
+  static const _bubbleTextInset = 1.0 + 12.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final scheme = theme.colorScheme;
+    final style = theme.textTheme.small.copyWith(
+      fontSize: 13,
+      color: scheme.mutedForeground,
+      height: 1.4,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(
+        left: _bubbleTextInset,
+        bottom: 12,
+        top: 2,
+      ),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Shimmer.fromColors(
+          baseColor: scheme.mutedForeground.withValues(alpha: 0.45),
+          highlightColor: scheme.foreground.withValues(alpha: 0.85),
+          period: const Duration(milliseconds: 1400),
+          child: Text(label, style: style),
+        ),
+      ),
+    );
+  }
+}
+
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.message,
@@ -324,6 +400,18 @@ class _MessageBubble extends StatelessWidget {
     final theme = ShadTheme.of(context);
     final scheme = theme.colorScheme;
     final isUser = message.role == AgentMessageRole.user;
+    final bodyStyle = theme.textTheme.small.copyWith(
+      fontSize: 13,
+      color: scheme.foreground,
+      height: 1.4,
+    );
+    final codeStyle = theme.textTheme.small.copyWith(
+      fontFamily: kMacMonoFont,
+      fontSize: 12,
+      height: 1.55,
+      backgroundColor: scheme.muted,
+      color: scheme.foreground,
+    );
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -347,31 +435,36 @@ class _MessageBubble extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   for (final part in message.parts) ...[
-                    if (part is AgentTextPart)
+                    if (part is AgentTextPart && part.text.trim().isNotEmpty)
                       isUser
-                          ? Text(part.text, style: theme.textTheme.p)
+                          ? Text(part.text, style: bodyStyle)
                           : MarkdownBody(
-                              data: part.text.isEmpty ? '…' : part.text,
+                              data: part.text,
                               selectable: true,
                               styleSheet: MarkdownStyleSheet(
-                                p: theme.textTheme.p.copyWith(
-                                  color: scheme.foreground,
-                                  height: 1.45,
-                                ),
-                                code: theme.textTheme.small.copyWith(
-                                  fontFamily: kMacMonoFont,
-                                  backgroundColor: scheme.muted,
-                                  color: scheme.foreground,
+                                p: bodyStyle,
+                                code: codeStyle,
+                                codeblockPadding: const EdgeInsets.fromLTRB(
+                                  12,
+                                  10,
+                                  12,
+                                  10,
                                 ),
                                 codeblockDecoration: BoxDecoration(
                                   color: scheme.muted,
                                   borderRadius: BorderRadius.circular(6),
                                 ),
-                                a: theme.textTheme.p.copyWith(color: kBrandBlue),
-                                listBullet: theme.textTheme.p,
-                                h1: theme.textTheme.h3,
-                                h2: theme.textTheme.h4,
-                                h3: theme.textTheme.p.copyWith(
+                                a: bodyStyle.copyWith(color: kBrandBlue),
+                                listBullet: bodyStyle,
+                                h1: bodyStyle.copyWith(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                h2: bodyStyle.copyWith(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                h3: bodyStyle.copyWith(
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
@@ -396,6 +489,7 @@ class _MessageBubble extends StatelessWidget {
                         child: Text(
                           part.message,
                           style: theme.textTheme.small.copyWith(
+                            fontSize: 13,
                             color: AppColors.errorRed,
                           ),
                         ),
@@ -439,6 +533,8 @@ class _ToolRowState extends State<_ToolRow> {
       AgentToolStatus.completed => AppColors.successDot,
       AgentToolStatus.error => AppColors.errorRed,
     };
+    final spinning = part.status == AgentToolStatus.pending ||
+        part.status == AgentToolStatus.running;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -458,7 +554,14 @@ class _ToolRowState extends State<_ToolRow> {
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 child: Row(
                   children: [
-                    Icon(statusIcon, size: 14, color: statusColor),
+                    if (spinning)
+                      _SpinningIcon(
+                        icon: statusIcon,
+                        size: 14,
+                        color: statusColor,
+                      )
+                    else
+                      Icon(statusIcon, size: 14, color: statusColor),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -466,8 +569,10 @@ class _ToolRowState extends State<_ToolRow> {
                             ? part.title!
                             : part.tool,
                         style: theme.textTheme.small.copyWith(
+                          fontSize: 12,
                           fontWeight: FontWeight.w500,
                           fontFamily: kMacMonoFont,
+                          height: 1.35,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -500,6 +605,7 @@ class _ToolRowState extends State<_ToolRow> {
                 style: theme.textTheme.small.copyWith(
                   fontFamily: kMacMonoFont,
                   fontSize: 11,
+                  height: 1.55,
                   color: scheme.mutedForeground,
                 ),
               ),
@@ -507,6 +613,49 @@ class _ToolRowState extends State<_ToolRow> {
           ],
         ],
       ),
+    );
+  }
+}
+
+class _SpinningIcon extends StatefulWidget {
+  const _SpinningIcon({
+    required this.icon,
+    required this.size,
+    required this.color,
+  });
+
+  final IconData icon;
+  final double size;
+  final Color color;
+
+  @override
+  State<_SpinningIcon> createState() => _SpinningIconState();
+}
+
+class _SpinningIconState extends State<_SpinningIcon>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: _controller,
+      child: Icon(widget.icon, size: widget.size, color: widget.color),
     );
   }
 }

@@ -41,16 +41,19 @@ toolchain/serverpod_cli/4.0.0-beta.0/
   lib/                 # sqlite dylibs — required
 ```
 
-2. Download Flutter (web-stripped) and OpenCode (darwin-arm64):
+2. Download Flutter (web-stripped), OpenCode (darwin-arm64), and portable Git:
 
 ```bash
 ./tool/bundle_toolchain.sh
-# optional: --force --flutter=3.44.2 --serverpod=4.0.0-beta.0 --opencode=1.18.4
+# optional: --force --flutter=3.44.2 --serverpod=4.0.0-beta.0 --opencode=1.18.4 --git=2.53.0-3
 ```
 
-Release builds embed the entire `toolchain/` tree (including Serverpod `lib/` and
-OpenCode) into the `.app`. Debug `flutter run` skips embedding and uses host tools
-when the local `toolchain/` pin is incomplete.
+Release builds embed the entire `toolchain/` tree (including Serverpod `lib/`,
+OpenCode, and Git) into the `.app`. Debug `flutter run` skips embedding and uses
+host tools when the local `toolchain/` pin is incomplete.
+
+Portable Git avoids the macOS `/usr/bin/git` stub that otherwise prompts for
+Xcode Command Line Tools on machines without developer tools installed.
 
 ## Distribute
 
@@ -64,3 +67,20 @@ Creates a signed DMG under `dist/macos/`. Notarization is optional:
 ```bash
 SIGN_IDENTITY="…" NOTARY_PROFILE="…" NOTARIZE=1 ./tool/distribute_macos.sh
 ```
+
+### Unsigned builds on another Mac
+
+If you skip `SIGN_IDENTITY`, macOS Gatekeeper may show **“AppStudio is damaged
+and can't be opened”** after copying the DMG. The app is not corrupted — it is
+unsigned and carries a quarantine flag from download/copy.
+
+On the target Mac, after installing to `/Applications`:
+
+```bash
+xattr -cr /Applications/AppStudio.app
+```
+
+Then open normally (or **Right-click → Open** the first time).
+
+For frictionless installs, sign with a **Developer ID Application** certificate
+and notarize (`NOTARIZE=1`).

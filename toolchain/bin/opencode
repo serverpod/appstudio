@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ACTIVE="$ROOT/active.json"
-OC_VER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("opencode",""))' "$ACTIVE")"
+OC_VER="$(tr -d '[:space:]' < "$ROOT/pins/opencode")"
 if [[ -z "$OC_VER" ]]; then
-  echo "opencode version missing from active.json" >&2
+  echo "opencode pin missing at $ROOT/pins/opencode" >&2
   exit 1
 fi
 exec "$ROOT/opencode/$OC_VER/opencode" "$@"

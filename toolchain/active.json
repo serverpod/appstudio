@@ -1,5 +1,6 @@
 {
   "flutter": "3.44.2",
   "serverpod_cli": "4.0.0-beta.0",
-  "opencode": "1.18.4"
+  "opencode": "1.18.4",
+  "git": "2.53.0-3"
 }

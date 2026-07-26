@@ -3,6 +3,9 @@ enum PreviewPhase {
   /// Project open but process not running.
   idle,
 
+  /// Running `dart` / `flutter pub get` for project packages.
+  fetchingDependencies,
+
   /// `serverpod start` is launching.
   startingServerpod,
 
@@ -29,6 +32,7 @@ extension PreviewPhaseX on PreviewPhase {
   /// Short, lightly entertaining copy for the phone overlay.
   String get overlayMessage => switch (this) {
         PreviewPhase.idle || PreviewPhase.stopping => 'Ready when you are',
+        PreviewPhase.fetchingDependencies => 'Fetching packages',
         PreviewPhase.startingServerpod => 'Booting Serverpod',
         PreviewPhase.waitingForServer => 'Spinning up the server',
         PreviewPhase.loadingApp => 'Loading the app',

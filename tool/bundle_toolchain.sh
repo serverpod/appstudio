@@ -4,6 +4,10 @@
 #   toolchain/serverpod_cli/<version>/{bin,lib}
 # Downloads OpenCode CLI (darwin-arm64 only) into:
 #   toolchain/opencode/<version>/opencode
+# Downloads portable Git (dugite-native) into:
+#   toolchain/git/<version>/{bin,libexec,...}
+# Copies real otool + install_name_tool from the build Mac's Xcode into:
+#   toolchain/cctools/{bin,lib}
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -11,6 +15,8 @@ OUT_DIR="${OUT_DIR:-$ROOT_DIR/toolchain}"
 FLUTTER_VERSION="${FLUTTER_VERSION:-3.44.2}"
 SERVERPOD_CLI_VERSION="${SERVERPOD_CLI_VERSION:-4.0.0-beta.0}"
 OPENCODE_VERSION="${OPENCODE_VERSION:-1.18.4}"
+# dugite-native release tag without leading "v" (GitHub Desktop portable Git).
+GIT_VERSION="${GIT_VERSION:-2.53.0-3}"
 FORCE="${FORCE:-0}"
 
 for arg in "$@"; do
@@ -19,9 +25,10 @@ for arg in "$@"; do
     --flutter=*) FLUTTER_VERSION="${arg#*=}" ;;
     --serverpod=*) SERVERPOD_CLI_VERSION="${arg#*=}" ;;
     --opencode=*) OPENCODE_VERSION="${arg#*=}" ;;
+    --git=*) GIT_VERSION="${arg#*=}" ;;
     *)
       echo "Unknown argument: $arg" >&2
-      echo "Usage: $0 [--force] [--flutter=VERSION] [--serverpod=VERSION] [--opencode=VERSION]" >&2
+      echo "Usage: $0 [--force] [--flutter=VERSION] [--serverpod=VERSION] [--opencode=VERSION] [--git=VERSION]" >&2
       exit 1
       ;;
   esac
@@ -29,10 +36,14 @@ done
 
 HOST_ARCH="$(uname -m)"
 case "$HOST_ARCH" in
-  arm64) ARCHIVE_NAME="flutter_macos_arm64_${FLUTTER_VERSION}-stable.zip" ;;
+  arm64)
+    ARCHIVE_NAME="flutter_macos_arm64_${FLUTTER_VERSION}-stable.zip"
+    DUGITE_ARCH="arm64"
+    ;;
   x86_64)
     echo "OpenCode bundling is arm64-only. Run on Apple Silicon to download opencode." >&2
     ARCHIVE_NAME="flutter_macos_${FLUTTER_VERSION}-stable.zip"
+    DUGITE_ARCH="x64"
     ;;
   *)
     echo "Unsupported architecture: $HOST_ARCH" >&2
@@ -43,14 +54,20 @@ esac
 FLUTTER_DIR="$OUT_DIR/flutter/$FLUTTER_VERSION"
 SERVERPOD_DIR="$OUT_DIR/serverpod_cli/$SERVERPOD_CLI_VERSION"
 OPENCODE_DIR="$OUT_DIR/opencode/$OPENCODE_VERSION"
+GIT_DIR="$OUT_DIR/git/$GIT_VERSION"
 BIN_DIR="$OUT_DIR/bin"
 DOWNLOAD_URL="https://storage.googleapis.com/flutter_infra_release/releases/stable/macos/${ARCHIVE_NAME}"
 OPENCODE_URL="https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-darwin-arm64.zip"
+DUGITE_TAG="v${GIT_VERSION}"
+
+CCTOOLS_DIR="$OUT_DIR/cctools"
 
 echo "==> Bundling toolchain into $OUT_DIR"
 echo "    Flutter $FLUTTER_VERSION ($HOST_ARCH) — strip other platforms only"
 echo "    serverpod_cli $SERVERPOD_CLI_VERSION — full prebuilt bundle"
 echo "    opencode $OPENCODE_VERSION — darwin-arm64 only"
+echo "    git $GIT_VERSION — dugite-native macOS-${DUGITE_ARCH}"
+echo "    cctools — otool + install_name_tool from Xcode (no CLT stubs)"
 
 mkdir -p "$OUT_DIR"
 
@@ -138,6 +155,48 @@ strip_flutter_for_web() {
 
 strip_flutter_for_web "$FLUTTER_DIR"
 
+echo "==> Ensuring flutter_tools snapshot stays valid on other Macs"
+bash "$ROOT_DIR/tool/ensure_flutter_tools_cache.sh" "$FLUTTER_DIR"
+
+# Portable Git (avoids Apple's /usr/bin/git CLT stub on target Macs)
+if [[ -x "$GIT_DIR/bin/git" && "$FORCE" != "1" ]]; then
+  echo "==> Git $GIT_VERSION already present (pass --force to redownload)"
+else
+  TMP_DIR="$(mktemp -d)"
+  cleanup_git() { rm -rf "$TMP_DIR"; }
+  trap cleanup_git EXIT
+  echo "==> Resolving dugite-native asset for $DUGITE_TAG (macOS-${DUGITE_ARCH})"
+  DUGITE_URL="$(
+    python3 - "$DUGITE_TAG" "$DUGITE_ARCH" <<'PY'
+import json, sys, urllib.request
+tag, arch = sys.argv[1], sys.argv[2]
+url = f"https://api.github.com/repos/desktop/dugite-native/releases/tags/{tag}"
+with urllib.request.urlopen(url) as resp:
+    data = json.load(resp)
+needle = f"-macOS-{arch}.tar.gz"
+for asset in data.get("assets", []):
+    name = asset.get("name", "")
+    if name.endswith(needle) and not name.endswith(".sha256"):
+        print(asset["browser_download_url"])
+        raise SystemExit(0)
+raise SystemExit(f"No dugite-native asset matching *{needle} for {tag}")
+PY
+  )"
+  echo "==> Downloading $DUGITE_URL"
+  curl -fL --progress-bar -o "$TMP_DIR/git.tar.gz" "$DUGITE_URL"
+  echo "==> Extracting portable Git"
+  rm -rf "$GIT_DIR"
+  mkdir -p "$GIT_DIR"
+  tar -xzf "$TMP_DIR/git.tar.gz" -C "$GIT_DIR"
+  if [[ ! -x "$GIT_DIR/bin/git" ]]; then
+    echo "Could not find bin/git in dugite-native archive" >&2
+    exit 1
+  fi
+  chmod +x "$GIT_DIR/bin/git"
+  cleanup_git
+  trap - EXIT
+fi
+
 # OpenCode: darwin-arm64 only
 if [[ "$HOST_ARCH" != "arm64" ]]; then
   echo "==> Skipping OpenCode download (arm64 hosts only)"
@@ -164,71 +223,156 @@ else
   trap - EXIT
 fi
 
-echo "==> Writing active.json and bin wrappers"
-mkdir -p "$BIN_DIR"
+# Real otool + install_name_tool from Xcode (not /usr/bin CLT stubs).
+# Serverpod native-assets bundling runs `otool -D` and `install_name_tool`.
+if [[ -x "$CCTOOLS_DIR/bin/otool" && -x "$CCTOOLS_DIR/bin/install_name_tool" && "$FORCE" != "1" ]]; then
+  echo "==> cctools already present (pass --force to recopy from Xcode)"
+else
+  echo "==> Copying otool + install_name_tool from Xcode"
+  OTOOL_CLASSIC="$(xcrun --find otool-classic 2>/dev/null || true)"
+  if [[ -z "$OTOOL_CLASSIC" || ! -x "$OTOOL_CLASSIC" ]]; then
+    echo "error: could not find otool-classic via xcrun — install Xcode on the build Mac" >&2
+    exit 1
+  fi
+  XCODE_USR="$(cd "$(dirname "$OTOOL_CLASSIC")/.." && pwd)"
+  if [[ ! -x "$XCODE_USR/bin/install_name_tool" ]]; then
+    echo "error: install_name_tool missing at $XCODE_USR/bin/install_name_tool" >&2
+    exit 1
+  fi
+  if [[ ! -f "$XCODE_USR/lib/libcodedirectory.dylib" ]]; then
+    echo "error: libcodedirectory.dylib missing at $XCODE_USR/lib/" >&2
+    exit 1
+  fi
+  rm -rf "$CCTOOLS_DIR"
+  mkdir -p "$CCTOOLS_DIR/bin" "$CCTOOLS_DIR/lib"
+  # Ship as `otool` so Process.run('otool', ...) finds the real binary.
+  cp "$OTOOL_CLASSIC" "$CCTOOLS_DIR/bin/otool"
+  cp "$XCODE_USR/bin/install_name_tool" "$CCTOOLS_DIR/bin/install_name_tool"
+  cp "$XCODE_USR/lib/libcodedirectory.dylib" "$CCTOOLS_DIR/lib/"
+  chmod +x "$CCTOOLS_DIR/bin/otool" "$CCTOOLS_DIR/bin/install_name_tool"
+fi
+
+echo "==> Writing active.json, pins, and bin wrappers"
+mkdir -p "$BIN_DIR" "$OUT_DIR/pins"
 cat > "$OUT_DIR/active.json" <<EOF
 {
   "flutter": "$FLUTTER_VERSION",
   "serverpod_cli": "$SERVERPOD_CLI_VERSION",
-  "opencode": "$OPENCODE_VERSION"
+  "opencode": "$OPENCODE_VERSION",
+  "git": "$GIT_VERSION"
 }
 EOF
 
-cat > "$BIN_DIR/flutter" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
+# Plain pin files — wrappers must NOT use python3/jq. On Macs without Xcode
+# CLT, /usr/bin/python3 is a stub that triggers "No developer tools found".
+printf '%s\n' "$FLUTTER_VERSION" > "$OUT_DIR/pins/flutter"
+printf '%s\n' "$SERVERPOD_CLI_VERSION" > "$OUT_DIR/pins/serverpod_cli"
+printf '%s\n' "$OPENCODE_VERSION" > "$OUT_DIR/pins/opencode"
+printf '%s\n' "$GIT_VERSION" > "$OUT_DIR/pins/git"
+
+# Shared env preamble for wrappers (bash only — no python).
+# Puts cctools + portable git FIRST on PATH; pins Flutter engine version.
+read -r -d '' WRAPPER_ENV <<'EOF' || true
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ACTIVE="$ROOT/active.json"
-FLUTTER_VER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["flutter"])' "$ACTIVE")"
+FLUTTER_VER="$(tr -d '[:space:]' < "$ROOT/pins/flutter")"
+GIT_VER="$(tr -d '[:space:]' < "$ROOT/pins/git" 2>/dev/null || true)"
 export FLUTTER_ROOT="$ROOT/flutter/$FLUTTER_VER"
+ENGINE_VERSION_FILE="$FLUTTER_ROOT/bin/internal/engine.version"
+if [[ -f "$ENGINE_VERSION_FILE" ]]; then
+  export FLUTTER_PREBUILT_ENGINE_VERSION="$(tr -d '[:space:]' < "$ENGINE_VERSION_FILE")"
+fi
+if [[ -d "$FLUTTER_ROOT/bin/cache/dart-sdk" ]]; then
+  export DART_SDK="$FLUTTER_ROOT/bin/cache/dart-sdk"
+fi
 export PATH="$FLUTTER_ROOT/bin:$PATH"
-exec "$FLUTTER_ROOT/bin/flutter" "$@"
+GIT_HOME=""
+if [[ -n "$GIT_VER" && -x "$ROOT/git/$GIT_VER/bin/git" ]]; then
+  GIT_HOME="$ROOT/git/$GIT_VER"
+  if [[ -d "$GIT_HOME/libexec/git-core" ]]; then
+    export GIT_EXEC_PATH="$GIT_HOME/libexec/git-core"
+  fi
+  export PATH="$GIT_HOME/bin:$PATH"
+fi
+# Real otool / install_name_tool ahead of /usr/bin CLT stubs.
+if [[ -x "$ROOT/cctools/bin/otool" ]]; then
+  export PATH="$ROOT/cctools/bin:$PATH"
+fi
 EOF
 
-cat > "$BIN_DIR/dart" <<'EOF'
+cat > "$BIN_DIR/flutter" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ACTIVE="$ROOT/active.json"
-FLUTTER_VER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["flutter"])' "$ACTIVE")"
-export FLUTTER_ROOT="$ROOT/flutter/$FLUTTER_VER"
-export PATH="$FLUTTER_ROOT/bin:$PATH"
-exec "$FLUTTER_ROOT/bin/dart" "$@"
+$WRAPPER_ENV
+exec "\$FLUTTER_ROOT/bin/flutter" "\$@"
 EOF
 
-cat > "$BIN_DIR/serverpod" <<'EOF'
+cat > "$BIN_DIR/dart" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ACTIVE="$ROOT/active.json"
-FLUTTER_VER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["flutter"])' "$ACTIVE")"
-CLI_VER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["serverpod_cli"])' "$ACTIVE")"
-export FLUTTER_ROOT="$ROOT/flutter/$FLUTTER_VER"
-CLI_HOME="$ROOT/serverpod_cli/$CLI_VER"
-SERVERPOD="$CLI_HOME/bin/serverpod"
+$WRAPPER_ENV
+exec "\$FLUTTER_ROOT/bin/dart" "\$@"
+EOF
+
+cat > "$BIN_DIR/serverpod" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+$WRAPPER_ENV
+CLI_VER="\$(tr -d '[:space:]' < "\$ROOT/pins/serverpod_cli")"
+CLI_HOME="\$ROOT/serverpod_cli/\$CLI_VER"
+SERVERPOD="\$CLI_HOME/bin/serverpod"
 # Ensure sqlite dylibs from the full CLI bundle are loadable.
-export DYLD_LIBRARY_PATH="$CLI_HOME/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
-export PATH="$FLUTTER_ROOT/bin:$CLI_HOME/bin:$PATH"
-exec "$SERVERPOD" "$@"
+export DYLD_LIBRARY_PATH="\$CLI_HOME/lib\${DYLD_LIBRARY_PATH:+:\$DYLD_LIBRARY_PATH}"
+export PATH="\$CLI_HOME/bin:\$PATH"
+# Keep portable tools ahead of /usr/bin after CLI prepend.
+if [[ -n "\${GIT_HOME:-}" ]]; then
+  export PATH="\$GIT_HOME/bin:\$PATH"
+fi
+if [[ -x "\$ROOT/cctools/bin/otool" ]]; then
+  export PATH="\$ROOT/cctools/bin:\$PATH"
+fi
+exec "\$SERVERPOD" "\$@"
 EOF
 
 cat > "$BIN_DIR/opencode" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ACTIVE="$ROOT/active.json"
-OC_VER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("opencode",""))' "$ACTIVE")"
+OC_VER="$(tr -d '[:space:]' < "$ROOT/pins/opencode")"
 if [[ -z "$OC_VER" ]]; then
-  echo "opencode version missing from active.json" >&2
+  echo "opencode pin missing at $ROOT/pins/opencode" >&2
   exit 1
 fi
 exec "$ROOT/opencode/$OC_VER/opencode" "$@"
 EOF
 
-chmod +x "$BIN_DIR/flutter" "$BIN_DIR/dart" "$BIN_DIR/serverpod" "$BIN_DIR/opencode"
+# Thin wrapper around the versioned dugite binary (not a copy of git).
+cat > "$BIN_DIR/git" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+GIT_VER="$(tr -d '[:space:]' < "$ROOT/pins/git")"
+GIT_HOME="$ROOT/git/$GIT_VER"
+if [[ ! -x "$GIT_HOME/bin/git" ]]; then
+  echo "bundled git missing at $GIT_HOME/bin/git" >&2
+  exit 1
+fi
+if [[ -d "$GIT_HOME/libexec/git-core" ]]; then
+  export GIT_EXEC_PATH="$GIT_HOME/libexec/git-core"
+fi
+exec "$GIT_HOME/bin/git" "$@"
+EOF
+
+chmod +x "$BIN_DIR/flutter" "$BIN_DIR/dart" "$BIN_DIR/serverpod" "$BIN_DIR/opencode" "$BIN_DIR/git"
 
 echo "==> Verifying"
 "$BIN_DIR/serverpod" --version | head -3
+if [[ -x "$BIN_DIR/git" ]]; then
+  "$BIN_DIR/git" --version | head -1
+fi
+if [[ -x "$CCTOOLS_DIR/bin/otool" ]]; then
+  PATH="$CCTOOLS_DIR/bin:/usr/bin:/bin" "$CCTOOLS_DIR/bin/otool" -D \
+    "$SERVERPOD_DIR/lib/libsqlite3_connection_pool.dylib" | head -2
+fi
 if [[ -x "$BIN_DIR/flutter" && -x "$FLUTTER_DIR/bin/flutter" ]]; then
   "$BIN_DIR/flutter" --version | head -3
 fi
@@ -237,6 +381,7 @@ if [[ -x "$BIN_DIR/opencode" ]]; then
 fi
 
 echo "==> Done"
-echo "    active: flutter=$FLUTTER_VERSION serverpod_cli=$SERVERPOD_CLI_VERSION opencode=$OPENCODE_VERSION"
+echo "    active: flutter=$FLUTTER_VERSION serverpod_cli=$SERVERPOD_CLI_VERSION opencode=$OPENCODE_VERSION git=$GIT_VERSION"
 echo "    serverpod bundle: $SERVERPOD_DIR/{bin,lib}"
-du -sh "$OUT_DIR" "$SERVERPOD_DIR" "$FLUTTER_DIR" "$OPENCODE_DIR" 2>/dev/null || true
+echo "    cctools: $CCTOOLS_DIR/{bin,lib}"
+du -sh "$OUT_DIR" "$SERVERPOD_DIR" "$FLUTTER_DIR" "$OPENCODE_DIR" "$GIT_DIR" "$CCTOOLS_DIR" 2>/dev/null || true

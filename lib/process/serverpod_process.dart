@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 
 import '../preview/preview_phase.dart';
 import '../process/dev_session_cleanup.dart';
@@ -19,6 +21,8 @@ final _vmServiceConnecting = RegExp(
 );
 
 final _ansiEscape = RegExp(r'\x1B\[[0-9;]*[A-Za-z]');
+
+final _flutterSdkDep = RegExp(r'sdk:\s*flutter');
 
 class ServerpodProcessController extends ChangeNotifier {
   ServerpodProcessController({
@@ -102,7 +106,7 @@ class ServerpodProcessController extends ChangeNotifier {
     _previewReady = false;
     _scheduledVmServiceReload = false;
     _outputBuffer.clear();
-    _setPhase(ProcessState.starting, PreviewPhase.startingServerpod);
+    _setPhase(ProcessState.starting, PreviewPhase.fetchingDependencies);
 
     _terminalListener ??= () {
       if (!terminal.isRunning &&
@@ -115,12 +119,23 @@ class ServerpodProcessController extends ChangeNotifier {
     await _outputSub?.cancel();
     _outputSub = terminal.output.listen(_onTerminalOutput);
 
+    final startEpoch = _epoch;
     try {
+      // Clear screen once, then show pub get + serverpod in the same log.
+      terminal.writeLocal('\x1bc');
+      await _ensureDependencies(projectPath);
+      if (startEpoch != _epoch || _state != ProcessState.starting) {
+        return;
+      }
+
+      _setPhase(ProcessState.starting, PreviewPhase.startingServerpod);
+      terminal.writeLocal('\r\n==> serverpod start --no-tui\r\n');
       await terminal.spawn(
         executable: toolchain.serverpodExecutable,
         arguments: const ['start', '--no-tui'],
         workingDirectory: projectPath,
         environment: toolchain.processEnvironment(),
+        clearScreen: false,
       );
       _setPhase(ProcessState.running, PreviewPhase.waitingForServer);
       _startPolling();
@@ -128,6 +143,215 @@ class ServerpodProcessController extends ChangeNotifier {
       _error = e.toString();
       _previewReady = false;
       _setPhase(ProcessState.idle, PreviewPhase.failed);
+    }
+  }
+
+  /// Resolve packages with the bundled Dart/Flutter so target Macs without a
+  /// host SDK (and with a stale `.dart_tool` from another machine) still work.
+  Future<void> _ensureDependencies(String projectPath) async {
+    final env = toolchain.processEnvironment();
+    final pubCache = env['PUB_CACHE'];
+    if (pubCache != null && pubCache.isNotEmpty) {
+      await Directory(pubCache).create(recursive: true);
+      terminal.writeLocal('PUB_CACHE=$pubCache\r\n');
+    }
+
+    final workspaceRoot = await _findWorkspaceRoot(projectPath);
+    final packages = workspaceRoot != null
+        ? <String>[workspaceRoot]
+        : await _discoverPackages(projectPath);
+    if (packages.isEmpty) {
+      terminal.writeLocal('No pubspec.yaml packages found under project.\r\n');
+      return;
+    }
+
+    if (workspaceRoot != null) {
+      terminal.writeLocal(
+        'Dart workspace: ${p.basename(workspaceRoot)}\r\n',
+      );
+    }
+
+    for (final pkg in packages) {
+      if (_state != ProcessState.starting) return;
+      final useFlutter = workspaceRoot != null
+          ? await _workspaceHasFlutterPackage(workspaceRoot)
+          : await _isFlutterPackage(pkg);
+      final exe =
+          useFlutter ? toolchain.flutterExecutable : toolchain.dartExecutable;
+      final label = p.basename(pkg);
+      terminal.writeLocal(
+        '\r\n==> ${useFlutter ? 'flutter' : 'dart'} pub get ($label)\r\n',
+      );
+      final process = await Process.start(
+        exe,
+        const ['pub', 'get'],
+        workingDirectory: pkg,
+        environment: env,
+      );
+      final out = process.stdout.transform(utf8.decoder).listen((chunk) {
+        terminal.writeLocal(chunk.replaceAll('\n', '\r\n'));
+      });
+      final err = process.stderr.transform(utf8.decoder).listen((chunk) {
+        terminal.writeLocal(chunk.replaceAll('\n', '\r\n'));
+      });
+      final code = await process.exitCode;
+      await out.cancel();
+      await err.cancel();
+      if (code != 0) {
+        throw Exception(
+          'pub get failed in $label (exit $code). '
+          'Check the Server logs tab — network may be required on first run.',
+        );
+      }
+    }
+
+    await _assertServerpodPackageResolved(
+      workspaceRoot ?? projectPath,
+    );
+
+    // serverpod start reuses `.dart_tool/serverpod/server.dill` when sources
+    // look unchanged — it does *not* invalidate on package_config changes.
+    // After a fresh pub get (new PUB_CACHE paths), force a recompile.
+    await _invalidateServerpodCompileCaches(
+      workspaceRoot ?? projectPath,
+    );
+  }
+
+  /// Walk up from [start] looking for a pubspec with a `workspace:` key.
+  Future<String?> _findWorkspaceRoot(String start) async {
+    var dir = p.normalize(start);
+    while (true) {
+      final pubspec = File(p.join(dir, 'pubspec.yaml'));
+      if (await pubspec.exists()) {
+        try {
+          final text = await pubspec.readAsString();
+          if (RegExp(r'^workspace\s*:', multiLine: true).hasMatch(text)) {
+            return dir;
+          }
+        } catch (_) {}
+      }
+      final parent = p.dirname(dir);
+      if (parent == dir) return null;
+      dir = parent;
+    }
+  }
+
+  Future<bool> _workspaceHasFlutterPackage(String workspaceRoot) async {
+    final packages = await _discoverPackages(workspaceRoot);
+    for (final pkg in packages) {
+      if (await _isFlutterPackage(pkg)) return true;
+    }
+    return false;
+  }
+
+  Future<List<String>> _discoverPackages(String root) async {
+    final found = <String>[];
+    Future<void> consider(String dir) async {
+      if (await File(p.join(dir, 'pubspec.yaml')).exists()) {
+        found.add(dir);
+      }
+    }
+
+    await consider(root);
+    final rootDir = Directory(root);
+    if (!await rootDir.exists()) return found;
+
+    await for (final entity in rootDir.list(followLinks: false)) {
+      if (entity is! Directory) continue;
+      final name = p.basename(entity.path);
+      if (name.startsWith('.')) continue;
+      await consider(entity.path);
+    }
+    return found;
+  }
+
+  Future<bool> _isFlutterPackage(String dir) async {
+    try {
+      final text = await File(p.join(dir, 'pubspec.yaml')).readAsString();
+      return _flutterSdkDep.hasMatch(text);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Ensure `package:serverpod` resolves to a directory that exists on disk.
+  Future<void> _assertServerpodPackageResolved(String resolutionRoot) async {
+    final configFile = File(
+      p.join(resolutionRoot, '.dart_tool', 'package_config.json'),
+    );
+    if (!await configFile.exists()) {
+      throw Exception(
+        'Missing .dart_tool/package_config.json under $resolutionRoot after '
+        'pub get. Try opening the workspace root folder.',
+      );
+    }
+
+    late final Map<String, dynamic> config;
+    try {
+      config = jsonDecode(await configFile.readAsString()) as Map<String, dynamic>;
+    } catch (e) {
+      throw Exception('Invalid package_config.json: $e');
+    }
+
+    final packages = config['packages'];
+    if (packages is! List) {
+      throw Exception('package_config.json has no packages list');
+    }
+
+    Map<String, dynamic>? serverpod;
+    for (final entry in packages) {
+      if (entry is Map<String, dynamic> && entry['name'] == 'serverpod') {
+        serverpod = entry;
+        break;
+      }
+    }
+    if (serverpod == null) {
+      throw Exception(
+        'package:serverpod is not in package_config.json. '
+        'Check that the server pubspec depends on serverpod and pub get '
+        'succeeded (network required on first run).',
+      );
+    }
+
+    final rootUri = serverpod['rootUri'] as String?;
+    if (rootUri == null || rootUri.isEmpty) {
+      throw Exception('package:serverpod has an empty rootUri');
+    }
+
+    final uri = Uri.parse(rootUri);
+    final rootPath = uri.scheme == 'file'
+        ? uri.toFilePath()
+        : p.normalize(p.join(resolutionRoot, '.dart_tool', rootUri));
+    if (!await Directory(rootPath).exists()) {
+      throw Exception(
+        'package:serverpod points to a missing directory:\n  $rootPath\n'
+        'Delete the project .dart_tool folders and try again.',
+      );
+    }
+
+    final serverpodLib = File(p.join(rootPath, 'lib', 'serverpod.dart'));
+    if (!await serverpodLib.exists()) {
+      throw Exception(
+        'package:serverpod is incomplete (missing lib/serverpod.dart) at:\n'
+        '  $rootPath',
+      );
+    }
+
+    terminal.writeLocal(
+      'Resolved package:serverpod → $rootPath\r\n',
+    );
+  }
+
+  Future<void> _invalidateServerpodCompileCaches(String root) async {
+    final packages = await _discoverPackages(root);
+    for (final pkg in packages) {
+      final cacheDir = Directory(p.join(pkg, '.dart_tool', 'serverpod'));
+      if (!await cacheDir.exists()) continue;
+      await cacheDir.delete(recursive: true);
+      terminal.writeLocal(
+        'Cleared ${p.basename(pkg)}/.dart_tool/serverpod '
+        '(force server recompile)\r\n',
+      );
     }
   }
 
