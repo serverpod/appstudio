@@ -76,12 +76,13 @@ Opened Serverpod projects must launch Flutter in **`web-server`** mode on port *
 
 ```bash
 ./tool/bundle_toolchain.sh
-SIGN_IDENTITY="Developer ID Application: …" ./tool/distribute_macos.sh
-# optional notarization:
-SIGN_IDENTITY="…" NOTARY_PROFILE="…" NOTARIZE=1 ./tool/distribute_macos.sh
+./tool/distribute_macos.sh              # Developer ID sign (Serverpod AB)
+NOTARIZE=1 ./tool/distribute_macos.sh   # + notarize via notarytool profile "appstudio"
 ```
 
-Produces a signed DMG under `dist/macos/`.
+Defaults: bundle id `dev.serverpod.appstudio`,  
+`SIGN_IDENTITY="Developer ID Application: Serverpod AB (WK2NRY4GS4)"`,  
+`NOTARY_PROFILE=appstudio`. Produces a DMG under `dist/macos/`.
 
 ## UI & design
 

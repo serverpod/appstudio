@@ -8,7 +8,7 @@
 PRODUCT_NAME = AppStudio
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.serverpod.appstudio
+PRODUCT_BUNDLE_IDENTIFIER = dev.serverpod.appstudio
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 Serverpod. All rights reserved.

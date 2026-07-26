@@ -57,30 +57,36 @@ Xcode Command Line Tools on machines without developer tools installed.
 
 ## Distribute
 
+Bundle ID: `dev.serverpod.appstudio` · Team: Serverpod AB (`WK2NRY4GS4`).
+
 ```bash
 ./tool/bundle_toolchain.sh
-SIGN_IDENTITY="Developer ID Application: …" ./tool/distribute_macos.sh
+# Signed DMG (Developer ID Application: Serverpod AB):
+./tool/distribute_macos.sh
+# Signed + notarized (requires notarytool profile "appstudio"):
+NOTARIZE=1 ./tool/distribute_macos.sh
 ```
 
-Creates a signed DMG under `dist/macos/`. Notarization is optional:
+Defaults (override via env):
+
+| Variable | Default |
+|---|---|
+| `SIGN_IDENTITY` | `Developer ID Application: Serverpod AB (WK2NRY4GS4)` |
+| `NOTARY_PROFILE` | `appstudio` |
+| `NOTARIZE` | `0` (set to `1` to submit) |
+
+One-time notary setup (App Store Connect API key):
 
 ```bash
-SIGN_IDENTITY="…" NOTARY_PROFILE="…" NOTARIZE=1 ./tool/distribute_macos.sh
+xcrun notarytool store-credentials "appstudio" \
+  --key ~/private_keys/AuthKey_XXXXXXXXXX.p8 \
+  --key-id "XXXXXXXXXX" \
+  --issuer "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 ```
 
 ### Unsigned builds on another Mac
 
-If you skip `SIGN_IDENTITY`, macOS Gatekeeper may show **“AppStudio is damaged
-and can't be opened”** after copying the DMG. The app is not corrupted — it is
-unsigned and carries a quarantine flag from download/copy.
-
-On the target Mac, after installing to `/Applications`:
-
-```bash
-xattr -cr /Applications/AppStudio.app
-```
-
-Then open normally (or **Right-click → Open** the first time).
-
-For frictionless installs, sign with a **Developer ID Application** certificate
-and notarize (`NOTARIZE=1`).
+Skip signing with `SIGN_IDENTITY="" ./tool/distribute_macos.sh`. Gatekeeper may
+then show **“AppStudio is damaged and can't be opened”** after copy — clear
+quarantine with `xattr -cr /Applications/AppStudio.app`, or distribute a
+notarized build instead.
