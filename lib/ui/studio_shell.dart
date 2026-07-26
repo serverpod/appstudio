@@ -91,7 +91,10 @@ class _StudioShellState extends State<StudioShell> {
                 leftPanelVisible: _leftPanelVisible,
                 onSplitChanged: (value) {
                   setState(() {
-                    _splitRatio = value.clamp(0.25, 0.70);
+                    _splitRatio = value.clamp(
+                      kWorkspaceMinSplitRatio,
+                      kWorkspaceMaxSplitRatio,
+                    );
                   });
                 },
                 terminal: widget.terminal,

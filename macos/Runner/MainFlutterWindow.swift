@@ -9,7 +9,20 @@ class MainFlutterWindow: NSWindow {
     let flutterViewController = FlutterViewController()
     let windowFrame = self.frame
     self.contentViewController = flutterViewController
-    self.setFrame(windowFrame, display: true)
+
+    // Fits a 13" display with dock/menu bar; keeps agent + preview usable.
+    let minWidth: CGFloat = 1024
+    let minHeight: CGFloat = 720
+    self.minSize = NSSize(width: minWidth, height: minHeight)
+
+    var frame = windowFrame
+    if frame.size.width < minWidth {
+      frame.size.width = minWidth
+    }
+    if frame.size.height < minHeight {
+      frame.size.height = minHeight
+    }
+    self.setFrame(frame, display: true)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     registerNotificationsChannel(flutterViewController)

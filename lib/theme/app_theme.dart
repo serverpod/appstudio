@@ -22,6 +22,10 @@ const kDividerWidth = 1.0;
 /// Drag hit area for the workspace split handle (visual line stays [kDividerWidth]).
 const kSplitHandleWidth = 6.0;
 
+/// Left (agent + logs) panel as a fraction of workspace width when resizing.
+const kWorkspaceMinSplitRatio = 0.375; // 150% of the former 0.25 minimum
+const kWorkspaceMaxSplitRatio = 0.70;
+
 BorderSide paneBorderSide(Color color) =>
     BorderSide(color: color, width: kDividerWidth);
 
