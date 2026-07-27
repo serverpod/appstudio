@@ -61,6 +61,33 @@ class AgentModelOption {
   String get value => '$providerId/$modelId';
 }
 
+/// OpenCode Zen free tier; preferred when listed and no model is saved yet.
+const kPreferredDefaultModelId = 'deepseek-v4-flash-free';
+
+AgentModelOption? pickPreferredDefaultModel(List<AgentModelOption> models) {
+  if (models.isEmpty) return null;
+
+  for (final providerId in ['opencode', 'deepseek']) {
+    for (final m in models) {
+      if (m.providerId == providerId && m.modelId == kPreferredDefaultModelId) {
+        return m;
+      }
+    }
+  }
+
+  for (final m in models) {
+    if (m.modelId == kPreferredDefaultModelId) return m;
+  }
+
+  for (final m in models) {
+    if (m.label.toLowerCase().contains('deepseek v4 flash free')) {
+      return m;
+    }
+  }
+
+  return null;
+}
+
 /// Owns OpenCode serve lifecycle, SSE transcript, and chat actions.
 class AgentController extends ChangeNotifier {
   AgentController({
@@ -311,12 +338,22 @@ class AgentController extends ChangeNotifier {
               label: m.label,
             ),
       ];
-      if (_defaultModel == null && _availableModels.isNotEmpty) {
-        _defaultModel = _availableModels.first.value;
-      }
+      await _ensureDefaultModel();
     } catch (_) {
       _availableModels = [];
     }
+  }
+
+  Future<void> _ensureDefaultModel() async {
+    if (_availableModels.isEmpty) return;
+
+    final currentValid = _defaultModel != null &&
+        _availableModels.any((m) => m.value == _defaultModel);
+    if (currentValid) return;
+
+    final preferred = pickPreferredDefaultModel(_availableModels);
+    final next = preferred?.value ?? _availableModels.first.value;
+    await setDefaultModel(next);
   }
 
   Future<void> saveApiKey(String providerId, String key) async {
