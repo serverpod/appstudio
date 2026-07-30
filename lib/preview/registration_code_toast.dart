@@ -85,7 +85,7 @@ class _RegistrationCodeToastState extends State<RegistrationCodeToast> {
           child: Row(
             children: [
               Icon(
-                LucideIcons.keyRound,
+                LucideIcons.mail,
                 size: 16,
                 color: scheme.foreground,
               ),
