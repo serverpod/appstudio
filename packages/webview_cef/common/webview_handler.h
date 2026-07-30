@@ -180,6 +180,8 @@ public:
     void goForward(int browserId);
     void goBack(int browserId);
     void reload(int browserId);
+    // Reload bypassing the cache, so a rebuilt app is not served stale assets.
+    void reloadIgnoreCache(int browserId);
     void openDevTools(int browserId);
 
     void imeSetComposition(int browserId, std::string text);

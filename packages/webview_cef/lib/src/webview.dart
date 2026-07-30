@@ -135,6 +135,15 @@ class WebViewController extends ValueNotifier<bool> {
     return _pluginChannel.invokeMethod('reload', _browserId);
   }
 
+  /// Reloads bypassing the cache, so a rebuilt app is not served stale assets.
+  Future<void> reloadIgnoreCache() async {
+    if (_isDisposed) {
+      return;
+    }
+    assert(value);
+    return _pluginChannel.invokeMethod('reloadIgnoreCache', _browserId);
+  }
+
   Future<void> goForward() async {
     if (_isDisposed) {
       return;

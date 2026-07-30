@@ -58,7 +58,9 @@ class PreviewPaneState extends State<PreviewPane> {
     }
     final revealGeneration = ++_revealGeneration;
     try {
-      await controller.loadUrl(widget.previewUrl.toString());
+      // Hard reload: a plain navigation re-serves the cached main.dart.js, so
+      // a rebuilt app would look unchanged.
+      await controller.reloadIgnoreCache();
       await _waitForFlutterMain(
         controller,
         isCancelled: () =>
@@ -66,6 +68,11 @@ class PreviewPaneState extends State<PreviewPane> {
             _controller != controller ||
             revealGeneration != _revealGeneration,
       );
+      if (!mounted || revealGeneration != _revealGeneration) return;
+      // The theme shim is injected at load start with the brightness captured
+      // when the webview was created, so a reload resets it — re-apply.
+      _appliedBrightness = null;
+      await _applyPreviewTheme(_previewBrightness);
       if (!mounted || revealGeneration != _revealGeneration) return;
       widget.process.markPreviewLive();
       if (mounted) setState(() {});

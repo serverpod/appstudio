@@ -469,6 +469,13 @@ void WebviewHandler::reload(int browserId) {
     }
 }
 
+void WebviewHandler::reloadIgnoreCache(int browserId) {
+    auto it = browser_map_.find(browserId);
+    if (it != browser_map_.end()) {
+        it->second.browser->GetMainFrame()->GetBrowser()->ReloadIgnoreCache();
+    }
+}
+
 void WebviewHandler::openDevTools(int browserId) {
     auto it = browser_map_.find(browserId);
     if (it != browser_map_.end()) {

@@ -346,6 +346,11 @@ namespace webview_cef {
 			m_handler->reload(browserId);
 			result(1, nullptr);
 		}
+		else if (name.compare("reloadIgnoreCache") == 0) {
+			int browserId = int(webview_value_get_int(values));
+			m_handler->reloadIgnoreCache(browserId);
+			result(1, nullptr);
+		}
 		else if (name.compare("openDevTools") == 0) {			
 			int browserId = int(webview_value_get_int(values));
 			m_handler->openDevTools(browserId);
