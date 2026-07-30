@@ -13,6 +13,7 @@ import 'theme/app_theme.dart';
 import 'theme/theme_controller.dart';
 import 'toolchain/toolchain.dart';
 import 'platform/macos_app_menu.dart';
+import 'ui/new_project_dialog.dart';
 import 'ui/studio_shell.dart';
 
 Future<void> main() async {
@@ -73,6 +74,9 @@ class AppStudioApp extends StatefulWidget {
 }
 
 class _AppStudioAppState extends State<AppStudioApp> {
+  /// The menu bar lives above [ShadApp], so dialogs it opens need the app's
+  /// own navigator context.
+  final _navigatorKey = GlobalKey<NavigatorState>();
   MacAppMenu? _macMenu;
 
   @override
@@ -89,20 +93,13 @@ class _AppStudioAppState extends State<AppStudioApp> {
   }
 
   void _showNewProjectDialog() {
-    if (!mounted) return;
-    showShadDialog<void>(
-      context: context,
-      builder: (context) => ShadDialog.alert(
-        title: const Text('New Project'),
-        description: const Text(
-          'Creating a new Serverpod project from App Studio is not available yet.',
-        ),
-        actions: [
-          ShadButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
-          ),
-        ],
+    final navigatorContext = _navigatorKey.currentContext;
+    if (!mounted || navigatorContext == null) return;
+    unawaited(
+      showNewProjectDialog(
+        navigatorContext,
+        toolchain: widget.toolchain,
+        session: widget.session,
       ),
     );
   }
@@ -128,6 +125,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
       listenable: widget.themeController,
       builder: (context, _) {
         return ShadApp(
+          navigatorKey: _navigatorKey,
           title: 'App Studio',
           debugShowCheckedModeBanner: false,
           theme: buildLightTheme(),

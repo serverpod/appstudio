@@ -88,6 +88,20 @@ AgentModelOption? pickPreferredDefaultModel(List<AgentModelOption> models) {
   return null;
 }
 
+/// Human-readable label for an OpenCode permission action.
+String permissionTitle(String action) {
+  final key = action.trim().toLowerCase();
+  return switch (key) {
+    'bash' => 'Run a terminal command',
+    'edit' || 'write' || 'patch' => 'Change files',
+    'read' => 'Read a file outside the project',
+    'list' || 'glob' || 'grep' => 'Look outside the project',
+    'webfetch' || 'fetch' => 'Fetch a web page',
+    '' => 'Permission required',
+    _ => 'Allow ${action.trim()}',
+  };
+}
+
 /// Owns OpenCode serve lifecycle, SSE transcript, and chat actions.
 class AgentController extends ChangeNotifier {
   AgentController({
@@ -123,12 +137,18 @@ class AgentController extends ChangeNotifier {
   String? _boundProjectPath;
   final List<AgentChatMessage> _messages = [];
   final List<AgentPermissionPart> _pendingPermissions = [];
+  final List<AgentQuestionPart> _pendingQuestions = [];
+
+  /// Tool calls replaced by a question card, so the raw row stays hidden even
+  /// if a later `message.part.updated` recreates it.
+  final Set<String> _hiddenToolCalls = {};
   List<String> _connectedProviders = [];
   List<AgentModelOption> _availableModels = [];
   String? _defaultModel; // provider/model
   AgentChatMode _mode = AgentChatMode.agent;
   StreamSubscription<Map<String, dynamic>>? _sseSub;
   int _epoch = 0;
+  bool _disposed = false;
   VoidCallback? _onOpenSettings;
 
   AgentConnectionState get connection => _connection;
@@ -137,6 +157,8 @@ class AgentController extends ChangeNotifier {
   List<AgentChatMessage> get messages => List.unmodifiable(_messages);
   List<AgentPermissionPart> get pendingPermissions =>
       List.unmodifiable(_pendingPermissions);
+  List<AgentQuestionPart> get pendingQuestions =>
+      List.unmodifiable(_pendingQuestions);
   List<String> get connectedProviders =>
       List.unmodifiable(_connectedProviders);
   List<AgentModelOption> get availableModels =>
@@ -484,20 +506,97 @@ class AgentController extends ChangeNotifier {
 
   Future<void> respondPermission({
     required AgentPermissionPart part,
-    required bool allow,
+    required AgentPermissionReply reply,
   }) async {
-    if (part.resolved) return;
+    if (part.resolved || part.submitting) return;
+    part.submitting = true;
+    part.error = null;
+    notifyListeners();
     try {
       await _client.replyPermission(
-        sessionId: part.sessionId,
         permissionId: part.permissionId,
-        response: allow ? 'allow' : 'deny',
+        reply: reply.wire,
       );
-    } catch (_) {}
-    part.resolved = true;
-    _pendingPermissions.removeWhere((p) => p.id == part.id);
+    } catch (e) {
+      // Keep the card up: the agent is still blocked waiting for an answer.
+      part.submitting = false;
+      part.error = 'Could not send the response: $e';
+      notifyListeners();
+      return;
+    }
+    part.reply = reply;
+    _resolvePermission(part.permissionId, reply);
+  }
+
+  Future<void> answerQuestion({
+    required AgentQuestionPart part,
+    required List<List<String>> answers,
+  }) async {
+    if (part.resolved || part.submitting) return;
+    part.submitting = true;
+    part.error = null;
+    notifyListeners();
+    try {
+      await _client.replyQuestion(
+        requestId: part.requestId,
+        answers: answers,
+      );
+    } catch (e) {
+      part.submitting = false;
+      part.error = 'Could not send the answer: $e';
+      notifyListeners();
+      return;
+    }
+    part.answers = answers;
+    _resolveQuestion(part.requestId, rejected: false);
+  }
+
+  Future<void> rejectQuestion(AgentQuestionPart part) async {
+    if (part.resolved || part.submitting) return;
+    part.submitting = true;
+    part.error = null;
+    notifyListeners();
+    try {
+      await _client.rejectQuestion(part.requestId);
+    } catch (e) {
+      part.submitting = false;
+      part.error = 'Could not skip the question: $e';
+      notifyListeners();
+      return;
+    }
+    _resolveQuestion(part.requestId, rejected: true);
+  }
+
+  void _resolvePermission(String permissionId, AgentPermissionReply? reply) {
+    for (final message in _messages) {
+      for (final part in message.parts) {
+        if (part is AgentPermissionPart && part.permissionId == permissionId) {
+          part.submitting = false;
+          part.resolved = true;
+          part.reply ??= reply;
+        }
+      }
+    }
+    _pendingPermissions.removeWhere((p) => p.permissionId == permissionId);
     notifyListeners();
   }
+
+  void _resolveQuestion(String requestId, {required bool rejected}) {
+    for (final message in _messages) {
+      for (final part in message.parts) {
+        if (part is AgentQuestionPart && part.requestId == requestId) {
+          part.submitting = false;
+          part.resolved = true;
+          part.rejected = rejected;
+        }
+      }
+    }
+    _pendingQuestions.removeWhere((q) => q.requestId == requestId);
+    notifyListeners();
+  }
+
+  @visibleForTesting
+  void handleEvent(Map<String, dynamic> event) => _onEvent(event);
 
   void _onEvent(Map<String, dynamic> event) {
     final type = event['type']?.toString();
@@ -514,9 +613,24 @@ class AgentController extends ChangeNotifier {
         _handleMessageUpdated(properties);
       case 'message.part.updated':
         _handlePartUpdated(properties);
+      case 'message.part.delta':
+        _handlePartDelta(properties);
       case 'permission.updated':
       case 'permission.asked':
+      case 'permission.v2.asked':
         _handlePermission(properties);
+      case 'permission.replied':
+      case 'permission.v2.replied':
+        _handlePermissionReplied(properties);
+      case 'question.asked':
+      case 'question.v2.asked':
+        _handleQuestion(properties);
+      case 'question.replied':
+      case 'question.v2.replied':
+        _handleQuestionResolved(properties, rejected: false);
+      case 'question.rejected':
+      case 'question.v2.rejected':
+        _handleQuestionResolved(properties, rejected: true);
       case 'session.error':
         _handleSessionError(properties);
       case 'session.idle':
@@ -622,9 +736,8 @@ class AgentController extends ChangeNotifier {
           }
         }
       case 'reasoning':
-        // Fold reasoning into a muted text part prefixed.
         final text = part['text']?.toString() ?? '';
-        final existing = _findTextPart(message, partId);
+        final existing = _findReasoningPart(message, partId);
         final content = text.isNotEmpty ? text : (delta ?? '');
         if (content.isEmpty) break;
         if (existing != null) {
@@ -634,10 +747,11 @@ class AgentController extends ChangeNotifier {
             existing.text = content;
           }
         } else {
-          message.parts.add(AgentTextPart(id: partId, text: content));
+          message.parts.add(AgentReasoningPart(id: partId, text: content));
         }
       case 'tool':
         final tool = part['tool']?.toString() ?? 'tool';
+        final callId = part['callID']?.toString();
         final stateRaw = part['state'];
         final state = stateRaw is Map
             ? stateRaw.map((k, v) => MapEntry(k.toString(), v))
@@ -671,11 +785,14 @@ class AgentController extends ChangeNotifier {
             AgentToolPart(
               id: partId,
               tool: tool,
+              callId: callId,
               status: status,
               title: title,
               input: input,
               output: output,
               error: error,
+              // A question/permission card may already stand in for this call.
+              hidden: callId != null && _hiddenToolCalls.contains(callId),
             ),
           );
         }
@@ -687,9 +804,55 @@ class AgentController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Streaming chunks arrive separately from `message.part.updated`, which
+  /// only carries whole snapshots.
+  void _handlePartDelta(Map<String, dynamic> properties) {
+    final messageId = properties['messageID']?.toString();
+    final partId = properties['partID']?.toString();
+    final delta = properties['delta']?.toString();
+    final field = properties['field']?.toString();
+    if (messageId == null || partId == null || delta == null) return;
+    if (delta.isEmpty) return;
+    if (field != null && field != 'text') return;
+
+    var message = _findMessage(messageId);
+    if (message == null) {
+      message = AgentChatMessage(
+        id: messageId,
+        role: AgentMessageRole.assistant,
+      );
+      _messages.add(message);
+    }
+
+    final text = _findTextPart(message, partId);
+    if (text != null) {
+      text.text += delta;
+      notifyListeners();
+      return;
+    }
+    final reasoning = _findReasoningPart(message, partId);
+    if (reasoning != null) {
+      reasoning.text += delta;
+      notifyListeners();
+      return;
+    }
+    message.parts.add(AgentTextPart(id: partId, text: delta));
+    notifyListeners();
+  }
+
   AgentTextPart? _findTextPart(AgentChatMessage message, String partId) {
     for (final p in message.parts) {
       if (p is AgentTextPart && p.id == partId) return p;
+    }
+    return null;
+  }
+
+  AgentReasoningPart? _findReasoningPart(
+    AgentChatMessage message,
+    String partId,
+  ) {
+    for (final p in message.parts) {
+      if (p is AgentReasoningPart && p.id == partId) return p;
     }
     return null;
   }
@@ -702,7 +865,6 @@ class AgentController extends ChangeNotifier {
   }
 
   void _handlePermission(Map<String, dynamic> properties) {
-    // Shapes vary; try common fields.
     final id = (properties['id'] ??
             properties['permissionID'] ??
             properties['permissionId'])
@@ -711,43 +873,173 @@ class AgentController extends ChangeNotifier {
         (properties['sessionID'] ?? properties['sessionId'] ?? _sessionId)
             ?.toString();
     if (id == null || sessionId == null) return;
+    if (_pendingPermissions.any((p) => p.permissionId == id)) return;
 
-    final title = (properties['permission'] ??
-            properties['tool'] ??
-            properties['title'] ??
-            'Permission required')
-        .toString();
+    // `permission` on v1 events, `action` on v2.
+    final action =
+        (properties['permission'] ?? properties['action'] ?? '').toString();
+    // `patterns` on v1 events, `resources` on v2.
+    final details = _stringList(properties['patterns']) +
+        _stringList(properties['resources']);
 
     final part = AgentPermissionPart(
       id: 'perm_$id',
       permissionId: id,
       sessionId: sessionId,
-      title: title,
+      title: permissionTitle(action),
+      details: details,
+      canRemember: _stringList(properties['always']).isNotEmpty ||
+          _stringList(properties['save']).isNotEmpty,
       metadata: properties,
     );
-    if (_pendingPermissions.any((p) => p.permissionId == id)) return;
     _pendingPermissions.add(part);
+    _attachRequestPart(
+      part: part,
+      tool: properties['tool'],
+      fallbackMessageId: 'perm_msg_$id',
+      hideToolRow: false,
+    );
+    notifyListeners();
+  }
 
-    // Also attach to latest assistant message for inline display.
-    AgentChatMessage? assistant;
-    for (var i = _messages.length - 1; i >= 0; i--) {
-      if (_messages[i].role == AgentMessageRole.assistant) {
-        assistant = _messages[i];
-        break;
+  void _handlePermissionReplied(Map<String, dynamic> properties) {
+    final id = (properties['requestID'] ??
+            properties['permissionID'] ??
+            properties['id'])
+        ?.toString();
+    if (id == null) return;
+    final reply = switch (properties['reply']?.toString()) {
+      'once' => AgentPermissionReply.once,
+      'always' => AgentPermissionReply.always,
+      'reject' => AgentPermissionReply.reject,
+      _ => null,
+    };
+    _resolvePermission(id, reply);
+  }
+
+  void _handleQuestion(Map<String, dynamic> properties) {
+    final id = (properties['id'] ?? properties['requestID'])?.toString();
+    final sessionId =
+        (properties['sessionID'] ?? properties['sessionId'] ?? _sessionId)
+            ?.toString();
+    if (id == null || sessionId == null) return;
+    if (_pendingQuestions.any((q) => q.requestId == id)) return;
+
+    final raw = properties['questions'];
+    if (raw is! List || raw.isEmpty) return;
+    final questions = <AgentQuestion>[];
+    for (final entry in raw) {
+      if (entry is! Map) continue;
+      final map = entry.map((k, v) => MapEntry(k.toString(), v));
+      final options = <AgentQuestionOption>[];
+      final optionsRaw = map['options'];
+      if (optionsRaw is List) {
+        for (final o in optionsRaw) {
+          if (o is! Map) continue;
+          final om = o.map((k, v) => MapEntry(k.toString(), v));
+          final label = om['label']?.toString();
+          if (label == null || label.isEmpty) continue;
+          options.add(
+            AgentQuestionOption(
+              label: label,
+              description: om['description']?.toString() ?? '',
+            ),
+          );
+        }
       }
-    }
-    if (assistant != null) {
-      assistant.parts.add(part);
-    } else {
-      _messages.add(
-        AgentChatMessage(
-          id: 'perm_msg_$id',
-          role: AgentMessageRole.system,
-          parts: [part],
+      questions.add(
+        AgentQuestion(
+          header: map['header']?.toString() ?? '',
+          question: map['question']?.toString() ?? '',
+          options: options,
+          multiple: map['multiple'] == true,
+          custom: map['custom'] == true,
         ),
       );
     }
+    if (questions.isEmpty) return;
+
+    final part = AgentQuestionPart(
+      id: 'ques_$id',
+      requestId: id,
+      sessionId: sessionId,
+      questions: questions,
+    );
+    _pendingQuestions.add(part);
+    // The card carries everything the raw `question` tool row would show.
+    _attachRequestPart(
+      part: part,
+      tool: properties['tool'],
+      fallbackMessageId: 'ques_msg_$id',
+      hideToolRow: true,
+    );
     notifyListeners();
+  }
+
+  void _handleQuestionResolved(
+    Map<String, dynamic> properties, {
+    required bool rejected,
+  }) {
+    final id = (properties['requestID'] ?? properties['id'])?.toString();
+    if (id == null) return;
+    _resolveQuestion(id, rejected: rejected);
+  }
+
+  /// Places a permission/question card next to the tool call that triggered
+  /// it, falling back to the latest assistant message.
+  void _attachRequestPart({
+    required AgentPart part,
+    required Object? tool,
+    required String fallbackMessageId,
+    required bool hideToolRow,
+  }) {
+    String? messageId;
+    String? callId;
+    if (tool is Map) {
+      messageId = tool['messageID']?.toString();
+      callId = tool['callID']?.toString();
+    }
+    if (hideToolRow && callId != null) _hiddenToolCalls.add(callId);
+
+    var message = messageId == null ? null : _findMessage(messageId);
+    if (message != null && callId != null) {
+      final idx = message.parts.indexWhere(
+        (p) => p is AgentToolPart && p.callId == callId,
+      );
+      if (idx >= 0) {
+        if (hideToolRow) (message.parts[idx] as AgentToolPart).hidden = true;
+        message.parts.insert(idx + 1, part);
+        return;
+      }
+    }
+
+    if (message == null) {
+      for (var i = _messages.length - 1; i >= 0; i--) {
+        if (_messages[i].role == AgentMessageRole.assistant) {
+          message = _messages[i];
+          break;
+        }
+      }
+    }
+    if (message != null) {
+      message.parts.add(part);
+      return;
+    }
+    _messages.add(
+      AgentChatMessage(
+        id: fallbackMessageId,
+        role: AgentMessageRole.system,
+        parts: [part],
+      ),
+    );
+  }
+
+  static List<String> _stringList(Object? value) {
+    if (value is! List) return const [];
+    return [
+      for (final v in value)
+        if (v != null && v.toString().isNotEmpty) v.toString(),
+    ];
   }
 
   void _handleSessionError(Map<String, dynamic> properties) {
@@ -810,6 +1102,8 @@ class AgentController extends ChangeNotifier {
   }
 
   void _notifyAgentFinished() {
+    // Blocked on the user, not finished.
+    if (_pendingPermissions.isNotEmpty || _pendingQuestions.isNotEmpty) return;
     final summary = _latestAssistantSummary();
     unawaited(StudioNotifications.agentTaskCompleted(summary: summary));
   }
@@ -857,6 +1151,8 @@ class AgentController extends ChangeNotifier {
     _sessionId = null;
     _boundProjectPath = null;
     _pendingPermissions.clear();
+    _pendingQuestions.clear();
+    _hiddenToolCalls.clear();
     _availableModels = [];
     if (clearMessages) _messages.clear();
     _connection = AgentConnectionState.idle;
@@ -866,7 +1162,15 @@ class AgentController extends ChangeNotifier {
   }
 
   @override
+  void notifyListeners() {
+    // Teardown runs async and can outlive dispose().
+    if (_disposed) return;
+    super.notifyListeners();
+  }
+
+  @override
   void dispose() {
+    _disposed = true;
     session.removeListener(_onSessionOrProcessChanged);
     process.removeListener(_onSessionOrProcessChanged);
     unawaited(_teardown(clearMessages: true));

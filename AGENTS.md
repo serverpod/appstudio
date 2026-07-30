@@ -10,7 +10,7 @@ lib/
   agent/                 # OpenCode serve client, SSE, AgentController, transcript
   ui/                    # studio_shell, preview_pane, terminal_pane, agent/, settings/
   preview/               # CEF preview: device modes, theme shim, surface sync
-  process/               # ServerpodProcessController (start/stop/reload)
+  process/               # ServerpodProcessController (start/stop/reload), ProjectCreator
   session/               # ProjectSession (open project, recents)
   terminal/              # xterm wrapper
   theme/                 # Shad themes, layout constants, ThemeController
@@ -32,13 +32,21 @@ UI reference for design patterns: `../cloudui/cloudui_flutter/`.
 - Scoped to the open project directory; restart serve on project switch.
 - API keys via Settings → Providers → OpenCode `auth.json` / `PUT /auth/{id}`.
 - Bundle: `toolchain/opencode/<ver>/` (darwin-arm64 only); pin in `active.json`.
+- **Permissions:** `permission.asked` → reply with `POST /permission/{id}/reply`
+  `{"reply": "once"|"always"|"reject"}`. Any other value is a 400 and the agent
+  stays blocked forever, so never swallow the error — keep the card up.
+- **Questions:** `question.asked` → `POST /question/{id}/reply` with
+  `{"answers": [[label, …], …]}` (one list per question) or
+  `POST /question/{id}/reject`. Both events carry `tool.{messageID,callID}`;
+  the card is attached next to that tool part and the raw row is hidden.
+- Ground truth for events/endpoints is the running server: `curl <base>/doc`.
 
 ## Setup & toolchain
 
 ### Prerequisites (dev machine)
 
 - **Flutter 3.44+** / **Dart 3.12+** (host SDK for building App Studio itself)
-- **Serverpod CLI 4.0.0-beta.0** — `dart install serverpod_cli 4.0.0-beta.0` (used when no bundled toolchain)
+- **Serverpod CLI 4.0.0-beta.1** — `dart install serverpod_cli 4.0.0-beta.1` (used when no bundled toolchain)
 - **CEF / webview_cef:** `brew install cmake ninja`; then `cd macos && pod install`  
   (CEF binaries download into `packages/webview_cef/macos/third/cef/` — gitignored)
 
@@ -109,6 +117,14 @@ Defaults: bundle id `dev.serverpod.appstudio`,
 
 - Long-lived controllers created in `main.dart`: `ThemeController`, `ProjectSession`, `StudioTerminal`, `ServerpodProcessController`.
 - `ServerpodProcessController` owns process lifecycle and signals when preview is ready to load.
+- The menu bar lives above `ShadApp`, so menu-triggered dialogs use the `navigatorKey` context from `main.dart`.
+
+## New projects
+
+- **New Project** (start page + File menu) opens `ui/new_project_dialog.dart`: project name + location, then `ProjectCreator` (`process/project_creator.dart`) runs the bundled `serverpod create <name> --ide opencode --no-interactive` in that location.
+- Names must match `^[a-z][a-z0-9_]*$` (they become Dart package names); the input folds case and drops separators as you type.
+- After the CLI succeeds, `patchFlutterAppForPreview` adds `device: web-server` and `web-port: 9998` to the `flutter_apps` entry in `<name>_server/pubspec.yaml` — without it `serverpod start` opens a browser instead of feeding the preview pane. The project is then opened, which auto-starts it.
+- Last used location is remembered in `ProjectSession` (`new_project_directory` pref).
 
 ## Conventions for agents
 

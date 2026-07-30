@@ -40,7 +40,7 @@ versions can coexist; `active.json` selects which one is used.
 ```bash
 ./tool/bundle_toolchain.sh
 # optional pins:
-./tool/bundle_toolchain.sh --flutter=3.44.2 --serverpod=4.0.0-beta.0 --opencode=1.18.4 --git=2.53.0-3
+./tool/bundle_toolchain.sh --flutter=3.44.2 --serverpod=4.0.0-beta.1 --opencode=1.18.4 --git=2.53.0-3
 ```
 
 Downloads and strips a web-only Flutter SDK into `toolchain/flutter/<version>/`.

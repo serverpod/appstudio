@@ -9,7 +9,7 @@ Chromium (CEF) at `http://localhost:9998`.
 Prerequisites:
 
 - Flutter 3.44+ / Dart 3.12+
-- `serverpod_cli` 4.0.0-beta.0 (`dart install serverpod_cli 4.0.0-beta.0`)
+- `serverpod_cli` 4.0.0-beta.1 (`dart install serverpod_cli 4.0.0-beta.1`)
 - For CEF: `brew install cmake ninja`
 
 ```bash
@@ -25,6 +25,10 @@ Without a bundled toolchain, the app uses host `flutter` / `dart` / `serverpod` 
 Opened projects must launch Flutter with `web-server` on port **9998** (Serverpod
 `flutter_apps` config).
 
+**New Project** (start page or File menu) runs the bundled
+`serverpod create --ide opencode`, sets that `flutter_apps` device/port in
+`<name>_server/pubspec.yaml`, and opens the project.
+
 The **Agent** tab runs a project-scoped OpenCode server (`opencode serve`) and
 streams chat over HTTP/SSE. Configure LLM API keys via the toolbar Settings
 dialog (stored in OpenCode’s `auth.json`).
@@ -37,7 +41,7 @@ Source of truth is the project-level [`toolchain/`](toolchain/) directory.
    versioned folder:
 
 ```
-toolchain/serverpod_cli/4.0.0-beta.0/
+toolchain/serverpod_cli/4.0.0-beta.1/
   bin/serverpod
   lib/                 # sqlite dylibs — required
 ```
@@ -48,7 +52,7 @@ toolchain/serverpod_cli/4.0.0-beta.0/
 ```bash
 make build_toolchain
 # or: ./tool/bundle_toolchain.sh
-# optional flags: --force --flutter=3.44.2 --serverpod=4.0.0-beta.0 --opencode=1.18.4 --git=2.53.0-3
+# optional flags: --force --flutter=3.44.2 --serverpod=4.0.0-beta.1 --opencode=1.18.4 --git=2.53.0-3
 ```
 
 Release builds embed the entire `toolchain/` tree (including Serverpod `lib/`,

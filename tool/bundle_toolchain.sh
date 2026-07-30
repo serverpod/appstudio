@@ -13,7 +13,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_DIR="${OUT_DIR:-$ROOT_DIR/toolchain}"
 FLUTTER_VERSION="${FLUTTER_VERSION:-3.44.2}"
-SERVERPOD_CLI_VERSION="${SERVERPOD_CLI_VERSION:-4.0.0-beta.0}"
+SERVERPOD_CLI_VERSION="${SERVERPOD_CLI_VERSION:-4.0.0-beta.1}"
 OPENCODE_VERSION="${OPENCODE_VERSION:-1.18.4}"
 # dugite-native release tag without leading "v" (GitHub Desktop portable Git).
 GIT_VERSION="${GIT_VERSION:-2.53.0-3}"

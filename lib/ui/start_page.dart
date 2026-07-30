@@ -23,9 +23,14 @@ const _kBackgroundAspectRatio = 2394 / 1247;
 
 /// Landing screen shown before a project is opened.
 class StartPage extends StatelessWidget {
-  const StartPage({super.key, required this.session});
+  const StartPage({
+    super.key,
+    required this.session,
+    required this.onNewProject,
+  });
 
   final ProjectSession session;
+  final VoidCallback onNewProject;
 
   @override
   Widget build(BuildContext context) {
@@ -38,7 +43,10 @@ class StartPage extends StatelessWidget {
             fit: StackFit.expand,
             children: [
               const _StartPageBackground(),
-              _StartPageContent(session: session),
+              _StartPageContent(
+                session: session,
+                onNewProject: onNewProject,
+              ),
             ],
           ),
         ),
@@ -113,9 +121,10 @@ class _StartPageBackground extends StatelessWidget {
 }
 
 class _StartPageContent extends StatelessWidget {
-  const _StartPageContent({required this.session});
+  const _StartPageContent({required this.session, required this.onNewProject});
 
   final ProjectSession session;
+  final VoidCallback onNewProject;
 
   @override
   Widget build(BuildContext context) {
@@ -160,7 +169,7 @@ class _StartPageContent extends StatelessWidget {
                         children: [
                           Expanded(
                             child: _StartPageActionButton(
-                              onPressed: () {},
+                              onPressed: onNewProject,
                               leading: const Icon(LucideIcons.plus, size: 16),
                               label: 'New Project',
                             ),

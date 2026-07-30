@@ -108,19 +108,25 @@ class OpenCodeClient {
     await _post('/session/$sessionId/abort', body: const {});
   }
 
+  /// [reply] must be `once`, `always` or `reject` — the server rejects
+  /// anything else with HTTP 400 and the agent stays blocked.
   Future<void> replyPermission({
-    required String sessionId,
     required String permissionId,
-    required String response,
-    bool remember = false,
+    required String reply,
   }) async {
-    await _post(
-      '/session/$sessionId/permissions/$permissionId',
-      body: {
-        'response': response,
-        'remember': remember,
-      },
-    );
+    await _post('/permission/$permissionId/reply', body: {'reply': reply});
+  }
+
+  /// [answers] holds one entry per question, each a list of selected labels.
+  Future<void> replyQuestion({
+    required String requestId,
+    required List<List<String>> answers,
+  }) async {
+    await _post('/question/$requestId/reply', body: {'answers': answers});
+  }
+
+  Future<void> rejectQuestion(String requestId) async {
+    await _post('/question/$requestId/reject', body: const {});
   }
 
   Future<void> setAuthApiKey(String providerId, String key) async {

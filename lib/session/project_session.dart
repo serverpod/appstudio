@@ -9,12 +9,14 @@ class ProjectSession extends ChangeNotifier {
   ProjectSession();
 
   static const _recentsKey = 'recent_projects';
+  static const _newProjectDirectoryKey = 'new_project_directory';
   static const _maxRecents = 5;
   static final previewUri = Uri.parse('http://localhost:9998');
 
   String? _projectPath;
   String? _error;
   List<String> _recents = [];
+  String? _newProjectDirectory;
 
   String? get projectPath => _projectPath;
   String? get error => _error;
@@ -31,9 +33,31 @@ class ProjectSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Directory offered when creating a project: the last one used, else the
+  /// folder holding the most recent project, else the user's home directory.
+  String get suggestedNewProjectDirectory {
+    for (final candidate in [
+      _newProjectDirectory,
+      if (_recents.isNotEmpty) p.dirname(_recents.first),
+      Platform.environment['HOME'],
+    ]) {
+      if (candidate == null || candidate.isEmpty) continue;
+      if (Directory(candidate).existsSync()) return candidate;
+    }
+    return Directory.current.path;
+  }
+
+  Future<void> setNewProjectDirectory(String path) async {
+    if (_newProjectDirectory == path) return;
+    _newProjectDirectory = path;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_newProjectDirectoryKey, path);
+  }
+
   Future<void> loadRecents() async {
     final prefs = await SharedPreferences.getInstance();
     _recents = prefs.getStringList(_recentsKey) ?? [];
+    _newProjectDirectory = prefs.getString(_newProjectDirectoryKey);
     notifyListeners();
   }
 

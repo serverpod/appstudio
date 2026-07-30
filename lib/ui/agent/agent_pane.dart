@@ -163,48 +163,30 @@ class _AgentPaneState extends State<AgentPane> {
       return _AgentIdleArt(caption: _agentCaption(c));
     }
 
+    // Permission and question cards are attached inline to the message that
+    // triggered them, so the list only walks messages here.
     return ListView.builder(
       controller: _scrollController,
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
-      itemCount: c.messages.length +
-          c.pendingPermissions.length +
-          (_showTrailingThinking(c) ? 1 : 0),
+      itemCount: c.messages.length + (_showTrailingThinking(c) ? 1 : 0),
       itemBuilder: (context, index) {
-        if (index < c.messages.length) {
-          final message = c.messages[index];
-          if (_isVisuallyEmptyAssistant(message)) {
-            return c.isBusy
-                ? _ThinkingStatus(label: _thinkingLabel(c))
-                : const SizedBox.shrink();
-          }
-          return _MessageBubble(
-            message: message,
-            onPermission: (part, allow) {
-              c.respondPermission(part: part, allow: allow);
-            },
-          );
+        if (index >= c.messages.length) {
+          return _ThinkingStatus(label: _thinkingLabel(c));
         }
-        final permIndex = index - c.messages.length;
-        if (permIndex < c.pendingPermissions.length) {
-          final perm = c.pendingPermissions[permIndex];
-          // Avoid duplicating permissions already shown inline.
-          if (c.messages.any(
-            (m) => m.parts.any(
-              (p) => p is AgentPermissionPart && p.id == perm.id,
-            ),
-          )) {
-            return const SizedBox.shrink();
-          }
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _PermissionCard(
-              part: perm,
-              onAllow: () => c.respondPermission(part: perm, allow: true),
-              onDeny: () => c.respondPermission(part: perm, allow: false),
-            ),
-          );
+        final message = c.messages[index];
+        if (_isVisuallyEmptyAssistant(message)) {
+          return c.isBusy
+              ? _ThinkingStatus(label: _thinkingLabel(c))
+              : const SizedBox.shrink();
         }
-        return _ThinkingStatus(label: _thinkingLabel(c));
+        return _MessageBubble(
+          message: message,
+          onPermission: (part, reply) =>
+              c.respondPermission(part: part, reply: reply),
+          onAnswer: (part, answers) =>
+              c.answerQuestion(part: part, answers: answers),
+          onSkipQuestion: c.rejectQuestion,
+        );
       },
     );
   }
@@ -219,8 +201,12 @@ class _AgentPaneState extends State<AgentPane> {
     if (message.role != AgentMessageRole.assistant) return false;
     for (final part in message.parts) {
       if (part is AgentTextPart && part.text.trim().isNotEmpty) return false;
-      if (part is AgentToolPart) return false;
-      if (part is AgentPermissionPart && !part.resolved) return false;
+      if (part is AgentReasoningPart && part.text.trim().isNotEmpty) {
+        return false;
+      }
+      if (part is AgentToolPart && !part.hidden) return false;
+      if (part is AgentPermissionPart) return false;
+      if (part is AgentQuestionPart) return false;
       if (part is AgentErrorPart) return false;
     }
     return true;
@@ -395,10 +381,16 @@ class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.message,
     required this.onPermission,
+    required this.onAnswer,
+    required this.onSkipQuestion,
   });
 
   final AgentChatMessage message;
-  final void Function(AgentPermissionPart part, bool allow) onPermission;
+  final void Function(AgentPermissionPart part, AgentPermissionReply reply)
+      onPermission;
+  final void Function(AgentQuestionPart part, List<List<String>> answers)
+      onAnswer;
+  final void Function(AgentQuestionPart part) onSkipQuestion;
 
   @override
   Widget build(BuildContext context) {
@@ -474,18 +466,33 @@ class _MessageBubble extends StatelessWidget {
                                 ),
                               ),
                             )
-                    else if (part is AgentToolPart)
+                    else if (part is AgentReasoningPart &&
+                        part.text.trim().isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 2),
+                        child: _ReasoningBlock(part: part),
+                      )
+                    else if (part is AgentToolPart && !part.hidden)
                       Padding(
                         padding: const EdgeInsets.only(top: 6, bottom: 2),
                         child: _ToolRow(part: part),
                       )
-                    else if (part is AgentPermissionPart && !part.resolved)
+                    else if (part is AgentPermissionPart)
                       Padding(
                         padding: const EdgeInsets.only(top: 8),
                         child: _PermissionCard(
                           part: part,
-                          onAllow: () => onPermission(part, true),
-                          onDeny: () => onPermission(part, false),
+                          onReply: (reply) => onPermission(part, reply),
+                        ),
+                      )
+                    else if (part is AgentQuestionPart)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: _QuestionCard(
+                          key: ValueKey(part.id),
+                          part: part,
+                          onSubmit: (answers) => onAnswer(part, answers),
+                          onSkip: () => onSkipQuestion(part),
                         ),
                       )
                     else if (part is AgentErrorPart)
@@ -665,16 +672,499 @@ class _SpinningIconState extends State<_SpinningIcon>
   }
 }
 
+/// Collapsed model reasoning, so it never reads as part of the answer.
+class _ReasoningBlock extends StatefulWidget {
+  const _ReasoningBlock({required this.part});
+
+  final AgentReasoningPart part;
+
+  @override
+  State<_ReasoningBlock> createState() => _ReasoningBlockState();
+}
+
+class _ReasoningBlockState extends State<_ReasoningBlock> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final scheme = theme.colorScheme;
+    final labelStyle = theme.textTheme.small.copyWith(
+      fontSize: 12,
+      color: scheme.mutedForeground,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    LucideIcons.brain,
+                    size: 13,
+                    color: scheme.mutedForeground,
+                  ),
+                  const SizedBox(width: 6),
+                  Text('Thinking', style: labelStyle),
+                  const SizedBox(width: 2),
+                  Icon(
+                    _expanded
+                        ? LucideIcons.chevronDown
+                        : LucideIcons.chevronRight,
+                    size: 13,
+                    color: scheme.mutedForeground,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (_expanded)
+          Padding(
+            padding: const EdgeInsets.only(left: 19, bottom: 4),
+            child: SelectableText(
+              widget.part.text.trim(),
+              style: theme.textTheme.small.copyWith(
+                fontSize: 12,
+                height: 1.45,
+                color: scheme.mutedForeground,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 class _PermissionCard extends StatelessWidget {
   const _PermissionCard({
     required this.part,
-    required this.onAllow,
-    required this.onDeny,
+    required this.onReply,
   });
 
   final AgentPermissionPart part;
-  final VoidCallback onAllow;
-  final VoidCallback onDeny;
+  final ValueChanged<AgentPermissionReply> onReply;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final scheme = theme.colorScheme;
+    final busy = part.submitting;
+
+    return _RequestCard(
+      accent: AppColors.warningAmber,
+      icon: LucideIcons.shieldAlert,
+      title: part.title,
+      children: [
+        if (part.details.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          SelectableText(
+            part.details.join('\n'),
+            style: theme.textTheme.small.copyWith(
+              fontFamily: kMacMonoFont,
+              fontSize: 11,
+              height: 1.5,
+              color: scheme.mutedForeground,
+            ),
+          ),
+        ],
+        if (part.resolved) ...[
+          const SizedBox(height: 8),
+          Text(
+            switch (part.reply) {
+              AgentPermissionReply.reject => 'Denied',
+              AgentPermissionReply.always => 'Allowed — always',
+              AgentPermissionReply.once => 'Allowed',
+              null => 'Answered',
+            },
+            style: theme.textTheme.small.copyWith(
+              fontSize: 12,
+              color: scheme.mutedForeground,
+            ),
+          ),
+        ] else ...[
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ShadButton.outline(
+                size: ShadButtonSize.sm,
+                onPressed:
+                    busy ? null : () => onReply(AgentPermissionReply.reject),
+                child: const Text('Deny'),
+              ),
+              if (part.canRemember)
+                ShadButton.outline(
+                  size: ShadButtonSize.sm,
+                  onPressed:
+                      busy ? null : () => onReply(AgentPermissionReply.always),
+                  child: const Text('Always allow'),
+                ),
+              ShadButton(
+                size: ShadButtonSize.sm,
+                onPressed:
+                    busy ? null : () => onReply(AgentPermissionReply.once),
+                child: const Text('Allow'),
+              ),
+            ],
+          ),
+        ],
+        if (part.error != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            part.error!,
+            style: theme.textTheme.small.copyWith(
+              fontSize: 12,
+              color: AppColors.errorRed,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _QuestionCard extends StatefulWidget {
+  const _QuestionCard({
+    super.key,
+    required this.part,
+    required this.onSubmit,
+    required this.onSkip,
+  });
+
+  final AgentQuestionPart part;
+  final ValueChanged<List<List<String>>> onSubmit;
+  final VoidCallback onSkip;
+
+  @override
+  State<_QuestionCard> createState() => _QuestionCardState();
+}
+
+class _QuestionCardState extends State<_QuestionCard> {
+  /// Selected option labels per question index.
+  late final List<Set<String>> _selected;
+
+  /// Free-text answers per question index, when the question allows them.
+  late final List<TextEditingController> _custom;
+  late final List<bool> _customOpen;
+
+  @override
+  void initState() {
+    super.initState();
+    final count = widget.part.questions.length;
+    _selected = List.generate(count, (_) => <String>{});
+    _custom = List.generate(count, (_) => TextEditingController());
+    _customOpen = List.filled(count, false);
+  }
+
+  @override
+  void dispose() {
+    for (final c in _custom) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  List<String> _answerFor(int index) {
+    final answer = <String>[..._selected[index]];
+    if (_customOpen[index]) {
+      final text = _custom[index].text.trim();
+      if (text.isNotEmpty) answer.add(text);
+    }
+    return answer;
+  }
+
+  bool get _complete {
+    for (var i = 0; i < widget.part.questions.length; i++) {
+      if (_answerFor(i).isEmpty) return false;
+    }
+    return true;
+  }
+
+  void _toggle(int index, String label) {
+    final question = widget.part.questions[index];
+    setState(() {
+      if (question.multiple) {
+        if (!_selected[index].remove(label)) _selected[index].add(label);
+      } else {
+        _selected[index]
+          ..clear()
+          ..add(label);
+        _customOpen[index] = false;
+      }
+    });
+  }
+
+  void _openCustom(int index) {
+    final question = widget.part.questions[index];
+    setState(() {
+      _customOpen[index] = !_customOpen[index];
+      if (_customOpen[index] && !question.multiple) _selected[index].clear();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final scheme = theme.colorScheme;
+    final part = widget.part;
+    final busy = part.submitting;
+
+    if (part.resolved) {
+      return _RequestCard(
+        accent: scheme.border,
+        icon: LucideIcons.messageCircleQuestion,
+        title: part.questions.first.question,
+        children: [
+          const SizedBox(height: 6),
+          Text(
+            part.rejected
+                ? 'Skipped'
+                : (part.answers ?? const <List<String>>[])
+                    .map((a) => a.join(', '))
+                    .where((a) => a.isNotEmpty)
+                    .join(' · '),
+            style: theme.textTheme.small.copyWith(
+              fontSize: 12,
+              color: scheme.mutedForeground,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return _RequestCard(
+      accent: kBrandBlue,
+      icon: LucideIcons.messageCircleQuestion,
+      title: part.questions.length == 1 && part.questions.first.header.isNotEmpty
+          ? part.questions.first.header
+          : 'A question for you',
+      children: [
+        for (var i = 0; i < part.questions.length; i++) ...[
+          const SizedBox(height: 8),
+          if (part.questions.length > 1 &&
+              part.questions[i].header.isNotEmpty) ...[
+            Text(
+              part.questions[i].header.toUpperCase(),
+              style: theme.textTheme.small.copyWith(
+                fontSize: 10,
+                letterSpacing: 0.6,
+                fontWeight: FontWeight.w600,
+                color: scheme.mutedForeground,
+              ),
+            ),
+            const SizedBox(height: 4),
+          ],
+          Text(
+            part.questions[i].question,
+            style: theme.textTheme.small.copyWith(fontSize: 13, height: 1.4),
+          ),
+          const SizedBox(height: 8),
+          for (final option in part.questions[i].options)
+            _QuestionOptionTile(
+              label: option.label,
+              description: option.description,
+              selected: _selected[i].contains(option.label),
+              multiple: part.questions[i].multiple,
+              onTap: busy ? null : () => _toggle(i, option.label),
+            ),
+          if (part.questions[i].custom) ...[
+            _QuestionOptionTile(
+              label: 'Something else',
+              description: '',
+              selected: _customOpen[i],
+              multiple: part.questions[i].multiple,
+              onTap: busy ? null : () => _openCustom(i),
+            ),
+            if (_customOpen[i])
+              Padding(
+                padding: const EdgeInsets.only(left: 24, top: 2, bottom: 4),
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: TextField(
+                    controller: _custom[i],
+                    enabled: !busy,
+                    minLines: 1,
+                    maxLines: 4,
+                    style: theme.textTheme.small.copyWith(fontSize: 13),
+                    cursorColor: scheme.foreground,
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: 'Type your answer',
+                      hintStyle: theme.textTheme.muted,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 6,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide: BorderSide(color: scheme.border),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide: BorderSide(color: scheme.border),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide: BorderSide(color: kBrandBlue),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ],
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            ShadButton.ghost(
+              size: ShadButtonSize.sm,
+              onPressed: busy ? null : widget.onSkip,
+              child: const Text('Skip'),
+            ),
+            const Spacer(),
+            ShadButton(
+              size: ShadButtonSize.sm,
+              onPressed: busy || !_complete
+                  ? null
+                  : () => widget.onSubmit([
+                        for (var i = 0; i < part.questions.length; i++)
+                          _answerFor(i),
+                      ]),
+              child: const Text('Send'),
+            ),
+          ],
+        ),
+        if (part.error != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            part.error!,
+            style: theme.textTheme.small.copyWith(
+              fontSize: 12,
+              color: AppColors.errorRed,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _QuestionOptionTile extends StatefulWidget {
+  const _QuestionOptionTile({
+    required this.label,
+    required this.description,
+    required this.selected,
+    required this.multiple,
+    required this.onTap,
+  });
+
+  final String label;
+  final String description;
+  final bool selected;
+  final bool multiple;
+  final VoidCallback? onTap;
+
+  @override
+  State<_QuestionOptionTile> createState() => _QuestionOptionTileState();
+}
+
+class _QuestionOptionTileState extends State<_QuestionOptionTile> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final scheme = theme.colorScheme;
+    final selected = widget.selected;
+    final icon = widget.multiple
+        ? (selected ? LucideIcons.squareCheck : LucideIcons.square)
+        : (selected ? LucideIcons.circleDot : LucideIcons.circle);
+
+    return MouseRegion(
+      cursor: widget.onTap == null
+          ? SystemMouseCursors.basic
+          : SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            color: selected
+                ? kBrandBlue.withValues(alpha: 0.10)
+                : (_hovered ? scheme.muted : Colors.transparent),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: Icon(
+                  icon,
+                  size: 14,
+                  color: selected ? kBrandBlue : scheme.mutedForeground,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.label,
+                      style: theme.textTheme.small.copyWith(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    if (widget.description.isNotEmpty)
+                      Text(
+                        widget.description,
+                        style: theme.textTheme.small.copyWith(
+                          fontSize: 12,
+                          height: 1.35,
+                          color: scheme.mutedForeground,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Shared chrome for the permission and question cards.
+class _RequestCard extends StatelessWidget {
+  const _RequestCard({
+    required this.accent,
+    required this.icon,
+    required this.title,
+    required this.children,
+  });
+
+  final Color accent;
+  final IconData icon;
+  final String title;
+  final List<Widget> children;
 
   @override
   Widget build(BuildContext context) {
@@ -684,7 +1174,7 @@ class _PermissionCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: scheme.muted,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.warningAmber.withValues(alpha: 0.5)),
+        border: Border.all(color: accent.withValues(alpha: 0.5)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -692,39 +1182,25 @@ class _PermissionCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  LucideIcons.shieldAlert,
-                  size: 16,
-                  color: AppColors.warningAmber,
+                Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: Icon(icon, size: 16, color: accent),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    part.title,
+                    title,
                     style: theme.textTheme.small.copyWith(
                       fontWeight: FontWeight.w600,
+                      height: 1.35,
                     ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                ShadButton.outline(
-                  size: ShadButtonSize.sm,
-                  onPressed: onDeny,
-                  child: const Text('Deny'),
-                ),
-                const SizedBox(width: 8),
-                ShadButton(
-                  size: ShadButtonSize.sm,
-                  onPressed: onAllow,
-                  child: const Text('Allow'),
-                ),
-              ],
-            ),
+            ...children,
           ],
         ),
       ),

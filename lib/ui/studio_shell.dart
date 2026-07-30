@@ -9,6 +9,7 @@ import '../terminal/studio_terminal.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import '../toolchain/toolchain.dart';
+import 'new_project_dialog.dart';
 import 'preview_pane.dart';
 import 'settings/providers_settings_dialog.dart';
 import 'start_page.dart';
@@ -57,6 +58,14 @@ class _StudioShellState extends State<StudioShell> {
     showProvidersSettingsDialog(context, agent: widget.agent);
   }
 
+  void _newProject() {
+    showNewProjectDialog(
+      context,
+      toolchain: widget.toolchain,
+      session: widget.session,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -69,7 +78,10 @@ class _StudioShellState extends State<StudioShell> {
       builder: (context, _) {
         final hasProject = widget.session.hasProject;
         if (!hasProject) {
-          return StartPage(session: widget.session);
+          return StartPage(
+            session: widget.session,
+            onNewProject: _newProject,
+          );
         }
 
         return Column(
