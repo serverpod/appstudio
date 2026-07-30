@@ -1,3 +1,16 @@
+import 'dart:ui';
+
+/// Backdrop drawn behind the CEF surface, which composites with alpha.
+///
+/// Follows the previewed app's brightness (the preview toggle), not the shell's
+/// — the pixels belong to the running app, not to App Studio.
+Color previewBackdropColor(Brightness brightness) {
+  return switch (brightness) {
+    Brightness.dark => const Color(0xFF000000),
+    Brightness.light => const Color(0xFFFFFFFF),
+  };
+}
+
 /// JS injected into the CEF preview so Flutter web sees App Studio's theme.
 ///
 /// Flutter web reads platform brightness from `matchMedia('(prefers-color-scheme: dark)')`.

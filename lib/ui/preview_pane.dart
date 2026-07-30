@@ -368,6 +368,13 @@ class PreviewPaneState extends State<PreviewPane> {
     final framed = Stack(
       fit: StackFit.expand,
       children: [
+        // CEF composites with an alpha channel, so anything the page leaves
+        // unpainted would show the shell through. Back it with the previewed
+        // app's own light/dark, not App Studio's.
+        ColoredBox(
+          key: const ValueKey('preview-backdrop'),
+          color: previewBackdropColor(_previewBrightness),
+        ),
         surface,
         PreviewStatusOverlay(
           phase: phase,
