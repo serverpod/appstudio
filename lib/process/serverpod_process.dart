@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 
 import '../preview/preview_phase.dart';
 import '../process/dev_session_cleanup.dart';
+import '../process/registration_code.dart';
 import '../session/project_session.dart';
 import '../terminal/studio_terminal.dart';
 import '../toolchain/toolchain.dart';
@@ -23,6 +24,11 @@ final _vmServiceConnecting = RegExp(
 final _ansiEscape = RegExp(r'\x1B\[[0-9;]*[A-Za-z]');
 
 final _flutterSdkDep = RegExp(r'sdk:\s*flutter');
+
+final _lineBreak = RegExp(r'\r\n|\r|\n');
+
+/// Cap on a console line that never terminates (e.g. a progress spinner).
+const _maxPartialLine = 4096;
 
 class ServerpodProcessController extends ChangeNotifier {
   ServerpodProcessController({
@@ -49,7 +55,9 @@ class ServerpodProcessController extends ChangeNotifier {
   VoidCallback? _terminalListener;
   StreamSubscription<String>? _outputSub;
   final _outputBuffer = StringBuffer();
+  final _partialLine = StringBuffer();
   bool _scheduledVmServiceReload = false;
+  String? _registrationCode;
 
   ProcessState get state => _state;
   PreviewPhase get phase => _phase;
@@ -65,6 +73,9 @@ class ServerpodProcessController extends ChangeNotifier {
 
   /// Last process failure message, if any.
   String? get error => _error;
+
+  /// Sign-up code the server last logged, until dismissed or superseded.
+  String? get registrationCode => _registrationCode;
 
   bool get canStart => session.hasProject && _state == ProcessState.idle;
   bool get canStop =>
@@ -106,6 +117,8 @@ class ServerpodProcessController extends ChangeNotifier {
     _previewReady = false;
     _scheduledVmServiceReload = false;
     _outputBuffer.clear();
+    _partialLine.clear();
+    _registrationCode = null;
     _setPhase(ProcessState.starting, PreviewPhase.fetchingDependencies);
 
     _terminalListener ??= () {
@@ -385,6 +398,8 @@ class ServerpodProcessController extends ChangeNotifier {
     _previewReady = false;
     _scheduledVmServiceReload = false;
     _outputBuffer.clear();
+    _partialLine.clear();
+    _registrationCode = null;
     if (wasStopping) {
       _error = null;
       _setPhase(ProcessState.idle, PreviewPhase.idle);
@@ -395,16 +410,54 @@ class ServerpodProcessController extends ChangeNotifier {
     _setPhase(ProcessState.idle, PreviewPhase.failed);
   }
 
+  @visibleForTesting
+  void ingestOutput(String chunk) => _onTerminalOutput(chunk);
+
   void _onTerminalOutput(String chunk) {
-    _outputBuffer.write(chunk);
+    _scanLines(chunk);
+
+    // Only buffer until the match lands — the server logs for the whole session
+    // otherwise, and this is the only thing the buffer is for.
     if (_scheduledVmServiceReload) return;
+    _outputBuffer.write(chunk);
 
     final plain = _outputBuffer.toString().replaceAll(_ansiEscape, '');
     if (!_vmServiceConnecting.hasMatch(plain)) return;
 
     _scheduledVmServiceReload = true;
+    _outputBuffer.clear();
     _previewReloadToken++;
     _phase = PreviewPhase.connecting;
+    notifyListeners();
+  }
+
+  /// Reassembles whole console lines across PTY chunks and inspects each one.
+  void _scanLines(String chunk) {
+    _partialLine.write(chunk.replaceAll(_ansiEscape, ''));
+    final lines = _partialLine.toString().split(_lineBreak);
+    // The tail has no line break yet, so it may still be growing.
+    final tail = lines.removeLast();
+    _partialLine
+      ..clear()
+      ..write(
+        tail.length > _maxPartialLine
+            ? tail.substring(tail.length - _maxPartialLine)
+            : tail,
+      );
+
+    for (final line in lines) {
+      final code = parseRegistrationCode(line);
+      if (code != null) {
+        _registrationCode = code;
+        notifyListeners();
+      }
+    }
+  }
+
+  /// Clears the registration code banner (user dismissed it).
+  void dismissRegistrationCode() {
+    if (_registrationCode == null) return;
+    _registrationCode = null;
     notifyListeners();
   }
 

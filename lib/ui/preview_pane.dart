@@ -8,6 +8,7 @@ import '../preview/preview_bootstrap.dart';
 import '../preview/preview_device.dart';
 import '../preview/preview_hero_gradient.dart';
 import '../preview/preview_status_overlay.dart';
+import '../preview/registration_code_toast.dart';
 import '../preview/preview_surface_sync.dart';
 import '../preview/preview_theme.dart';
 import '../process/serverpod_process.dart';
@@ -289,6 +290,7 @@ class PreviewPaneState extends State<PreviewPane> {
   @override
   Widget build(BuildContext context) {
     final viewport = previewPhoneViewport(_viewMode.orientation);
+    final registrationCode = widget.process.registrationCode;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -302,9 +304,28 @@ class PreviewPaneState extends State<PreviewPane> {
           canReload: widget.process.previewReady,
         ),
         Expanded(
-          child: PreviewHeroGradient(
-            animating: widget.gradientAnimating,
-            child: _buildBody(viewport: viewport),
+          child: Stack(
+            children: [
+              PreviewHeroGradient(
+                animating: widget.gradientAnimating,
+                child: _buildBody(viewport: viewport),
+              ),
+              // Floats over the whole preview area — including the CEF surface
+              // — rather than inside the phone frame.
+              if (registrationCode != null)
+                Positioned(
+                  top: 32,
+                  left: 12,
+                  right: 12,
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: RegistrationCodeToast(
+                      code: registrationCode,
+                      onDismiss: widget.process.dismissRegistrationCode,
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       ],
