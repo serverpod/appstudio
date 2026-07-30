@@ -29,7 +29,14 @@ namespace webview_cef {
         void initCallback();
         void uninitCallback();
         void HandleMethodCall(std::string name, WValue* values, std::function<void(int ,WValue*)> result);
-        void sendKeyEvent(CefKeyEvent& ev);
+        // False when no browser is focused, i.e. the event was not delivered
+        // and the platform layer should leave it to the host.
+        bool sendKeyEvent(CefKeyEvent& ev);
+        // Clipboard/editing command for the focused browser. Off-screen
+        // browsers never see the platform responder chain, so ⌘X/⌘C/⌘V and
+        // friends must be translated into explicit frame commands. False when
+        // nothing could handle it.
+        bool sendEditCommand(const std::string& command);
         void setInvokeMethodFunc(std::function<void(std::string, WValue*)> func);
         void setCreateTextureFunc(std::function<std::shared_ptr<WebviewTexture>()> func);
         bool getAnyBrowserFocused();

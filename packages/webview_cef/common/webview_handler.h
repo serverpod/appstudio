@@ -168,7 +168,14 @@ public:
     void changeSize(int browserId, float a_dpi, int width, int height);
     void cursorClick(int browserId, int x, int y, bool up);
     void cursorMove(int browserId, int x, int y, bool dragging);
-    void sendKeyEvent(CefKeyEvent& ev);
+    // Returns false when there is no focused browser to deliver to, so the
+    // caller can leave the event to the host instead of swallowing it.
+    bool sendKeyEvent(CefKeyEvent& ev);
+    // Editing command ("cut"/"copy"/"paste"/"selectAll"/"undo"/"redo"/"delete")
+    // for the focused browser. Off-screen browsers get no responder chain, so
+    // the platform shortcut has to be translated into an explicit command.
+    // False when there is no focused browser or the command is unknown.
+    bool sendEditCommand(const std::string& command);
     void loadUrl(int browserId, std::string url);
     void goForward(int browserId);
     void goBack(int browserId);

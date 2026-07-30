@@ -194,6 +194,7 @@ bool WebviewHandler::OnSetFocus(CefRefPtr<CefBrowser> browser, FocusSource sourc
 
 void WebviewHandler::OnGotFocus(CefRefPtr<CefBrowser> browser)
 {
+    current_focused_browser_ = browser;
 }
 
 void WebviewHandler::OnLoadError(CefRefPtr<CefBrowser> browser,
@@ -429,13 +430,14 @@ void WebviewHandler::OnImeCompositionRangeChanged(CefRefPtr<CefBrowser> browser,
     }
 }
 
-void WebviewHandler::sendKeyEvent(CefKeyEvent& ev)
+bool WebviewHandler::sendKeyEvent(CefKeyEvent& ev)
 {
     auto browser = current_focused_browser_;
     if (!browser.get()) {
-        return;
+        return false;
     }
     browser->GetHost()->SendKeyEvent(ev);
+    return true;
 }
 
 void WebviewHandler::loadUrl(int browserId, std::string url)
@@ -535,8 +537,51 @@ void WebviewHandler::setClientFocus(int browserId, bool focus)
         // Re-arm the first-frame re-assert (handles a SetFocus that lands before
         // the browser is render/input-ready under external_begin_frame).
         it->second.focus_reasserted = false;
+        // The host tells us which webview owns the keyboard. Without this the
+        // key router only had a browser once the page reported a focused DOM
+        // node, so keys were dropped until the user clicked into a web input.
+        current_focused_browser_ = it->second.browser;
+    } else if (current_focused_browser_.get() &&
+               current_focused_browser_->IsSame(it->second.browser)) {
+        current_focused_browser_ = nullptr;
     }
     it->second.browser->GetHost()->SetFocus(focus);
+}
+
+bool WebviewHandler::sendEditCommand(const std::string& command)
+{
+    auto browser = current_focused_browser_;
+    if (!browser.get()) {
+        return false;
+    }
+    // Windowless browsers never see the macOS responder chain, so Chromium
+    // does not turn ⌘X/⌘C/⌘V/… key events into editing commands. Drive the
+    // frame's clipboard API directly instead.
+    CefRefPtr<CefFrame> frame = browser->GetFocusedFrame();
+    if (!frame.get()) {
+        frame = browser->GetMainFrame();
+    }
+    if (!frame.get()) {
+        return false;
+    }
+    if (command == "cut") {
+        frame->Cut();
+    } else if (command == "copy") {
+        frame->Copy();
+    } else if (command == "paste") {
+        frame->Paste();
+    } else if (command == "selectAll") {
+        frame->SelectAll();
+    } else if (command == "undo") {
+        frame->Undo();
+    } else if (command == "redo") {
+        frame->Redo();
+    } else if (command == "delete") {
+        frame->Delete();
+    } else {
+        return false;
+    }
+    return true;
 }
 
 CefRefPtr<CefBrowser> WebviewHandler::getFocusedBrowser()

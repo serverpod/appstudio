@@ -17,7 +17,12 @@
     instance->_cefWrapper = [[CefWrapper alloc] init];
     instance->_cefWrapper.channel = channel;
     instance->_cefWrapper.textureRegistry = registrar.textures;
-    [webviewPlugins setObject:instance->_cefWrapper forKey: registrar.view.superview];
+    // Key on the Flutter view itself. Where it sits in the window differs
+    // between engine versions, so the key router resolves the wrapper by
+    // window rather than by an exact view identity (see wrapperForEvent:).
+    if (registrar.view != nil) {
+        [webviewPlugins setObject:instance->_cefWrapper forKey:registrar.view];
+    }
 }
 
 - (void)handleMethodCall:(FlutterMethodCall*)call result:(FlutterResult)result {

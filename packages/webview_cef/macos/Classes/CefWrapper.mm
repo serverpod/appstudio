@@ -211,10 +211,69 @@ private:
     return [[event charactersIgnoringModifiers] length] > 0;
 }
 
+// The map is keyed by the Flutter view. Whether that view is the window's
+// contentView or a descendant of it depends on the engine version, so match on
+// the window rather than on an exact view identity.
++ (CefWrapper*)wrapperForEvent:(NSEvent*)event {
+    NSWindow* window = event.window ?: [NSApp keyWindow];
+    if (window == nil) {
+        return nil;
+    }
+    for (NSView* view in [[webviewPlugins keyEnumerator] allObjects]) {
+        if (view.window == window) {
+            return [webviewPlugins objectForKey:view];
+        }
+    }
+    return nil;
+}
+
+// ⌘-based editing shortcuts. A windowless browser is not part of the macOS
+// responder chain, so Chromium never turns these key events into editing
+// commands — they have to be translated and sent explicitly.
++ (std::string)editCommandForEvent:(NSEvent*)event {
+    NSEventModifierFlags flags = [event modifierFlags];
+    if (!(flags & NSEventModifierFlagCommand)) {
+        return std::string();
+    }
+    // ⌃/⌥ chords are page shortcuts, not editing commands.
+    if (flags & (NSEventModifierFlagControl | NSEventModifierFlagOption)) {
+        return std::string();
+    }
+    NSString* key = [[event charactersIgnoringModifiers] lowercaseString];
+    if ([key length] != 1) {
+        return std::string();
+    }
+    const BOOL shift = (flags & NSEventModifierFlagShift) != 0;
+    switch ([key characterAtIndex:0]) {
+        // ⇧⌘X/C/V/A are different commands (e.g. paste and match style); leave
+        // them to the page.
+        case 'x': return shift ? std::string() : std::string("cut");
+        case 'c': return shift ? std::string() : std::string("copy");
+        case 'v': return shift ? std::string() : std::string("paste");
+        case 'a': return shift ? std::string() : std::string("selectAll");
+        case 'z': return shift ? std::string("redo") : std::string("undo");
+        default: return std::string();
+    }
+}
+
 + (BOOL)processKeyboardEvent: (NSEvent*) event {
-    CefWrapper *currentPlugin = [webviewPlugins objectForKey:event.window.contentView];
+    CefWrapper *currentPlugin = [CefWrapper wrapperForEvent:event];
     if(currentPlugin == nil || !currentPlugin->_plugin->getAnyBrowserFocused()){
         return false;
+    }
+
+    if ([event modifierFlags] & NSEventModifierFlagCommand) {
+        std::string editCommand = [CefWrapper editCommandForEvent:event];
+        if (editCommand.empty()) {
+            // Any other ⌘ chord belongs to the app's menu bar (⌘Q, ⌘N, ⌘R …).
+            // Forwarding it to the page would shadow the host's shortcuts.
+            return false;
+        }
+        if ([event type] != NSEventTypeKeyDown) {
+            // Consume the key up too, so the page never sees half a chord.
+            return true;
+        }
+        return currentPlugin->_plugin->sendEditCommand(editCommand);
     }
 
     // While a web input is focused, hand text/composition keys to the OS input
@@ -258,14 +317,18 @@ private:
 //    }
     if([event type] == NSEventTypeKeyDown){
         keyEvent.type = KEYEVENT_RAWKEYDOWN;
-        currentPlugin->_plugin->sendKeyEvent(keyEvent);
+        if (!currentPlugin->_plugin->sendKeyEvent(keyEvent)) {
+            // No browser to deliver to. Returning true here would swallow the
+            // key without anything acting on it, which reads as a dead
+            // keyboard — leave it to the host instead.
+            return false;
+        }
         keyEvent.type = KEYEVENT_CHAR;
     }else{
         keyEvent.type = KEYEVENT_KEYUP;
     }
 
-    currentPlugin->_plugin->sendKeyEvent(keyEvent);
-    return true;
+    return currentPlugin->_plugin->sendKeyEvent(keyEvent);
 }
 
 + (int)getModifiersForEvent:(NSEvent*)event {

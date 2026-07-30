@@ -12,11 +12,20 @@ mixin WebeViewTextInput implements DeltaTextInputClient {
 
   TextInputConnection? _textInputConnection;
 
+  /// Whether this client currently owns the platform text input connection.
+  /// Goes false when another Flutter widget (or another webview) takes it over.
+  bool get hasTextInputClient => _textInputConnection?.attached ?? false;
+
   attachTextInputClient() {
     // On Windows the OS IME is driven by the native WM_IME pipeline (the Flutter
     // text-input/delta path does not deliver composition for an OSR browser on
     // Windows). Don't claim the IME here so the native path can own it.
     if (Platform.isWindows) {
+      return;
+    }
+    // Already the active client: reattaching would tear down a live IME
+    // composition (e.g. when clicking inside the field being composed into).
+    if (hasTextInputClient) {
       return;
     }
     _textInputConnection?.close();

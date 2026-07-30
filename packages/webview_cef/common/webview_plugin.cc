@@ -542,9 +542,9 @@ namespace webview_cef {
 		m_handler->imeFinishComposition();
 	}
 
-	void WebviewPlugin::sendKeyEvent(CefKeyEvent& ev)
+	bool WebviewPlugin::sendKeyEvent(CefKeyEvent& ev)
 	{
-		m_handler->sendKeyEvent(ev);
+		const bool delivered = m_handler->sendKeyEvent(ev);
 		if(ev.type == KEYEVENT_RAWKEYDOWN && ev.windows_key_code == 0x7B && (ev.modifiers & EVENTFLAG_CONTROL_DOWN) != 0){
 			for(auto render : m_renderers){
 				if(render.second.get()->isFocused){
@@ -552,6 +552,12 @@ namespace webview_cef {
 				}
 			}
 		}
+		return delivered;
+	}
+
+	bool WebviewPlugin::sendEditCommand(const std::string& command)
+	{
+		return m_handler->sendEditCommand(command);
 	}
 
 	void WebviewPlugin::setInvokeMethodFunc(std::function<void(std::string, WValue*)> func){

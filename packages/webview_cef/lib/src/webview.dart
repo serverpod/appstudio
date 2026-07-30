@@ -511,6 +511,16 @@ class WebViewState extends State<WebView> with WebeViewTextInput, WidgetsBinding
                   _focusNode.requestFocus();
                 }
               });
+            } else {
+              // Already focused on the Flutter side, so onFocusChange won't
+              // fire. Re-assert host focus anyway: a SetFocus made before the
+              // browser was input-ready is dropped, and nothing else would
+              // recover it — the webview then ignores the keyboard until focus
+              // leaves and comes back.
+              _controller.setClientFocus(true);
+              if (_controller._focusEditable) {
+                attachTextInputClient();
+              }
             }
             _controller._cursorClickDown(ev.localPosition);
           },
