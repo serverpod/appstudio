@@ -2,15 +2,16 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import '../toolchain/toolchain.dart';
+import '../toolchain/tool_status.dart';
+import '../toolchain/toolchain_controller.dart';
 
 enum OpenCodeServeState { stopped, starting, running, stopping }
 
 /// Spawns `opencode serve` bound to a project directory.
 class OpenCodeServe {
-  OpenCodeServe({required this.toolchain});
+  OpenCodeServe({required this.toolchains});
 
-  final Toolchain toolchain;
+  final ToolchainController toolchains;
 
   Process? _process;
   OpenCodeServeState _state = OpenCodeServeState.stopped;
@@ -38,6 +39,14 @@ class OpenCodeServe {
     _projectPath = projectPath;
     _stdout.clear();
 
+    final toolchain = toolchains.current;
+    final opencode = toolchain.opencodeExecutable;
+    if (opencode == null) {
+      _state = OpenCodeServeState.stopped;
+      _error = toolchain.unavailableReason(ToolId.opencode);
+      throw StateError(_error!);
+    }
+
     final port = await _freePort();
     final env = toolchain.processEnvironment();
     // Avoid password prompt / leave local-only unsecured (loopback).
@@ -45,7 +54,7 @@ class OpenCodeServe {
 
     try {
       _process = await Process.start(
-        toolchain.opencodeExecutable,
+        opencode,
         [
           'serve',
           '--hostname',

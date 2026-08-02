@@ -10,7 +10,8 @@ import '../process/dev_session_cleanup.dart';
 import '../process/registration_code.dart';
 import '../session/project_session.dart';
 import '../terminal/studio_terminal.dart';
-import '../toolchain/toolchain.dart';
+import '../toolchain/tool_status.dart';
+import '../toolchain/toolchain_controller.dart';
 
 enum ProcessState { idle, starting, running, stopping }
 
@@ -32,7 +33,7 @@ const _maxPartialLine = 4096;
 
 class ServerpodProcessController extends ChangeNotifier {
   ServerpodProcessController({
-    required this.toolchain,
+    required this.toolchains,
     required this.session,
     required this.terminal,
   }) {
@@ -40,7 +41,7 @@ class ServerpodProcessController extends ChangeNotifier {
     _onSessionChanged();
   }
 
-  final Toolchain toolchain;
+  final ToolchainController toolchains;
   final ProjectSession session;
   final StudioTerminal terminal;
 
@@ -142,12 +143,18 @@ class ServerpodProcessController extends ChangeNotifier {
       }
 
       _setPhase(ProcessState.starting, PreviewPhase.startingServerpod);
+      final serverpod = toolchains.current.serverpodExecutable;
+      if (serverpod == null) {
+        throw Exception(
+          toolchains.current.unavailableReason(ToolId.serverpodCli),
+        );
+      }
       terminal.writeLocal('\r\n==> serverpod start --no-tui\r\n');
       await terminal.spawn(
-        executable: toolchain.serverpodExecutable,
+        executable: serverpod,
         arguments: const ['start', '--no-tui'],
         workingDirectory: projectPath,
-        environment: toolchain.processEnvironment(),
+        environment: toolchains.current.processEnvironment(),
         clearScreen: false,
       );
       _setPhase(ProcessState.running, PreviewPhase.waitingForServer);
@@ -162,12 +169,7 @@ class ServerpodProcessController extends ChangeNotifier {
   /// Resolve packages with the bundled Dart/Flutter so target Macs without a
   /// host SDK (and with a stale `.dart_tool` from another machine) still work.
   Future<void> _ensureDependencies(String projectPath) async {
-    final env = toolchain.processEnvironment();
-    final pubCache = env['PUB_CACHE'];
-    if (pubCache != null && pubCache.isNotEmpty) {
-      await Directory(pubCache).create(recursive: true);
-      terminal.writeLocal('PUB_CACHE=$pubCache\r\n');
-    }
+    final env = toolchains.current.processEnvironment();
 
     final workspaceRoot = await _findWorkspaceRoot(projectPath);
     final packages = workspaceRoot != null
@@ -189,8 +191,12 @@ class ServerpodProcessController extends ChangeNotifier {
       final useFlutter = workspaceRoot != null
           ? await _workspaceHasFlutterPackage(workspaceRoot)
           : await _isFlutterPackage(pkg);
+      final toolchain = toolchains.current;
       final exe =
           useFlutter ? toolchain.flutterExecutable : toolchain.dartExecutable;
+      if (exe == null) {
+        throw Exception(toolchain.unavailableReason(ToolId.flutter));
+      }
       final label = p.basename(pkg);
       terminal.writeLocal(
         '\r\n==> ${useFlutter ? 'flutter' : 'dart'} pub get ($label)\r\n',

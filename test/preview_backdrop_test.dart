@@ -3,10 +3,11 @@ import 'package:appstudio/process/serverpod_process.dart';
 import 'package:appstudio/session/project_session.dart';
 import 'package:appstudio/terminal/studio_terminal.dart';
 import 'package:appstudio/theme/app_theme.dart';
-import 'package:appstudio/toolchain/toolchain.dart';
 import 'package:appstudio/ui/preview_pane.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support/toolchain_support.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 void main() {
@@ -30,7 +31,7 @@ void main() {
     late final ServerpodProcessController process;
     await tester.runAsync(() async {
       process = ServerpodProcessController(
-        toolchain: await Toolchain.resolve(),
+        toolchains: await emptyToolchainController(),
         session: ProjectSession(),
         terminal: StudioTerminal(),
       );

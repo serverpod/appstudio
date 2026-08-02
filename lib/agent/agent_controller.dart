@@ -7,7 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../platform/studio_notifications.dart';
 import '../process/serverpod_process.dart';
 import '../session/project_session.dart';
-import '../toolchain/toolchain.dart';
+import '../toolchain/toolchain_controller.dart';
 import 'agent_transcript.dart';
 import 'opencode_auth_store.dart';
 import 'opencode_client.dart';
@@ -105,12 +105,12 @@ String permissionTitle(String action) {
 /// Owns OpenCode serve lifecycle, SSE transcript, and chat actions.
 class AgentController extends ChangeNotifier {
   AgentController({
-    required this.toolchain,
+    required this.toolchains,
     required this.session,
     required this.process,
     OpenCodeAuthStore? authStore,
   })  : _authStore = authStore ?? OpenCodeAuthStore(),
-        _serve = OpenCodeServe(toolchain: toolchain),
+        _serve = OpenCodeServe(toolchains: toolchains),
         _client = OpenCodeClient(),
         _sse = OpenCodeSse() {
     session.addListener(_onSessionOrProcessChanged);
@@ -119,7 +119,7 @@ class AgentController extends ChangeNotifier {
     _onSessionOrProcessChanged();
   }
 
-  final Toolchain toolchain;
+  final ToolchainController toolchains;
   final ProjectSession session;
   final ServerpodProcessController process;
   final OpenCodeAuthStore _authStore;

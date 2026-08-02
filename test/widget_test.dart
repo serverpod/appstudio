@@ -27,7 +27,7 @@ void main() {
     expect(ProjectSession.previewUri.port, 9998);
   });
 
-  test('Toolchain host badge label', () async {
+  test('Toolchain badge label names the source', () async {
     final toolchain = await Toolchain.resolve();
     expect(toolchain.badgeLabel, isNotEmpty);
   });

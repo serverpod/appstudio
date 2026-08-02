@@ -20,11 +20,15 @@ class MacAppMenu {
     required this.agent,
     required this.themeController,
     required this.onNewProject,
+    required this.onManageTools,
   }) {
     session.addListener(_sync);
     themeController.addListener(_sync);
   }
 
+  static const _toolsMenuId = 'tools';
+  static const _manageToolsId = 'tools_manage';
+  static const _manageToolsIcon = 'wrench.and.screwdriver';
   static const _viewMenuId = 'View';
   static const _fileMenuId = 'file';
   static const _openRecentId = 'file_open_recent';
@@ -52,6 +56,7 @@ class MacAppMenu {
   final AgentController agent;
   final ThemeController themeController;
   final VoidCallback onNewProject;
+  final VoidCallback onManageTools;
 
   bool _installed = false;
   List<String> _recentItemIds = [];
@@ -71,11 +76,29 @@ class MacAppMenu {
     });
 
     await _installFileMenu();
+    await _installToolsMenu();
     await _installViewMenu();
 
     _installed = true;
     await _syncRecents();
     await _syncAppearance();
+  }
+
+  Future<void> _installToolsMenu() async {
+    await MacMenuBar.addSubmenu(
+      parentMenuId: 'main',
+      submenuId: _toolsMenuId,
+      title: 'Tools',
+      index: 2,
+    );
+
+    await MacMenuBar.addMenuItem(
+      menuId: _toolsMenuId,
+      itemId: _manageToolsId,
+      title: 'Manage Tools...',
+      index: 0,
+      systemImage: _manageToolsIcon,
+    );
   }
 
   Future<void> _installFileMenu() async {
@@ -194,6 +217,8 @@ class MacAppMenu {
     switch (itemId) {
       case _newProjectId:
         onNewProject();
+      case _manageToolsId:
+        onManageTools();
       case _openId:
         unawaited(session.openProjectPicker());
       case _closeId:

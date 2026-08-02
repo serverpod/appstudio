@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "manifestId": "2026.08.02.2012",
+  "baseUrl": "https://storage.googleapis.com/serverpod-appstudio-toolchain/",
+  "tools": [
+    {
+      "id": "flutter",
+      "displayName": "Flutter SDK",
+      "description": "Builds and serves the Flutter web app shown in the preview pane.",
+      "version": "3.44.2",
+      "build": 1,
+      "hostAccepts": ">=3.44.0 <3.45.0",
+      "required": true,
+      "installDir": "flutter/3.44.2",
+      "platforms": {
+        "macos-arm64": {
+          "path": "tools/flutter/3.44.2/b1/flutter-macos-arm64.tar.gz",
+          "sha256": "87f20adfafb50eb978a022260bcc59ed90bb1f58861ee47e5f36345331382a21",
+          "downloadBytes": 694147880,
+          "installedBytes": 1579876352,
+          "format": "tar.gz",
+          "stripComponents": 1
+        }
+      },
+      "entrypoints": {
+        "flutter": "bin/flutter",
+        "dart": "bin/cache/dart-sdk/bin/dart"
+      },
+      "metadata": {
+        "channel": "stable",
+        "frameworkRevision": "c9a6c484230f8b5e408ec57be1ef71dee1e77020",
+        "dartSdkVersion": "3.12.2"
+      }
+    },
+    {
+      "id": "serverpod_cli",
+      "displayName": "Serverpod CLI",
+      "description": "Creates projects, generates code and runs the server.",
+      "version": "4.0.0-beta.1",
+      "build": 1,
+      "hostAccepts": ">=4.0.0-beta.1 <4.1.0",
+      "required": true,
+      "installDir": "serverpod_cli/4.0.0-beta.1",
+      "platforms": {
+        "macos-arm64": {
+          "path": "tools/serverpod_cli/4.0.0-beta.1/b1/serverpod_cli-macos-arm64.tar.gz",
+          "sha256": "a8fca27b7e67efbe0e01330bf9808f3c9b56d03872bbce2e6e36bc188b7b2aab",
+          "downloadBytes": 11201300,
+          "installedBytes": 30040064,
+          "format": "tar.gz",
+          "stripComponents": 1
+        }
+      },
+      "entrypoints": {
+        "serverpod": "bin/serverpod"
+      },
+      "metadata": {
+        "nativeAssetsDir": "lib"
+      }
+    },
+    {
+      "id": "opencode",
+      "displayName": "OpenCode",
+      "description": "Backs the Agent tab.",
+      "version": "1.18.4",
+      "build": 1,
+      "hostAccepts": ">=1.18.0",
+      "required": true,
+      "installDir": "opencode/1.18.4",
+      "platforms": {
+        "macos-arm64": {
+          "path": "tools/opencode/1.18.4/b1/opencode-macos-arm64.tar.gz",
+          "sha256": "94152c5fca175859001d809f11dc5bad7333001f43b7b645e5246e08400754ed",
+          "downloadBytes": 44850474,
+          "installedBytes": 138297344,
+          "format": "tar.gz",
+          "stripComponents": 1
+        }
+      },
+      "entrypoints": {
+        "opencode": "opencode"
+      },
+      "metadata": {}
+    },
+    {
+      "id": "git",
+      "displayName": "Git",
+      "description": "Flutter needs a real git. macOS ships a stub that prompts to install Xcode.",
+      "version": "2.53.0-3",
+      "build": 1,
+      "hostAccepts": ">=2.20.0",
+      "required": true,
+      "installDir": "git/2.53.0-3",
+      "platforms": {
+        "macos-arm64": {
+          "path": "tools/git/2.53.0-3/b1/git-macos-arm64.tar.gz",
+          "sha256": "1700caeb6fad9f609d4118c49ea37be57c65def1c0a8fb5591c1c13f78da46ec",
+          "downloadBytes": 60229484,
+          "installedBytes": 148090880,
+          "format": "tar.gz",
+          "stripComponents": 1
+        }
+      },
+      "entrypoints": {
+        "git": "bin/git"
+      },
+      "metadata": {
+        "execPath": "libexec/git-core"
+      }
+    },
+    {
+      "id": "llvm-tools",
+      "displayName": "Native tools",
+      "description": "otool and install_name_tool, used by Serverpod to relocate native libraries. macOS ships stubs that prompt to install Xcode.",
+      "version": "20.1.8",
+      "build": 1,
+      "hostAccepts": "*",
+      "required": true,
+      "installDir": "llvm-tools/20.1.8",
+      "platforms": {
+        "macos-arm64": {
+          "path": "tools/llvm-tools/20.1.8/b1/llvm-tools-macos-arm64.tar.gz",
+          "sha256": "03f9b9d7ee7f2b38aa613ada7feae3abadbd8219c0f49c222961bac683c27f1b",
+          "downloadBytes": 9608845,
+          "installedBytes": 42471424,
+          "format": "tar.gz",
+          "stripComponents": 1
+        }
+      },
+      "entrypoints": {
+        "otool": "bin/otool",
+        "install_name_tool": "bin/install_name_tool"
+      },
+      "metadata": {
+        "upstream": "llvm-otool and llvm-install-name-tool from an official LLVM release, installed under the Apple tool names"
+      }
+    }
+  ]
+}

@@ -8,8 +8,9 @@ import '../session/project_session.dart';
 import '../terminal/studio_terminal.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
-import '../toolchain/toolchain.dart';
+import '../toolchain/toolchain_controller.dart';
 import 'new_project_dialog.dart';
+import 'toolchain/manage_tools_dialog.dart';
 import 'preview_pane.dart';
 import 'settings/providers_settings_dialog.dart';
 import 'start_page.dart';
@@ -18,7 +19,7 @@ import 'terminal_pane.dart';
 class StudioShell extends StatefulWidget {
   const StudioShell({
     super.key,
-    required this.toolchain,
+    required this.toolchains,
     required this.session,
     required this.terminal,
     required this.process,
@@ -26,7 +27,7 @@ class StudioShell extends StatefulWidget {
     required this.themeController,
   });
 
-  final Toolchain toolchain;
+  final ToolchainController toolchains;
   final ProjectSession session;
   final StudioTerminal terminal;
   final ServerpodProcessController process;
@@ -58,10 +59,14 @@ class _StudioShellState extends State<StudioShell> {
     showProvidersSettingsDialog(context, agent: widget.agent);
   }
 
+  void _openManageTools() {
+    showManageToolsDialog(context, toolchains: widget.toolchains);
+  }
+
   void _newProject() {
     showNewProjectDialog(
       context,
-      toolchain: widget.toolchain,
+      toolchains: widget.toolchains,
       session: widget.session,
     );
   }
@@ -87,7 +92,8 @@ class _StudioShellState extends State<StudioShell> {
         return Column(
           children: [
             _Toolbar(
-              toolchain: widget.toolchain,
+              toolchains: widget.toolchains,
+              onManageTools: _openManageTools,
               session: widget.session,
               process: widget.process,
               leftPanelVisible: _leftPanelVisible,
@@ -126,18 +132,20 @@ class _StudioShellState extends State<StudioShell> {
 
 class _Toolbar extends StatelessWidget {
   const _Toolbar({
-    required this.toolchain,
+    required this.toolchains,
     required this.session,
     required this.process,
     required this.leftPanelVisible,
     required this.onToggleLeftPanel,
+    required this.onManageTools,
   });
 
-  final Toolchain toolchain;
+  final ToolchainController toolchains;
   final ProjectSession session;
   final ServerpodProcessController process;
   final bool leftPanelVisible;
   final VoidCallback? onToggleLeftPanel;
+  final VoidCallback onManageTools;
 
   @override
   Widget build(BuildContext context) {
@@ -191,26 +199,7 @@ class _Toolbar extends StatelessWidget {
             )
           else
             const Spacer(),
-          ShadBadge.secondary(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  LucideIcons.package,
-                  size: 12,
-                  color: scheme.mutedForeground,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  toolchain.badgeLabel,
-                  style: textTheme.small.copyWith(
-                    fontWeight: FontWeight.w500,
-                    color: scheme.mutedForeground,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          _ToolchainBadge(toolchains: toolchains, onTap: onManageTools),
           const SizedBox(width: 4),
           _IconAction(
             icon: LucideIcons.play,
@@ -340,6 +329,64 @@ class _IconAction extends StatelessWidget {
         width: 34,
         height: 34,
       ),
+    );
+  }
+}
+
+/// Toolbar badge showing which toolchain is in use. Turns destructive and
+/// opens the Tools Manager when something required is missing.
+class _ToolchainBadge extends StatelessWidget {
+  const _ToolchainBadge({required this.toolchains, required this.onTap});
+
+  final ToolchainController toolchains;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: toolchains,
+      builder: (context, _) {
+        final theme = ShadTheme.of(context);
+        final scheme = theme.colorScheme;
+        final missing = toolchains.inventory.missingRequired.length;
+        final color = missing > 0 ? scheme.destructive : scheme.mutedForeground;
+
+        return ShadTooltip(
+          builder: (context) => Text(
+            missing > 0
+                ? 'Some tools are missing — open Manage Tools'
+                : 'Manage Tools',
+          ),
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: onTap,
+              child: ShadBadge.secondary(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      missing > 0
+                          ? LucideIcons.circleAlert
+                          : LucideIcons.package,
+                      size: 12,
+                      color: color,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      toolchains.current.badgeLabel,
+                      style: theme.textTheme.small.copyWith(
+                        fontWeight: FontWeight.w500,
+                        color: color,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

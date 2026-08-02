@@ -53,17 +53,74 @@ UI reference for design patterns: `../cloudui/cloudui_flutter/`.
 ### First-time / day-to-day (Makefile)
 
 ```bash
-make build_toolchain   # pub get + CEF/pods + toolchain/ (once, or when incomplete)
-make start             # ensure toolchain, then flutter run -d macos
+make deps              # pub get + CEF/pods (once, or when CEF is missing)
+make start             # flutter run -d macos
+make clean             # drop build/ + dist/ (keeps CEF, Pods, toolchain/)
+make clean_all         # also drop CEF, Pods and the dev toolchain
 make dist_debug        # unsigned DMG
 make dist              # Developer ID + notarized DMG
 ```
 
-`start` / `dist` / `dist_debug` call `ensure_toolchain` first and run `build_toolchain` if pins, git, cctools, or CEF are missing.
+`start` / `dist` / `dist_debug` only need CEF; the app downloads its own tools.
 
-### Bundled runtime (shipped in release builds)
+**Stale-embed trap:** Xcode never deletes unknown files under `Contents/Resources`, so a build tree from before the toolchain moved out keeps a ~1.8 GB embed alive — it gets re-signed on every release and shipped in the DMG (2.1 GB app / 1.06 GB DMG instead of 350 MB / 158 MB). `distribute_macos.sh` deletes it defensively; `make clean` is the honest fix.
 
-App Studio embeds a **web-focused Flutter SDK**, a **full Serverpod CLI bundle**, and **OpenCode** so opened projects run without host tools installed. Source of truth: `toolchain/`.
+### Tool resolution (in the app)
+
+- `ToolchainController` (`lib/toolchain/toolchain_controller.dart`) owns the resolved `Toolchain`. **Consumers read `toolchains.current` at call time — never capture it**, or they strand on a snapshot taken before the user installed anything.
+- Resolution is **per tool** across four sources, in precedence order: dev repo (`<repo>/toolchain`) → bundled (`Contents/Resources/toolchain`) → managed (`~/Library/Application Support/AppStudio/toolchain`) → host. A missing OpenCode no longer invalidates Flutter.
+- Executable getters are **nullable**. Spawn sites check `toolchain.unavailableReason(id)` first; a bare command name would only defer the failure to `Process.start`.
+- `Toolchain.resolve()` short-circuits at the first satisfied candidate (~350 ms). `deep: true` enumerates every candidate (~900 ms) and is only for the Tools Manager — the full sweep is too slow to run before `runApp`.
+- **Never probe `/usr/bin/{git,otool,install_name_tool,clang,ar,ld}`** — all confirmed CLT shims (identical 118,928-byte stub) that pop a modal installer. `codesign` at /usr/bin *is* real. Candidates come from Homebrew, `/Library/Developer/CommandLineTools`, and `$(xcode-select -p)`.
+- Flutter is version-detected from `bin/cache/flutter.version.json`, never by running `flutter --version` — that can trigger a precache download on a cold SDK.
+- `PUB_CACHE` is deliberately **not** set: `package_config.json` stores absolute paths, so a private cache would make every switch to an external editor re-resolve the project.
+- Version rules live in `tool_version.dart`. A numeric-only suffix is a *packaging revision*, not a prerelease — dugite's `2.53.0-3` is newer than `2.53.0`, while `4.0.0-beta.1` is older than `4.0.0`.
+
+### Publishing tools (release engineer)
+
+```bash
+./tool/bundle_toolchain.sh                    # build the trees (unchanged)
+./tool/publish_toolchain.sh --dry-run         # sizes, no upload
+./tool/publish_toolchain.sh --only=git        # publish a subset
+./tool/publish_toolchain.sh                   # publish everything
+```
+
+- Bucket `gs://serverpod-appstudio-toolchain`, served from
+  `https://storage.googleapis.com/serverpod-appstudio-toolchain/`. Public read; publisher has
+  **`objectCreator`, not `objectAdmin`** — it can add objects but never overwrite or delete
+  one, so immutability is enforced by IAM. **A mistaken publish cannot be undone with the
+  publisher role: always `--dry-run` first.**
+- Object names embed the build counter as a path segment
+  (`tools/<id>/<version>/b<build>/<id>-macos-arm64.tar.gz`), so repacking the same upstream
+  version is a new URL. There is no mutable `latest.json`.
+- The script hashes the **exact bytes uploaded**, re-downloads to re-verify, then rewrites
+  `assets/toolchain_manifest.json`. Commit that file with the release.
+- Do **not** put a service-account key in a `.env`. Write access here is effectively
+  code-signing authority over every install. Use `--impersonate-service-account` (no key
+  exists) or Workload Identity Federation in CI.
+
+### Native tools: what we can and cannot ship
+
+Serverpod's per-start native-assets step runs exactly three commands on prebuilt dylibs:
+`otool -D`, `install_name_tool -id/-change`, then `codesign --force --sign -`.
+
+- `/usr/bin/{otool,install_name_tool,clang,ar,ld,lipo,strip}` are **all the same 118,928-byte
+  Xcode CLT shim** and pop a modal installer on a clean Mac. Never execute them.
+- `/usr/bin/codesign` (459,824 bytes) **is** a real base-system binary — nothing to ship.
+- We ship LLVM's `llvm-objdump`/`llvm-objcopy` under the names `otool`/`install_name_tool`
+  (they dispatch on `argv[0]`). Verified: `otool -D` output is byte-identical to Apple's, and
+  `install_name_tool` self-reports as "compatible with cctools install_name_tool".
+  `llvm-install-name-tool` does not re-sign after editing a Mach-O — which is fine, because
+  Serverpod runs `codesign` on the very next line.
+- **Compiling** native code from source is different: `native_toolchain_c` needs `clang`, `ar`
+  and `xcrun --show-sdk-path`, and **the macOS SDK cannot be redistributed**. That path
+  requires Xcode CLT; detect it and offer `xcode-select --install`.
+
+### Dev toolchain (optional, `<repo>/toolchain`)
+
+`make dev_toolchain` builds a local tree that the app prefers over anything it would download —
+useful offline. It is **not** required to build, run or ship the app: the toolchain is no
+longer embedded in the `.app`, and the DMG carries none of it.
 
 ```
 toolchain/
@@ -72,11 +129,11 @@ toolchain/
   serverpod_cli/<version>/{bin,lib}/   # full CLI bundle — lib/ has sqlite dylibs (required)
   opencode/<version>/opencode          # darwin-arm64 CLI binary
   git/<version>/{bin,libexec}/         # portable Git (dugite-native) — avoids Xcode CLT stub
-  cctools/{bin,lib}/                   # real otool + install_name_tool (no CLT stubs)
+  llvm-tools/<version>/bin/            # otool + install_name_tool from LLVM (no CLT stubs)
   bin/{flutter,dart,serverpod,opencode,git}
 ```
 
-- **`./tool/bundle_toolchain.sh`** — downloads Flutter, runs `flutter precache --web`, strips iOS/Android/other engine artifacts; downloads OpenCode + portable Git; copies real `otool` / `install_name_tool` from Xcode into `cctools/`. Does **not** download Serverpod; copy the full CLI bundle into `toolchain/serverpod_cli/<version>/` first. Flags: `--force`, `--flutter=VERSION`, `--serverpod=VERSION`, `--opencode=VERSION`, `--git=VERSION`.
+- **`./tool/bundle_toolchain.sh`** — downloads Flutter, runs `flutter precache --web`, strips iOS/Android/other engine artifacts; downloads OpenCode + portable Git; downloads an official LLVM release and installs `llvm-objdump`/`llvm-objcopy` as `otool`/`install_name_tool`. Does **not** download Serverpod; copy the full CLI bundle into `toolchain/serverpod_cli/<version>/` first. Flags: `--force`, `--flutter=VERSION`, `--serverpod=VERSION`, `--opencode=VERSION`, `--git=VERSION`.
 - **`Toolchain.resolve()`** (`lib/toolchain/toolchain.dart`) — uses bundled toolchain if `active.json` exists (repo `toolchain/` in dev, `AppStudio.app/Contents/Resources/toolchain` in release), otherwise falls back to host `PATH`. Prepends portable `git` + `cctools` to `PATH` and sets `FLUTTER_PREBUILT_ENGINE_VERSION` so target Macs don't need Xcode / CLT for web preview.
 - **Debug builds** skip embedding (`tool/embed_toolchain.sh`) and use host `flutter`/`dart`/`serverpod`. **Release** embeds the full `toolchain/` tree into the `.app`.
 
@@ -85,14 +142,32 @@ Opened Serverpod projects must launch Flutter in **`web-server`** mode on port *
 ### Release / distribute
 
 ```bash
-./tool/bundle_toolchain.sh
-./tool/distribute_macos.sh              # Developer ID sign (Serverpod AB)
-NOTARIZE=1 ./tool/distribute_macos.sh   # + notarize via notarytool profile "appstudio"
+make dist                 # build + sign + notarize + PUBLISH to the bucket
+PUBLISH=0 make dist       # stop at the local DMG
+make publish_dist         # upload an already-built DMG
+make dist_debug           # unsigned, local only, never uploaded
 ```
 
-Defaults: bundle id `dev.serverpod.appstudio`,  
-`SIGN_IDENTITY="Developer ID Application: Serverpod AB (WK2NRY4GS4)"`,  
-`NOTARY_PROFILE=appstudio`. Produces a DMG under `dist/macos/`.
+Defaults: bundle id `dev.serverpod.appstudio`,
+`SIGN_IDENTITY="Developer ID Application: Serverpod AB (WK2NRY4GS4)"`,
+`NOTARY_PROFILE=appstudio`. DMG lands in `dist/macos/`.
+
+**`make dist` publishes.** `tool/publish_dist.sh` derives the path from
+`pubspec.yaml` (`version: 1.0.0+1` → `releases/macos/1.0.0/b1/AppStudio-1.0.0-arm64.dmg`)
+and uploads with `--if-generation-match=0`, so objects are immutable — a
+re-release means bumping the pubspec build number, never overwriting a URL
+someone already has. A `.sha256` sidecar goes up alongside it.
+
+Three gates run before any upload, all verified to reject:
+- the DMG is **mounted** and its `CFBundleShortVersionString` must match pubspec
+  (stops a stale DMG being served under a new version number),
+- it must contain no `Contents/Resources/toolchain` (stale embed),
+- it must have a stapled notarization ticket (`--allow-unnotarized` overrides
+  for internal builds, and says so loudly).
+
+Reference sizes for a clean, notarized build: **.app 350 MB, DMG 156 MB**
+(CEF is 302 MB of it). If you see ~2.1 GB / ~1.06 GB, the build tree is stale —
+run `make clean`.
 
 ## UI & design
 

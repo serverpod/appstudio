@@ -3,9 +3,11 @@ import 'package:appstudio/agent/agent_transcript.dart';
 import 'package:appstudio/process/serverpod_process.dart';
 import 'package:appstudio/session/project_session.dart';
 import 'package:appstudio/terminal/studio_terminal.dart';
-import 'package:appstudio/toolchain/toolchain.dart';
 import 'package:flutter_test/flutter_test.dart';
+
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'support/toolchain_support.dart';
 
 /// Event payloads mirror the shapes in `opencode serve`'s OpenAPI document
 /// (`GET /doc`) for the bundled CLI version.
@@ -16,15 +18,15 @@ void main() {
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
-    final toolchain = await Toolchain.resolve();
+    final toolchains = await emptyToolchainController();
     final session = ProjectSession();
     final process = ServerpodProcessController(
-      toolchain: toolchain,
+      toolchains: toolchains,
       session: session,
       terminal: StudioTerminal(),
     );
     controller = AgentController(
-      toolchain: toolchain,
+      toolchains: toolchains,
       session: session,
       process: process,
     );

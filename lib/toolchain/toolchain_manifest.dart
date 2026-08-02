@@ -1,0 +1,220 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'tool_status.dart';
+import 'tool_version.dart';
+
+/// Bumped only for breaking shape changes. A manifest declaring a newer schema
+/// is ignored rather than half-parsed.
+const kManifestSchemaVersion = 1;
+
+const kBakedManifestAsset = 'assets/toolchain_manifest.json';
+
+/// Key into a tool's `platforms` map.
+String currentPlatformKey() {
+  if (!Platform.isMacOS) return 'unsupported';
+  // Platform.version reads e.g. "3.12.2 ... (macos_arm64)".
+  return Platform.version.contains('arm64') ? 'macos-arm64' : 'macos-x64';
+}
+
+class ToolArtifact {
+  const ToolArtifact({
+    required this.path,
+    required this.sha256,
+    required this.downloadBytes,
+    required this.installedBytes,
+    required this.format,
+    required this.stripComponents,
+  });
+
+  /// Relative to the manifest's `baseUrl`.
+  final String path;
+  final String sha256;
+  final int downloadBytes;
+  final int installedBytes;
+  final String format;
+  final int stripComponents;
+
+  static ToolArtifact? tryParse(Map<String, dynamic> json) {
+    final path = json['path'] as String?;
+    final sha = json['sha256'] as String?;
+    if (path == null || path.isEmpty || sha == null || sha.isEmpty) return null;
+    return ToolArtifact(
+      path: path,
+      sha256: sha.toLowerCase(),
+      downloadBytes: _asInt(json['downloadBytes']),
+      installedBytes: _asInt(json['installedBytes']),
+      format: json['format'] as String? ?? 'tar.gz',
+      stripComponents: _asInt(json['stripComponents']),
+    );
+  }
+}
+
+class ToolSpec {
+  const ToolSpec({
+    required this.id,
+    required this.displayName,
+    required this.description,
+    required this.version,
+    required this.build,
+    required this.hostAccepts,
+    required this.required,
+    required this.installDir,
+    required this.platforms,
+    required this.entrypoints,
+    required this.metadata,
+  });
+
+  final ToolId id;
+  final String displayName;
+  final String description;
+
+  /// The version we install.
+  final ToolVersion version;
+
+  /// Repack counter — lets us republish the same upstream version.
+  final int build;
+
+  /// What a *host* install must satisfy to be reused instead.
+  final VersionRange hostAccepts;
+
+  final bool required;
+
+  /// Relative to the managed toolchain root, e.g. `flutter/3.44.2`.
+  final String installDir;
+  final Map<String, ToolArtifact> platforms;
+
+  /// Paths inside the install dir that must exist for it to count as complete.
+  final Map<String, String> entrypoints;
+  final Map<String, dynamic> metadata;
+
+  ToolArtifact? get artifactForCurrentPlatform => platforms[currentPlatformKey()];
+
+  static ToolSpec? tryParse(Map<String, dynamic> json) {
+    final rawId = json['id'] as String?;
+    if (rawId == null) return null;
+    final id = ToolId.fromManifestId(rawId);
+    if (id == null) return null;
+
+    final version = ToolVersion.tryParse(json['version'] as String?);
+    if (version == null) return null;
+
+    // A malformed range is a manifest bug — refuse the tool rather than
+    // defaulting to something permissive.
+    final hostAccepts = VersionRange.tryParse(json['hostAccepts'] as String?);
+    if (hostAccepts == null) return null;
+
+    final platforms = <String, ToolArtifact>{};
+    final rawPlatforms = json['platforms'];
+    if (rawPlatforms is Map) {
+      for (final entry in rawPlatforms.entries) {
+        final value = entry.value;
+        if (value is! Map) continue;
+        final artifact = ToolArtifact.tryParse(
+          value.map((k, v) => MapEntry(k.toString(), v)),
+        );
+        if (artifact != null) platforms[entry.key.toString()] = artifact;
+      }
+    }
+
+    return ToolSpec(
+      id: id,
+      displayName: json['displayName'] as String? ?? id.displayName,
+      description: json['description'] as String? ?? '',
+      version: version,
+      build: _asInt(json['build']),
+      hostAccepts: hostAccepts,
+      required: json['required'] as bool? ?? true,
+      installDir: json['installDir'] as String? ??
+          '${id.manifestId}/$version',
+      platforms: Map.unmodifiable(platforms),
+      entrypoints: Map.unmodifiable(_asStringMap(json['entrypoints'])),
+      metadata: Map.unmodifiable(_asMap(json['metadata'])),
+    );
+  }
+}
+
+class ToolManifest {
+  const ToolManifest({
+    required this.manifestId,
+    required this.baseUrl,
+    required this.tools,
+  });
+
+  /// Monotonic id used to decide whether a fetched manifest supersedes the
+  /// baked one, and to re-prompt after a pin changes.
+  final String manifestId;
+  final Uri baseUrl;
+  final Map<ToolId, ToolSpec> tools;
+
+  ToolSpec? operator [](ToolId id) => tools[id];
+
+  Uri urlFor(ToolArtifact artifact) => baseUrl.resolve(artifact.path);
+
+  static ToolManifest? tryParse(String source) {
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(source);
+    } catch (_) {
+      return null;
+    }
+    if (decoded is! Map) return null;
+    final json = decoded.map((k, v) => MapEntry(k.toString(), v));
+
+    // Forward compatibility: a newer schema is ignored, not half-read.
+    if (_asInt(json['schemaVersion']) != kManifestSchemaVersion) return null;
+
+    final baseUrl = Uri.tryParse(json['baseUrl'] as String? ?? '');
+    if (baseUrl == null || !baseUrl.hasScheme) return null;
+
+    final tools = <ToolId, ToolSpec>{};
+    final rawTools = json['tools'];
+    if (rawTools is List) {
+      for (final entry in rawTools) {
+        if (entry is! Map) continue;
+        final spec = ToolSpec.tryParse(
+          entry.map((k, v) => MapEntry(k.toString(), v)),
+        );
+        if (spec != null) tools[spec.id] = spec;
+      }
+    }
+    if (tools.isEmpty) return null;
+
+    return ToolManifest(
+      manifestId: json['manifestId'] as String? ?? '0',
+      baseUrl: baseUrl,
+      tools: Map.unmodifiable(tools),
+    );
+  }
+
+  /// The manifest compiled into the app — the source of truth for what this
+  /// build requires, and the offline fallback.
+  ///
+  /// [loadAsset] is injected (normally `rootBundle.loadString`) so this library
+  /// stays free of Flutter and can run in a plain Dart script or unit test.
+  static Future<ToolManifest> loadBaked(
+    Future<String> Function(String key) loadAsset,
+  ) async {
+    final source = await loadAsset(kBakedManifestAsset);
+    final manifest = tryParse(source);
+    if (manifest == null) {
+      throw StateError('Bundled $kBakedManifestAsset is not a valid manifest');
+    }
+    return manifest;
+  }
+}
+
+int _asInt(Object? value) => switch (value) {
+      int() => value,
+      double() => value.round(),
+      String() => int.tryParse(value) ?? 0,
+      _ => 0,
+    };
+
+Map<String, dynamic> _asMap(Object? value) => value is Map
+    ? value.map((k, v) => MapEntry(k.toString(), v))
+    : const <String, dynamic>{};
+
+Map<String, String> _asStringMap(Object? value) => value is Map
+    ? {for (final e in value.entries) e.key.toString(): e.value.toString()}
+    : const <String, String>{};

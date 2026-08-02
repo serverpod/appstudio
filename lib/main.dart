@@ -11,9 +11,11 @@ import 'session/project_session.dart';
 import 'terminal/studio_terminal.dart';
 import 'theme/app_theme.dart';
 import 'theme/theme_controller.dart';
-import 'toolchain/toolchain.dart';
+import 'toolchain/toolchain_controller.dart';
 import 'platform/macos_app_menu.dart';
 import 'ui/new_project_dialog.dart';
+import 'ui/toolchain/manage_tools_dialog.dart';
+import 'ui/toolchain/toolchain_setup_dialog.dart';
 import 'ui/studio_shell.dart';
 
 Future<void> main() async {
@@ -24,17 +26,17 @@ Future<void> main() async {
   final themeController = ThemeController();
   await themeController.load();
 
-  final toolchain = await Toolchain.resolve();
+  final toolchains = await ToolchainController.create();
   final session = ProjectSession();
   await session.loadRecents();
   final terminal = StudioTerminal();
   final process = ServerpodProcessController(
-    toolchain: toolchain,
+    toolchains: toolchains,
     session: session,
     terminal: terminal,
   );
   final agent = AgentController(
-    toolchain: toolchain,
+    toolchains: toolchains,
     session: session,
     process: process,
   );
@@ -42,7 +44,7 @@ Future<void> main() async {
   runApp(
     AppStudioApp(
       themeController: themeController,
-      toolchain: toolchain,
+      toolchains: toolchains,
       session: session,
       terminal: terminal,
       process: process,
@@ -55,7 +57,7 @@ class AppStudioApp extends StatefulWidget {
   const AppStudioApp({
     super.key,
     required this.themeController,
-    required this.toolchain,
+    required this.toolchains,
     required this.session,
     required this.terminal,
     required this.process,
@@ -63,7 +65,7 @@ class AppStudioApp extends StatefulWidget {
   });
 
   final ThemeController themeController;
-  final Toolchain toolchain;
+  final ToolchainController toolchains;
   final ProjectSession session;
   final StudioTerminal terminal;
   final ServerpodProcessController process;
@@ -88,8 +90,30 @@ class _AppStudioAppState extends State<AppStudioApp> {
       agent: widget.agent,
       themeController: widget.themeController,
       onNewProject: _showNewProjectDialog,
+      onManageTools: _showManageToolsDialog,
     );
     unawaited(_macMenu!.install());
+    // Clear anything a crashed install left behind, then offer to fetch what
+    // is missing. Both after the first frame, so neither delays launch.
+    unawaited(widget.toolchains.collectGarbage());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _offerToolchainSetup());
+  }
+
+  Future<void> _offerToolchainSetup() async {
+    final navigatorContext = _navigatorKey.currentContext;
+    if (!mounted || navigatorContext == null) return;
+    await maybeShowToolchainSetup(
+      navigatorContext,
+      toolchains: widget.toolchains,
+    );
+  }
+
+  void _showManageToolsDialog() {
+    final navigatorContext = _navigatorKey.currentContext;
+    if (!mounted || navigatorContext == null) return;
+    unawaited(
+      showManageToolsDialog(navigatorContext, toolchains: widget.toolchains),
+    );
   }
 
   void _showNewProjectDialog() {
@@ -98,7 +122,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
     unawaited(
       showNewProjectDialog(
         navigatorContext,
-        toolchain: widget.toolchain,
+        toolchains: widget.toolchains,
         session: widget.session,
       ),
     );
@@ -132,7 +156,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
           darkTheme: buildDarkTheme(),
           themeMode: widget.themeController.mode,
           home: StudioShell(
-            toolchain: widget.toolchain,
+            toolchains: widget.toolchains,
             session: widget.session,
             terminal: widget.terminal,
             process: widget.process,

@@ -15,35 +15,6 @@ SKIP_BUNDLE_CHECK="${SKIP_BUNDLE_CHECK:-0}"
 # Set SKIP_BUILD=1 to re-sign / re-package an existing Release .app (faster notarize retries).
 SKIP_BUILD="${SKIP_BUILD:-0}"
 DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist/macos}"
-TOOLCHAIN_DIR="$ROOT_DIR/toolchain"
-
-if [[ "$SKIP_BUNDLE_CHECK" != "1" ]]; then
-  if [[ ! -f "$TOOLCHAIN_DIR/active.json" ]]; then
-    echo "Bundled toolchain missing. Run ./tool/bundle_toolchain.sh first," >&2
-    echo "or set SKIP_BUNDLE_CHECK=1 to continue with host toolchain." >&2
-    exit 1
-  fi
-  CLI_VER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["serverpod_cli"])' "$TOOLCHAIN_DIR/active.json")"
-  if [[ ! -x "$TOOLCHAIN_DIR/serverpod_cli/$CLI_VER/bin/serverpod" || ! -d "$TOOLCHAIN_DIR/serverpod_cli/$CLI_VER/lib" ]]; then
-    echo "Serverpod CLI bundle incomplete. Need:" >&2
-    echo "  $TOOLCHAIN_DIR/serverpod_cli/$CLI_VER/bin/serverpod" >&2
-    echo "  $TOOLCHAIN_DIR/serverpod_cli/$CLI_VER/lib/" >&2
-    exit 1
-  fi
-  GIT_VER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("git",""))' "$TOOLCHAIN_DIR/active.json")"
-  if [[ -z "$GIT_VER" || ! -x "$TOOLCHAIN_DIR/git/$GIT_VER/bin/git" ]]; then
-    echo "Portable Git missing. Run ./tool/bundle_toolchain.sh to download dugite-native," >&2
-    echo "or set SKIP_BUNDLE_CHECK=1 to continue without it." >&2
-    echo "  Expected: $TOOLCHAIN_DIR/git/<version>/bin/git" >&2
-    exit 1
-  fi
-  if [[ ! -x "$TOOLCHAIN_DIR/cctools/bin/otool" || ! -x "$TOOLCHAIN_DIR/cctools/bin/install_name_tool" ]]; then
-    echo "cctools missing (otool / install_name_tool). Run ./tool/bundle_toolchain.sh," >&2
-    echo "or set SKIP_BUNDLE_CHECK=1 to continue without it." >&2
-    exit 1
-  fi
-fi
-
 APP_PATH="$(find "$ROOT_DIR/build/macos/Build/Products/Release" -maxdepth 1 -name '*.app' | head -n 1 || true)"
 
 if [[ "$SKIP_BUILD" != "1" ]]; then
@@ -65,21 +36,24 @@ fi
 
 echo "==> App: $APP_PATH"
 
-if [[ "$SKIP_BUILD" != "1" && -f "$TOOLCHAIN_DIR/active.json" ]]; then
-  bash "$ROOT_DIR/tool/copy_toolchain_into_app.sh" "$APP_PATH" "$TOOLCHAIN_DIR"
-elif [[ "$SKIP_BUILD" == "1" && -f "$TOOLCHAIN_DIR/active.json" ]]; then
-  # Ensure toolchain is present; copy if missing (idempotent enough for retries).
-  if [[ ! -f "$APP_PATH/Contents/Resources/toolchain/active.json" ]]; then
-    bash "$ROOT_DIR/tool/copy_toolchain_into_app.sh" "$APP_PATH" "$TOOLCHAIN_DIR"
-  fi
+# Xcode never deletes unknown files under Contents/Resources, so a build tree
+# from before the toolchain moved out still carries the old embed — 1.8 GB that
+# would be re-signed on every release and shipped in the DMG. Drop it.
+STALE_TOOLCHAIN="$APP_PATH/Contents/Resources/toolchain"
+if [[ -d "$STALE_TOOLCHAIN" ]]; then
+  echo "==> Removing stale embedded toolchain ($(du -sh "$STALE_TOOLCHAIN" | awk '{print $1}'))"
+  echo "    The app downloads its tools at runtime; nothing should embed them."
+  rm -rf "$STALE_TOOLCHAIN"
 fi
 
 # Sign a single path.
 # - Main app / helper .apps → Release.entitlements (sandbox off, JIT, network).
-# - Nested toolchain CLIs (dart, etc.) → Tooling.entitlements so the Dart VM
-#   can mmap flutter_tools.snapshot under hardened runtime (without this,
-#   target Macs fail with "mmap failed Invalid argument").
 # - Other frameworks/dylibs → hardened runtime, no entitlements plist.
+#
+# The toolchain is no longer nested inside the bundle, so it needs no signing
+# from us at all: it lives in ~/Library/Application Support, is written by our
+# own downloader (so carries no com.apple.quarantine), and ad-hoc signatures
+# execute fine on Apple Silicon.
 codesign_one() {
   local path="$1"
   if [[ -z "$SIGN_IDENTITY" ]]; then
@@ -89,9 +63,6 @@ codesign_one() {
   case "$path" in
     *.app)
       args+=(--entitlements "$ROOT_DIR/macos/Runner/Release.entitlements")
-      ;;
-    */Contents/Resources/toolchain/*)
-      args+=(--entitlements "$ROOT_DIR/macos/Runner/Tooling.entitlements")
       ;;
   esac
   echo "    codesign ${path#"$APP_PATH/"}"
@@ -189,26 +160,6 @@ sys.stdout.write("\n".join(paths) + ("\n" if paths else ""))
     echo "==> CEF Libraries/*.dylib Developer ID + timestamp OK"
   fi
 
-  # Smoke-test: dart must mmap flutter_tools.snapshot (needs Tooling.entitlements).
-  FLUTTER_VER="$(
-    python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["flutter"])' \
-      "$APP_PATH/Contents/Resources/toolchain/active.json" 2>/dev/null || true
-  )"
-  if [[ -n "$FLUTTER_VER" ]]; then
-    DART_BIN="$APP_PATH/Contents/Resources/toolchain/flutter/$FLUTTER_VER/bin/cache/dart-sdk/bin/dart"
-    SNAP="$APP_PATH/Contents/Resources/toolchain/flutter/$FLUTTER_VER/bin/cache/flutter_tools.snapshot"
-    if [[ -x "$DART_BIN" && -f "$SNAP" ]]; then
-      echo "==> Smoke-testing dart → flutter_tools.snapshot"
-      if ! FLUTTER_ROOT="$APP_PATH/Contents/Resources/toolchain/flutter/$FLUTTER_VER" \
-          "$DART_BIN" "$SNAP" --version >/dev/null; then
-        echo "error: dart failed to load flutter_tools.snapshot after codesign." >&2
-        echo "Toolchain binaries must be signed with macos/Runner/Tooling.entitlements" >&2
-        echo "(allow-jit / allow-unsigned-executable-memory)." >&2
-        exit 1
-      fi
-      echo "==> flutter_tools.snapshot OK"
-    fi
-  fi
 else
   echo "==> SIGN_IDENTITY empty — skipping codesign"
   echo "==> On other Macs, run: xattr -cr /Applications/AppStudio.app"

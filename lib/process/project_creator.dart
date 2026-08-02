@@ -4,7 +4,8 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
-import '../toolchain/toolchain.dart';
+import '../toolchain/tool_status.dart';
+import '../toolchain/toolchain_controller.dart';
 import 'dev_session_cleanup.dart';
 
 /// IDE integration installed into new projects (agent skills + MCP config).
@@ -47,9 +48,9 @@ class ProjectCreationException implements Exception {
 /// Creates Serverpod projects with the bundled CLI and configures them for the
 /// App Studio preview pane.
 class ProjectCreator {
-  const ProjectCreator({required this.toolchain});
+  const ProjectCreator({required this.toolchains});
 
-  final Toolchain toolchain;
+  final ToolchainController toolchains;
 
   /// Runs `serverpod create` inside [parentDirectory] and returns the path of
   /// the new project. [onStatus] receives CLI progress lines.
@@ -104,17 +105,26 @@ class ProjectCreator {
     required StringBuffer log,
     void Function(String status)? onStatus,
   }) async {
+    final toolchain = toolchains.current;
+    final serverpod = toolchain.serverpodExecutable;
+    if (serverpod == null) {
+      throw ProjectCreationException(
+        toolchain.unavailableReason(ToolId.serverpodCli) ??
+            'The Serverpod CLI is not available.',
+      );
+    }
+
     final Process process;
     try {
       process = await Process.start(
-        toolchain.serverpodExecutable,
+        serverpod,
         ['create', name, '--ide', _kIdeOption, '--no-interactive'],
         workingDirectory: workingDirectory,
         environment: toolchain.processEnvironment(),
       );
     } catch (e) {
       throw ProjectCreationException(
-        'Could not run the Serverpod CLI:\n${toolchain.serverpodExecutable}',
+        'Could not run the Serverpod CLI:\n$serverpod',
         log: '$e',
       );
     }

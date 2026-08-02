@@ -2,8 +2,9 @@ import 'package:appstudio/process/registration_code.dart';
 import 'package:appstudio/process/serverpod_process.dart';
 import 'package:appstudio/session/project_session.dart';
 import 'package:appstudio/terminal/studio_terminal.dart';
-import 'package:appstudio/toolchain/toolchain.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support/toolchain_support.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -39,7 +40,7 @@ void main() {
 
     setUp(() async {
       process = ServerpodProcessController(
-        toolchain: await Toolchain.resolve(),
+        toolchains: await emptyToolchainController(),
         session: ProjectSession(),
         terminal: StudioTerminal(),
       );

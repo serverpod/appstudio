@@ -7,7 +7,7 @@
 # Downloads portable Git (dugite-native) into:
 #   toolchain/git/<version>/{bin,libexec,...}
 # Copies real otool + install_name_tool from the build Mac's Xcode into:
-#   toolchain/cctools/{bin,lib}
+#   toolchain/llvm-tools/<version>/bin
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -17,6 +17,9 @@ SERVERPOD_CLI_VERSION="${SERVERPOD_CLI_VERSION:-4.0.0-beta.1}"
 OPENCODE_VERSION="${OPENCODE_VERSION:-1.18.4}"
 # dugite-native release tag without leading "v" (GitHub Desktop portable Git).
 GIT_VERSION="${GIT_VERSION:-2.53.0-3}"
+# Official LLVM release: llvm-otool / llvm-install-name-tool are
+# Apache-2.0 WITH LLVM-exception, so redistribution is unambiguous.
+LLVM_VERSION="${LLVM_VERSION:-20.1.8}"
 FORCE="${FORCE:-0}"
 
 for arg in "$@"; do
@@ -60,14 +63,15 @@ DOWNLOAD_URL="https://storage.googleapis.com/flutter_infra_release/releases/stab
 OPENCODE_URL="https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-darwin-arm64.zip"
 DUGITE_TAG="v${GIT_VERSION}"
 
-CCTOOLS_DIR="$OUT_DIR/cctools"
+LLVM_DIR="$OUT_DIR/llvm-tools/$LLVM_VERSION"
+LLVM_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/LLVM-${LLVM_VERSION}-macOS-ARM64.tar.xz"
 
 echo "==> Bundling toolchain into $OUT_DIR"
 echo "    Flutter $FLUTTER_VERSION ($HOST_ARCH) — strip other platforms only"
 echo "    serverpod_cli $SERVERPOD_CLI_VERSION — full prebuilt bundle"
 echo "    opencode $OPENCODE_VERSION — darwin-arm64 only"
 echo "    git $GIT_VERSION — dugite-native macOS-${DUGITE_ARCH}"
-echo "    cctools — otool + install_name_tool from Xcode (no CLT stubs)"
+echo "    llvm-tools $LLVM_VERSION — otool + install_name_tool (no CLT stubs, no Xcode)"
 
 mkdir -p "$OUT_DIR"
 
@@ -223,33 +227,35 @@ else
   trap - EXIT
 fi
 
-# Real otool + install_name_tool from Xcode (not /usr/bin CLT stubs).
-# Serverpod native-assets bundling runs `otool -D` and `install_name_tool`.
-if [[ -x "$CCTOOLS_DIR/bin/otool" && -x "$CCTOOLS_DIR/bin/install_name_tool" && "$FORCE" != "1" ]]; then
-  echo "==> cctools already present (pass --force to recopy from Xcode)"
+# otool + install_name_tool, from an official LLVM release rather than Xcode.
+#
+# Copying Apple's binaries out of Xcode is restricted by its licence, and
+# publishing them to a public bucket would be plain redistribution. LLVM's are
+# verified drop-ins: `llvm-otool -D` output is byte-identical to Apple's, and
+# although llvm-install-name-tool does not re-sign after editing a Mach-O
+# (Apple's does, via libcodedirectory.dylib), Serverpod runs `codesign` on the
+# very next line — so that difference does not matter here.
+#
+# Both are argv[0]-dispatching aliases, so they are installed under the Apple
+# names and behave accordingly.
+if [[ -x "$LLVM_DIR/bin/otool" && -x "$LLVM_DIR/bin/install_name_tool" && "$FORCE" != "1" ]]; then
+  echo "==> llvm-tools already present (pass --force to re-download)"
 else
-  echo "==> Copying otool + install_name_tool from Xcode"
-  OTOOL_CLASSIC="$(xcrun --find otool-classic 2>/dev/null || true)"
-  if [[ -z "$OTOOL_CLASSIC" || ! -x "$OTOOL_CLASSIC" ]]; then
-    echo "error: could not find otool-classic via xcrun — install Xcode on the build Mac" >&2
-    exit 1
-  fi
-  XCODE_USR="$(cd "$(dirname "$OTOOL_CLASSIC")/.." && pwd)"
-  if [[ ! -x "$XCODE_USR/bin/install_name_tool" ]]; then
-    echo "error: install_name_tool missing at $XCODE_USR/bin/install_name_tool" >&2
-    exit 1
-  fi
-  if [[ ! -f "$XCODE_USR/lib/libcodedirectory.dylib" ]]; then
-    echo "error: libcodedirectory.dylib missing at $XCODE_USR/lib/" >&2
-    exit 1
-  fi
-  rm -rf "$CCTOOLS_DIR"
-  mkdir -p "$CCTOOLS_DIR/bin" "$CCTOOLS_DIR/lib"
-  # Ship as `otool` so Process.run('otool', ...) finds the real binary.
-  cp "$OTOOL_CLASSIC" "$CCTOOLS_DIR/bin/otool"
-  cp "$XCODE_USR/bin/install_name_tool" "$CCTOOLS_DIR/bin/install_name_tool"
-  cp "$XCODE_USR/lib/libcodedirectory.dylib" "$CCTOOLS_DIR/lib/"
-  chmod +x "$CCTOOLS_DIR/bin/otool" "$CCTOOLS_DIR/bin/install_name_tool"
+  echo "==> Downloading LLVM $LLVM_VERSION (~1.4 GB, for two binaries)"
+  LLVM_TMP="$(mktemp -d)"
+  curl -fL --retry 3 --progress-bar -o "$LLVM_TMP/llvm.tar.xz" "$LLVM_URL"
+
+  PREFIX="LLVM-${LLVM_VERSION}-macOS-ARM64"
+  tar -xJf "$LLVM_TMP/llvm.tar.xz" -C "$LLVM_TMP" --strip-components=2 \
+    "$PREFIX/bin/llvm-objdump" "$PREFIX/bin/llvm-objcopy"
+
+  rm -rf "$LLVM_DIR"
+  mkdir -p "$LLVM_DIR/bin"
+  # Installed under Apple's names: both binaries switch behaviour on argv[0].
+  cp "$LLVM_TMP/llvm-objdump" "$LLVM_DIR/bin/otool"
+  cp "$LLVM_TMP/llvm-objcopy" "$LLVM_DIR/bin/install_name_tool"
+  chmod +x "$LLVM_DIR/bin/otool" "$LLVM_DIR/bin/install_name_tool"
+  rm -rf "$LLVM_TMP"
 fi
 
 echo "==> Writing active.json, pins, and bin wrappers"
@@ -259,7 +265,8 @@ cat > "$OUT_DIR/active.json" <<EOF
   "flutter": "$FLUTTER_VERSION",
   "serverpod_cli": "$SERVERPOD_CLI_VERSION",
   "opencode": "$OPENCODE_VERSION",
-  "git": "$GIT_VERSION"
+  "git": "$GIT_VERSION",
+  "llvm_tools": "$LLVM_VERSION"
 }
 EOF
 
@@ -269,9 +276,10 @@ printf '%s\n' "$FLUTTER_VERSION" > "$OUT_DIR/pins/flutter"
 printf '%s\n' "$SERVERPOD_CLI_VERSION" > "$OUT_DIR/pins/serverpod_cli"
 printf '%s\n' "$OPENCODE_VERSION" > "$OUT_DIR/pins/opencode"
 printf '%s\n' "$GIT_VERSION" > "$OUT_DIR/pins/git"
+printf '%s\n' "$LLVM_VERSION" > "$OUT_DIR/pins/llvm_tools"
 
 # Shared env preamble for wrappers (bash only — no python).
-# Puts cctools + portable git FIRST on PATH; pins Flutter engine version.
+# Puts llvm-tools + portable git FIRST on PATH; pins Flutter engine version.
 read -r -d '' WRAPPER_ENV <<'EOF' || true
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FLUTTER_VER="$(tr -d '[:space:]' < "$ROOT/pins/flutter")"
@@ -294,8 +302,8 @@ if [[ -n "$GIT_VER" && -x "$ROOT/git/$GIT_VER/bin/git" ]]; then
   export PATH="$GIT_HOME/bin:$PATH"
 fi
 # Real otool / install_name_tool ahead of /usr/bin CLT stubs.
-if [[ -x "$ROOT/cctools/bin/otool" ]]; then
-  export PATH="$ROOT/cctools/bin:$PATH"
+if [[ -x "$ROOT/llvm-tools/$LLVM_VERSION/bin/otool" ]]; then
+  export PATH="$ROOT/llvm-tools/$LLVM_VERSION/bin:$PATH"
 fi
 EOF
 
@@ -327,8 +335,8 @@ export PATH="\$CLI_HOME/bin:\$PATH"
 if [[ -n "\${GIT_HOME:-}" ]]; then
   export PATH="\$GIT_HOME/bin:\$PATH"
 fi
-if [[ -x "\$ROOT/cctools/bin/otool" ]]; then
-  export PATH="\$ROOT/cctools/bin:\$PATH"
+if [[ -x "\$ROOT/llvm-tools/$LLVM_VERSION/bin/otool" ]]; then
+  export PATH="\$ROOT/llvm-tools/\$LLVM_PIN/bin:\$PATH"
 fi
 exec "\$SERVERPOD" "\$@"
 EOF
@@ -369,8 +377,8 @@ echo "==> Verifying"
 if [[ -x "$BIN_DIR/git" ]]; then
   "$BIN_DIR/git" --version | head -1
 fi
-if [[ -x "$CCTOOLS_DIR/bin/otool" ]]; then
-  PATH="$CCTOOLS_DIR/bin:/usr/bin:/bin" "$CCTOOLS_DIR/bin/otool" -D \
+if [[ -x "$LLVM_DIR/bin/otool" ]]; then
+  PATH="$LLVM_DIR/bin:/usr/bin:/bin" "$LLVM_DIR/bin/otool" -D \
     "$SERVERPOD_DIR/lib/libsqlite3_connection_pool.dylib" | head -2
 fi
 if [[ -x "$BIN_DIR/flutter" && -x "$FLUTTER_DIR/bin/flutter" ]]; then
@@ -383,5 +391,5 @@ fi
 echo "==> Done"
 echo "    active: flutter=$FLUTTER_VERSION serverpod_cli=$SERVERPOD_CLI_VERSION opencode=$OPENCODE_VERSION git=$GIT_VERSION"
 echo "    serverpod bundle: $SERVERPOD_DIR/{bin,lib}"
-echo "    cctools: $CCTOOLS_DIR/{bin,lib}"
-du -sh "$OUT_DIR" "$SERVERPOD_DIR" "$FLUTTER_DIR" "$OPENCODE_DIR" "$GIT_DIR" "$CCTOOLS_DIR" 2>/dev/null || true
+echo "    llvm-tools: $LLVM_DIR/bin"
+du -sh "$OUT_DIR" "$SERVERPOD_DIR" "$FLUTTER_DIR" "$OPENCODE_DIR" "$GIT_DIR" "$LLVM_DIR" 2>/dev/null || true

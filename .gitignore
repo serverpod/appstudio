@@ -51,8 +51,8 @@ app.*.map.json
 # Portable Git (dugite-native) from tool/bundle_toolchain.sh
 /toolchain/git/
 
-# Real otool + install_name_tool copied from Xcode
-/toolchain/cctools/
+# otool + install_name_tool from an official LLVM release
+/toolchain/llvm-tools/
 
 # Prebuilt Serverpod CLI bundles (binary + native libs)
 /toolchain/serverpod_cli/*/bin/

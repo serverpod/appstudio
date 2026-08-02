@@ -9,19 +9,22 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import '../process/project_creator.dart';
 import '../session/project_session.dart';
 import '../theme/app_theme.dart';
-import '../toolchain/toolchain.dart';
+import '../toolchain/toolchain_controller.dart';
+import '../util/pretty_path.dart';
+import '../widgets/error_banner.dart';
+import '../widgets/field_label.dart';
 
 const _kDialogWidth = 460.0;
 
 Future<void> showNewProjectDialog(
   BuildContext context, {
-  required Toolchain toolchain,
+  required ToolchainController toolchains,
   required ProjectSession session,
 }) {
   return showShadDialog<void>(
     context: context,
     builder: (context) =>
-        NewProjectDialog(toolchain: toolchain, session: session),
+        NewProjectDialog(toolchains: toolchains, session: session),
   );
 }
 
@@ -30,11 +33,11 @@ Future<void> showNewProjectDialog(
 class NewProjectDialog extends StatefulWidget {
   const NewProjectDialog({
     super.key,
-    required this.toolchain,
+    required this.toolchains,
     required this.session,
   });
 
-  final Toolchain toolchain;
+  final ToolchainController toolchains;
   final ProjectSession session;
 
   @override
@@ -109,7 +112,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
     });
 
     try {
-      final path = await ProjectCreator(toolchain: widget.toolchain).create(
+      final path = await ProjectCreator(toolchains: widget.toolchains).create(
         name: name,
         parentDirectory: _directory,
         onStatus: (status) {
@@ -203,10 +206,10 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
       children: [
         const SizedBox(height: 8),
         if (_error != null) ...[
-          _ErrorBanner(message: _error!, log: _errorLog),
+          ErrorBanner(message: _error!, log: _errorLog),
           const SizedBox(height: 16),
         ],
-        _FieldLabel('Project name'),
+        FieldLabel('Project name'),
         const SizedBox(height: 6),
         ShadInput(
           controller: _nameController,
@@ -229,7 +232,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
           ),
         ),
         const SizedBox(height: 16),
-        _FieldLabel('Location'),
+        FieldLabel('Location'),
         const SizedBox(height: 6),
         Row(
           children: [
@@ -294,21 +297,6 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
   }
 }
 
-class _FieldLabel extends StatelessWidget {
-  const _FieldLabel(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    return Text(
-      text,
-      style: theme.textTheme.small.copyWith(fontWeight: FontWeight.w600),
-    );
-  }
-}
-
 /// Read-only folder display matching the height and chrome of [ShadInput].
 class _PathField extends StatelessWidget {
   const _PathField({required this.path});
@@ -349,68 +337,6 @@ class _PathField extends StatelessWidget {
   }
 }
 
-class _ErrorBanner extends StatelessWidget {
-  const _ErrorBanner({required this.message, this.log});
-
-  final String message;
-  final String? log;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    final scheme = theme.colorScheme;
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: BoxDecoration(
-        color: scheme.destructive.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: scheme.destructive.withValues(alpha: 0.35)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(
-                LucideIcons.circleAlert,
-                size: 14,
-                color: scheme.destructive,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  message,
-                  style: theme.textTheme.small.copyWith(
-                    color: scheme.destructive,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          if (log != null && log!.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 120),
-              child: SingleChildScrollView(
-                child: Text(
-                  log!,
-                  style: theme.textTheme.muted.copyWith(
-                    fontFamily: kMacMonoFont,
-                    fontSize: 10.5,
-                    height: 1.4,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
 /// Serverpod project names are lowercase — fold as the user types instead of
 /// rejecting the keystroke.
 class _LowerCaseFormatter extends TextInputFormatter {
@@ -423,13 +349,4 @@ class _LowerCaseFormatter extends TextInputFormatter {
     if (lower == newValue.text) return newValue;
     return newValue.copyWith(text: lower);
   }
-}
-
-/// Shortens `$HOME/...` to `~/...` for display.
-String prettyPath(String path) {
-  final home = Platform.environment['HOME'];
-  if (home == null || home.isEmpty) return path;
-  if (path == home) return '~';
-  if (path.startsWith('$home/')) return '~${path.substring(home.length)}';
-  return path;
 }
