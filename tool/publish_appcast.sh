@@ -74,6 +74,39 @@ fi
 SPARKLE_BIN="$("$ROOT_DIR/tool/ensure_sparkle_tools.sh")"
 
 # ---------------------------------------------------------------------------
+# The key that signs must be the key that ships.
+#
+# generate_appcast signs with the private key in the login Keychain. Installed
+# copies verify with the SUPublicEDKey compiled into their bundle. If those two
+# ever diverge — a regenerated key, a different release machine, an edit to the
+# xcconfig — every update is rejected by every install, silently, and no
+# re-publish fixes it because the old builds are already out there.
+# ---------------------------------------------------------------------------
+KEYCHAIN_KEY="$("$SPARKLE_BIN/generate_keys" -p 2>/dev/null || true)"
+# Note the trailing "=" of base64: match to end of line, do not split on "=".
+SHIPPED_KEY="$(
+  sed -n 's/^SPARKLE_PUBLIC_ED_KEY[[:space:]]*=[[:space:]]*//p' \
+    "$ROOT_DIR/macos/Runner/Configs/Sparkle.xcconfig" | head -1
+)"
+if [[ -z "$KEYCHAIN_KEY" ]]; then
+  echo "error: no Sparkle signing key in the login Keychain." >&2
+  echo "This machine cannot sign updates. See AGENTS.md for key recovery." >&2
+  exit 1
+fi
+if [[ -z "$SHIPPED_KEY" ]]; then
+  echo "error: SPARKLE_PUBLIC_ED_KEY is empty in Sparkle.xcconfig." >&2
+  exit 1
+fi
+if [[ "$KEYCHAIN_KEY" != "$SHIPPED_KEY" ]]; then
+  echo "error: the signing key does not match the key shipped in the app." >&2
+  echo "  Keychain: $KEYCHAIN_KEY" >&2
+  echo "  Shipped:  $SHIPPED_KEY" >&2
+  echo "Publishing would produce updates every installed copy rejects." >&2
+  exit 1
+fi
+echo "==> Signing key matches the one shipped in the app"
+
+# ---------------------------------------------------------------------------
 # Collect every published release. generate_appcast needs the actual bundles:
 # it reads each one's CFBundleVersion and signs the archive, so a feed cannot
 # be assembled from listings alone.
@@ -119,7 +152,26 @@ done <<<"$OBJECTS"
 # ---------------------------------------------------------------------------
 echo
 echo "==> Generating and signing the appcast"
+# --maximum-deltas 0 keeps deltas OFF.
+#
+# generate_appcast turns them on by itself as soon as two versions are present,
+# and then writes <sparkle:deltas> enclosures for .delta files that this script
+# neither uploads nor knows how to name — so the feed points at objects that do
+# not exist. Enabling deltas properly is its own piece of work: the files need
+# an immutable path, and because every release regenerates every delta, the
+# upload cannot simply use --if-generation-match=0 the way the release zips do.
+# Until that is designed and measured, full updates only.
+# --maximum-versions 0 keeps EVERY published release in the feed.
+#
+# The default is 3, and the pruning is silent: `generate_appcast` quietly moves
+# older archives into an old_updates/ directory and drops them from the feed.
+# That makes the feed disagree with the bucket, and it makes "did this publish
+# work?" impossible to answer by inspection. Keeping everything means the feed
+# is exactly the set of published objects — an invariant this script then
+# checks. Items are ~0.5 KB, so the feed stays small for a long time.
 "$SPARKLE_BIN/generate_appcast" \
+  --maximum-versions 0 \
+  --maximum-deltas 0 \
   --download-url-prefix "$BASE_URL" \
   --link "https://serverpod.dev" \
   "$RELEASES"
@@ -134,7 +186,7 @@ fi
 # flat directory. The real objects live under releases/macos/<v>/b<n>/, so
 # rewrite each enclosure to its true path.
 python3 - "$FEED" "$MAP" "$BASE_URL" <<'PY'
-import sys
+import re, sys
 feed_path, map_path, base = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(map_path) as f:
     paths = dict(
@@ -152,8 +204,24 @@ for name, obj in paths.items():
         missing.append(name)
 if missing:
     sys.exit(
-        "error: these archives are not in the generated feed: " + ", ".join(missing)
+        "error: these published archives are missing from the generated feed:\n  "
+        + "\n  ".join(missing)
+        + "\n\ngenerate_appcast dropped them. Check --maximum-versions (0 keeps"
+        "\nall) and look for an old_updates/ directory beside the archives."
     )
+
+# Every enclosure must now point at an object we actually published. Anything
+# else means generate_appcast emitted a file this script does not upload — as
+# it did for delta updates — and the feed would advertise a 404. Catch it here,
+# by name, instead of at the reachability check after the feed is already live.
+known = {base + obj for obj in paths.values()}
+bad = [u for u in re.findall(r'url="([^"]+)"', feed) if u not in known]
+if bad:
+    sys.exit(
+        "error: the feed references files this script does not publish:\n  "
+        + "\n  ".join(bad)
+    )
+
 with open(feed_path, "w") as f:
     f.write(feed)
 PY

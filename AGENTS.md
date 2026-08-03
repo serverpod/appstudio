@@ -300,6 +300,35 @@ release or the feed's signatures will not verify.
 `releases/macos/<v>/b<n>/` object, then fetches the published feed back and
 checks every enclosure actually resolves.
 
+**Every published release stays in the feed** (`--maximum-versions 0`). The
+default is 3 and the pruning is *silent* — `generate_appcast` moves older
+archives into `old_updates/` and drops them. Keeping everything means the feed
+is exactly the set of published objects, which is an invariant the script can
+and does check. Items are ~0.5 KB.
+
+**The signing key is checked against the shipped key before anything uploads.**
+`generate_appcast` signs with the Keychain private key; installed copies verify
+with the `SUPublicEDKey` in their bundle. If those diverge, every update is
+rejected by every install, silently, and no re-publish fixes it — the old
+builds are already out there. When reading the key from the xcconfig, match to
+end of line: base64 ends in `=`, so splitting on `=` yields an empty string.
+
+**Deltas are off** (`--maximum-deltas 0`). `generate_appcast` enables them by
+itself the moment two versions are present, and writes `<sparkle:deltas>`
+enclosures for `.delta` files this script neither uploads nor knows how to
+name — which put two dead URLs in the live feed before it was caught. Turning
+them on is real work, not a flag: the files need an immutable path, and since
+every run regenerates every delta, the upload cannot use
+`--if-generation-match=0` the way release zips do. A guard now rejects any
+enclosure that is not a published object, so a surprise like this fails before
+the feed goes live rather than after.
+
+**Reads of the appcast must bypass the cache.** It is served with
+`max-age=300`, so a plain GET returns the *previous* feed for five minutes
+after a publish. That is not cosmetic: `published_max_build` reads this feed,
+and a stale answer would let the build-number gate approve a number already
+taken. Use `fetch_uncached` from `tool/lib/pubspec_version.sh`.
+
 ### Zip, not DMG — and why translocation matters
 
 A zip auto-extracts to `~/Downloads`, and an app launched from there is
