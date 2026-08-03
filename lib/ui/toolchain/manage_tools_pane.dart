@@ -10,44 +10,40 @@ import '../../toolchain/install_progress.dart';
 import '../../toolchain/shell_path_integration.dart';
 import '../../toolchain/tool_status.dart';
 import '../../toolchain/toolchain_controller.dart';
-import '../../util/byte_format.dart';
 import '../../util/pretty_path.dart';
 import '../../widgets/determinate_progress.dart';
 import '../../widgets/error_banner.dart';
 import 'tool_row.dart';
-import 'uninstall_confirm_dialog.dart';
-
-const _kDialogWidth = 580.0;
-
-Future<void> showManageToolsDialog(
-  BuildContext context, {
-  required ToolchainController toolchains,
-}) {
-  return showShadDialog<void>(
-    context: context,
-    builder: (context) => ManageToolsDialog(toolchains: toolchains),
-  );
-}
 
 /// Where every tool came from, whether it is usable, and what to do about it.
-class ManageToolsDialog extends StatefulWidget {
-  const ManageToolsDialog({super.key, required this.toolchains});
+///
+/// A pane inside the Settings dialog, so it owns no chrome of its own — the
+/// install button lives in the dialog's footer.
+class ManageToolsPane extends StatefulWidget {
+  const ManageToolsPane({super.key, required this.toolchains});
 
   final ToolchainController toolchains;
 
   @override
-  State<ManageToolsDialog> createState() => _ManageToolsDialogState();
+  State<ManageToolsPane> createState() => _ManageToolsPaneState();
 }
 
-class _ManageToolsDialogState extends State<ManageToolsDialog> {
+class _ManageToolsPaneState extends State<ManageToolsPane> {
   @override
   void initState() {
     super.initState();
     widget.toolchains.addListener(_onToolchains);
-    // The startup probe stops at the first satisfied candidate; this view wants
-    // the alternatives too ("you also have a host Flutter").
-    unawaited(widget.toolchains.refresh(deep: true));
-    unawaited(widget.toolchains.refreshShellPathState());
+    // Deferred to after the frame: refresh() notifies synchronously before its
+    // first await, so starting it here marks any ancestor listening to the
+    // controller dirty in the middle of its own build. Harmless while this was
+    // a standalone dialog, a crash once the Settings dialog wrapped it.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // The startup probe stops at the first satisfied candidate; this view
+      // wants the alternatives too ("you also have a host Flutter").
+      unawaited(widget.toolchains.refresh(deep: true));
+      unawaited(widget.toolchains.refreshShellPathState());
+    });
   }
 
   @override
@@ -67,111 +63,75 @@ class _ManageToolsDialogState extends State<ManageToolsDialog> {
     final toolchains = widget.toolchains;
     final inventory = toolchains.inventory;
     final missing = inventory.missingRequired;
-    final installable = inventory.installable;
     final busy = toolchains.isBusy;
 
-    return ShadDialog(
-      title: const Text('Manage Tools'),
-      description: const Text(
-        'App Studio uses these tools to create and run Serverpod projects.',
-      ),
-      // Cancelling mid-install is offered inline; closing the dialog would
-      // leave a download running with nowhere to report.
-      closeIcon: toolchains.isInstalling ? const SizedBox.shrink() : null,
-      actions: [
-        if (installable.isNotEmpty && !toolchains.isInstalling)
-          ShadButton(
-            onPressed: busy ? null : toolchains.installMissing,
-            child: Text(
-              'Install ${installable.length == 1 ? '1 tool' : '${installable.length} tools'} '
-              '(${formatBytes(inventory.downloadBytes)})',
-            ),
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'App Studio uses these tools to create and run Serverpod projects.',
+            style: theme.textTheme.muted,
           ),
-        ShadButton.outline(
-          onPressed: toolchains.isInstalling
-              ? null
-              : () => Navigator.of(context).pop(),
-          child: const Text('Done'),
-        ),
-      ],
-      child: SizedBox(
-        width: _kDialogWidth,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 520),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (toolchains.installError case final error?) ...[
-                  ErrorBanner(message: error),
-                  const SizedBox(height: 12),
-                ] else if (missing.isNotEmpty &&
-                    !toolchains.isInstalling) ...[
-                  ErrorBanner(message: _missingMessage(missing)),
-                  const SizedBox(height: 12),
-                ],
-                if (toolchains.progress case final progress?
-                    when toolchains.isInstalling) ...[
-                  _InstallBanner(
-                    progress: progress,
-                    onCancel: toolchains.cancelInstall,
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                for (final id in ToolId.values)
-                  if (inventory[id] case final status?) ...[
-                    ToolRow(
-                      status: status,
-                      requirement:
-                          toolchains.requirements.describe(status.spec),
-                      progress: toolchains.progress?[id],
-                      actions: _actionsFor(status, busy),
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                Divider(color: scheme.border, height: 1),
-                const SizedBox(height: 12),
-                _ShellPathToggle(toolchains: toolchains),
-                const SizedBox(height: 12),
-                Divider(color: scheme.border, height: 1),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        prettyPath(toolchains.paths.toolchainRoot),
-                        style: theme.textTheme.muted.copyWith(fontSize: 11),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    ShadButton.ghost(
-                      size: ShadButtonSize.sm,
-                      onPressed: _revealToolchainFolder,
-                      child: const Text('Reveal'),
-                    ),
-                    ShadButton.ghost(
-                      size: ShadButtonSize.sm,
-                      onPressed:
-                          busy ? null : () => toolchains.refresh(deep: true),
-                      child: Text(
-                        toolchains.isRefreshing ? 'Checking…' : 'Re-check',
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: ShadButton.destructive(
-                    size: ShadButtonSize.sm,
-                    onPressed: busy ? null : _confirmUninstallAll,
-                    child: const Text('Uninstall all tools'),
-                  ),
-                ),
-              ],
+          const SizedBox(height: 14),
+          if (toolchains.installError case final error?) ...[
+            ErrorBanner(message: error),
+            const SizedBox(height: 12),
+          ] else if (missing.isNotEmpty &&
+              !toolchains.isInstalling) ...[
+            ErrorBanner(message: _missingMessage(missing)),
+            const SizedBox(height: 12),
+          ],
+          if (toolchains.progress case final progress?
+              when toolchains.isInstalling) ...[
+            _InstallBanner(
+              progress: progress,
+              onCancel: toolchains.cancelInstall,
             ),
+            const SizedBox(height: 12),
+          ],
+          for (final id in ToolId.values)
+            if (inventory[id] case final status?) ...[
+              ToolRow(
+                status: status,
+                requirement:
+                    toolchains.requirements.describe(status.spec),
+                progress: toolchains.progress?[id],
+                actions: _actionsFor(status, busy),
+              ),
+              const SizedBox(height: 10),
+            ],
+          Divider(color: scheme.border, height: 1),
+          const SizedBox(height: 12),
+          _ShellPathToggle(toolchains: toolchains),
+          const SizedBox(height: 12),
+          Divider(color: scheme.border, height: 1),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  prettyPath(toolchains.paths.toolchainRoot),
+                  style: theme.textTheme.muted.copyWith(fontSize: 11),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              ShadButton.ghost(
+                size: ShadButtonSize.sm,
+                onPressed: _revealToolchainFolder,
+                child: const Text('Reveal'),
+              ),
+              ShadButton.ghost(
+                size: ShadButtonSize.sm,
+                onPressed:
+                    busy ? null : () => toolchains.refresh(deep: true),
+                child: Text(
+                  toolchains.isRefreshing ? 'Checking…' : 'Re-check',
+                ),
+              ),
+            ],
           ),
-        ),
+        ],
       ),
     );
   }
@@ -235,18 +195,6 @@ class _ManageToolsDialogState extends State<ManageToolsDialog> {
         ToolId.opencode => 'brew upgrade opencode',
         _ => null,
       };
-
-  Future<void> _confirmUninstallAll() async {
-    final choice = await showUninstallConfirmDialog(
-      context,
-      toolchains: widget.toolchains,
-    );
-    if (choice == null) return;
-    await widget.toolchains.uninstallAll();
-    if (choice.clearPubCache) {
-      await widget.toolchains.clearPubCache();
-    }
-  }
 
   Future<void> _revealToolchainFolder() async {
     final dir = widget.toolchains.paths.toolchainRoot;

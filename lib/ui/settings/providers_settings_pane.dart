@@ -7,27 +7,20 @@ import '../../agent/agent_controller.dart';
 import '../../agent/agent_transcript.dart';
 import '../../theme/app_theme.dart';
 
-Future<void> showProvidersSettingsDialog(
-  BuildContext context, {
-  required AgentController agent,
-}) {
-  return showShadDialog(
-    context: context,
-    builder: (context) => ProvidersSettingsDialog(agent: agent),
-  );
-}
-
-class ProvidersSettingsDialog extends StatefulWidget {
-  const ProvidersSettingsDialog({super.key, required this.agent});
+/// Provider keys and the default model, as a pane inside the Settings dialog.
+///
+/// Deliberately not a dialog of its own: it shares a window with the Tools
+/// pane, so it owns no chrome, no title and no Done button.
+class ProvidersSettingsPane extends StatefulWidget {
+  const ProvidersSettingsPane({super.key, required this.agent});
 
   final AgentController agent;
 
   @override
-  State<ProvidersSettingsDialog> createState() =>
-      _ProvidersSettingsDialogState();
+  State<ProvidersSettingsPane> createState() => _ProvidersSettingsPaneState();
 }
 
-class _ProvidersSettingsDialogState extends State<ProvidersSettingsDialog> {
+class _ProvidersSettingsPaneState extends State<ProvidersSettingsPane> {
   final Map<String, TextEditingController> _keyControllers = {};
   final Map<String, bool> _saving = {};
   List<({String providerId, String modelId, String label})> _models = [];
@@ -112,95 +105,83 @@ class _ProvidersSettingsDialogState extends State<ProvidersSettingsDialog> {
     // Also treat auth-store keys as connected for display when serve is down.
     final defaultModel = widget.agent.defaultModel;
 
-    return ShadDialog(
-      title: const Text('Providers'),
-      description: const Text(
-        'API keys are stored in OpenCode’s credential file and shared with the CLI.',
-      ),
-      actions: [
-        ShadButton.outline(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Done'),
-        ),
-      ],
-      child: SizedBox(
-        width: 520,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 520),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (_error != null) ...[
-                  Text(
-                    _error!,
-                    style: theme.textTheme.small.copyWith(
-                      color: scheme.destructive,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                Text(
-                  'Default model',
-                  style: theme.textTheme.small.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                if (_loadingModels)
-                  Text('Loading models…', style: theme.textTheme.muted)
-                else if (_models.isEmpty)
-                  Text(
-                    connected.isEmpty
-                        ? 'Add a provider key to choose a default model.'
-                        : 'No models available yet.',
-                    style: theme.textTheme.muted,
-                  )
-                else
-                  ShadSelect<String>(
-                    initialValue: defaultModel,
-                    placeholder: const Text('Select model'),
-                    options: [
-                      for (final m in _models)
-                        ShadOption(
-                          value: '${m.providerId}/${m.modelId}',
-                          child: Text(m.label),
-                        ),
-                    ],
-                    selectedOptionBuilder: (context, value) {
-                      for (final m in _models) {
-                        if ('${m.providerId}/${m.modelId}' == value) {
-                          return Text(m.label);
-                        }
-                      }
-                      return Text(value);
-                    },
-                    onChanged: (value) {
-                      if (value != null) {
-                        widget.agent.setDefaultModel(value);
-                      }
-                    },
-                  ),
-                const SizedBox(height: 16),
-                Divider(color: scheme.border, height: 1),
-                const SizedBox(height: 12),
-                for (final provider in curatedProviders) ...[
-                  _ProviderRow(
-                    provider: provider,
-                    connected: connected.contains(provider.id),
-                    controller: _keyControllers[provider.id]!,
-                    saving: _saving[provider.id] == true,
-                    onSave: () => _save(provider.id),
-                    onRemove: connected.contains(provider.id)
-                        ? () => _remove(provider.id)
-                        : null,
-                  ),
-                  const SizedBox(height: 10),
-                ],
-              ],
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'API keys are stored in OpenCode\u2019s credential file and shared '
+            'with the CLI.',
+            style: theme.textTheme.muted,
+          ),
+          const SizedBox(height: 14),
+          if (_error != null) ...[
+            Text(
+              _error!,
+              style: theme.textTheme.small.copyWith(
+                color: scheme.destructive,
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          Text(
+            'Default model',
+            style: theme.textTheme.small.copyWith(
+              fontWeight: FontWeight.w600,
             ),
           ),
-        ),
+          const SizedBox(height: 6),
+          if (_loadingModels)
+            Text('Loading models…', style: theme.textTheme.muted)
+          else if (_models.isEmpty)
+            Text(
+              connected.isEmpty
+                  ? 'Add a provider key to choose a default model.'
+                  : 'No models available yet.',
+              style: theme.textTheme.muted,
+            )
+          else
+            ShadSelect<String>(
+              initialValue: defaultModel,
+              placeholder: const Text('Select model'),
+              options: [
+                for (final m in _models)
+                  ShadOption(
+                    value: '${m.providerId}/${m.modelId}',
+                    child: Text(m.label),
+                  ),
+              ],
+              selectedOptionBuilder: (context, value) {
+                for (final m in _models) {
+                  if ('${m.providerId}/${m.modelId}' == value) {
+                    return Text(m.label);
+                  }
+                }
+                return Text(value);
+              },
+              onChanged: (value) {
+                if (value != null) {
+                  widget.agent.setDefaultModel(value);
+                }
+              },
+            ),
+          const SizedBox(height: 16),
+          Divider(color: scheme.border, height: 1),
+          const SizedBox(height: 12),
+          for (final provider in curatedProviders) ...[
+            _ProviderRow(
+              provider: provider,
+              connected: connected.contains(provider.id),
+              controller: _keyControllers[provider.id]!,
+              saving: _saving[provider.id] == true,
+              onSave: () => _save(provider.id),
+              onRemove: connected.contains(provider.id)
+                  ? () => _remove(provider.id)
+                  : null,
+            ),
+            const SizedBox(height: 10),
+          ],
+    ],
       ),
     );
   }

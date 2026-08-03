@@ -30,7 +30,7 @@ UI reference for design patterns: `../cloudui/cloudui_flutter/`.
 
 - Agent tab hosts a Cursor-style chat driven by bundled `opencode serve` (HTTP + SSE).
 - Scoped to the open project directory; restart serve on project switch.
-- API keys via Settings → Providers → OpenCode `auth.json` / `PUT /auth/{id}`.
+- API keys via Settings → Providers tab → OpenCode `auth.json` / `PUT /auth/{id}`.
 - Bundle: `toolchain/opencode/<ver>/` (darwin-arm64 only); pin in `active.json`.
 - **Permissions:** `permission.asked` → reply with `POST /permission/{id}/reply`
   `{"reply": "once"|"always"|"reject"}`. Any other value is a 400 and the agent
@@ -361,6 +361,35 @@ install. Sparkle would also catch it, but later and less clearly.
 - **Keyboard into CEF (macOS):** a local `NSEvent` monitor (`CefWrapper.processKeyboardEvent`) routes keys. It only forwards to `current_focused_browser_`, which is set from `setClientFocus` — never let it consume an event it can't deliver, or the webview looks dead.
 - **Clipboard:** off-screen browsers are not in the responder chain, so Chromium never turns ⌘X/C/V/A/Z into editing commands. They are translated to `CefFrame::Cut/Copy/Paste/…` (`WebviewHandler::sendEditCommand`). Every other ⌘ chord is left uncaptured so the app's menu bar wins.
 - **IME:** while a web input is focused, text keys go to the OS input method and come back as `imeCommitText`/`imeSetComposition`; only navigation/control keys are sent raw. Don't reattach the text input client while it is already active — that kills a live composition.
+
+## Settings & uninstall
+
+- **One dialog, two tabs** (`ui/settings/settings_dialog.dart`): Providers and
+  Tools. They were separate dialogs behind unrelated menus. Each pane owns no
+  chrome — no title, no Done button; the dialog supplies both, including the
+  Tools install button, which needs `toolchains` state the pane no longer has to
+  expose.
+- **`ManageToolsPane` defers its deep probe to a post-frame callback.**
+  `ToolchainController.refresh()` calls `notifyListeners()` *synchronously*
+  before its first await, so starting it in `initState` marks any ancestor
+  listening to the controller dirty mid-build. Harmless while it was a
+  standalone dialog; a crash the moment the Settings dialog wrapped it.
+- **Uninstall lives in the App Studio menu**, not the Tools tab — it is not a
+  tool operation. `uninstall/uninstaller.dart` clears three separate stores:
+  the Application Support directory, the shell `PATH` block in the user's rc
+  file (in `$HOME`, so deleting the directory alone would leave a dead entry in
+  every new terminal), and preferences (NSUserDefaults), which is what makes a
+  relaunch behave like a fresh install — the toolchain-setup dismissal lives
+  there, not on disk.
+- It never aborts on a failed step: stopping halfway leaves neither a working
+  install nor a clean machine. Failures are collected and named on the final
+  screen, which never claims a clean uninstall that did not happen.
+- Deliberately **not** removed: `~/.pub-cache` (opt-in checkbox — shared with
+  every Dart project) and `~/.local/share/opencode/auth.json` (API keys the
+  OpenCode CLI uses independently of App Studio).
+- The final screen is a dead end by design. The session is stopped, the
+  toolchain is gone and preferences are cleared, so any control would either
+  fail or silently recreate what was just removed.
 
 ## Architecture notes
 

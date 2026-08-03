@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
-import '../../toolchain/tool_status.dart';
 import '../../toolchain/toolchain_controller.dart';
 import '../../util/byte_format.dart';
 import '../../util/pretty_path.dart';
@@ -27,7 +26,11 @@ Future<UninstallChoice?> showUninstallConfirmDialog(
   );
 }
 
-/// Confirms removal of everything managed, naming the exact size.
+/// Confirms a full uninstall, naming exactly what goes and what stays.
+///
+/// This is a bigger action than the old "uninstall all tools": it removes the
+/// whole Application Support directory, the shell PATH entry and every stored
+/// preference, so that a relaunch behaves like a fresh install.
 ///
 /// The Dart package cache is offered separately and off by default: it is
 /// shared with every other Dart project on the machine and holds
@@ -43,7 +46,7 @@ class UninstallConfirmDialog extends StatefulWidget {
 
 class _UninstallConfirmDialogState extends State<UninstallConfirmDialog> {
   bool _clearPubCache = false;
-  int? _managedBytes;
+  int? _supportBytes;
 
   @override
   void initState() {
@@ -52,14 +55,14 @@ class _UninstallConfirmDialogState extends State<UninstallConfirmDialog> {
   }
 
   Future<void> _measure() async {
-    final root = widget.toolchains.paths.toolchainRoot;
+    final root = widget.toolchains.paths.appSupportRoot;
     try {
       final result = await Process.run('/usr/bin/du', ['-sk', root]);
       if (result.exitCode != 0) return;
       final kb = int.tryParse(
         (result.stdout as String).trim().split(RegExp(r'\s+')).first,
       );
-      if (kb != null && mounted) setState(() => _managedBytes = kb * 1024);
+      if (kb != null && mounted) setState(() => _supportBytes = kb * 1024);
     } catch (_) {
       // Size is a nicety; the dialog works without it.
     }
@@ -69,13 +72,9 @@ class _UninstallConfirmDialogState extends State<UninstallConfirmDialog> {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final toolchains = widget.toolchains;
-    final managed = [
-      for (final status in toolchains.inventory.tools.values)
-        if (status.resolved?.source == ToolSource.managed) status,
-    ];
 
     return ShadDialog(
-      title: const Text('Uninstall all tools'),
+      title: const Text('Uninstall App Studio'),
       actions: [
         ShadButton.outline(
           onPressed: () => Navigator.of(context).pop(),
@@ -95,18 +94,26 @@ class _UninstallConfirmDialogState extends State<UninstallConfirmDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              managed.isEmpty
-                  ? 'This removes the App Studio toolchain folder. Tools '
-                      'already on your Mac are not touched.'
-                  : 'This removes ${managed.length} managed '
-                      '${managed.length == 1 ? 'tool' : 'tools'}'
-                      '${_managedBytes == null ? '' : ' (${formatBytes(_managedBytes!)})'}'
-                      '. Tools already on your Mac are not touched.',
+              'This removes the downloaded tools, the shell PATH entry and all '
+              'App Studio settings'
+              '${_supportBytes == null ? '' : ' (${formatBytes(_supportBytes!)})'}'
+              '. The app itself is not deleted — you can drag it to the Trash '
+              'afterwards.',
               style: theme.textTheme.small,
             ),
             const SizedBox(height: 8),
             Text(
-              prettyPath(toolchains.paths.toolchainRoot),
+              prettyPath(toolchains.paths.appSupportRoot),
+              style: theme.textTheme.muted.copyWith(fontSize: 11),
+            ),
+            const SizedBox(height: 10),
+            // Say what survives, so nobody has to guess whether their API keys
+            // or every other Dart project just went with it.
+            Text(
+              'Tools already on your Mac, your Dart package cache and your '
+              'OpenCode API keys are left alone. The keys are shared with the '
+              'OpenCode CLI, so removing them here would affect more than App '
+              'Studio.',
               style: theme.textTheme.muted.copyWith(fontSize: 11),
             ),
             const SizedBox(height: 14),

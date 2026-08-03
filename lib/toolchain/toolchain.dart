@@ -71,7 +71,7 @@ class Toolchain {
     if (status == null) return '${id.displayName} is not configured.';
     if (status.isSatisfied) return null;
 
-    const fix = 'Open Tools → Manage Tools to install it.';
+    const fix = 'Open Settings → Tools to install it.';
     final rejected = status.bestRejected;
     if (rejected == null || rejected.reason == null) {
       return '${id.displayName} is not installed. $fix';

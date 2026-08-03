@@ -10,9 +10,8 @@ import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import '../toolchain/toolchain_controller.dart';
 import 'new_project_dialog.dart';
-import 'toolchain/manage_tools_dialog.dart';
 import 'preview_pane.dart';
-import 'settings/providers_settings_dialog.dart';
+import 'settings/settings_dialog.dart';
 import 'start_page.dart';
 import 'terminal_pane.dart';
 
@@ -55,12 +54,17 @@ class _StudioShellState extends State<StudioShell> {
     super.dispose();
   }
 
-  void _openSettings() {
-    showProvidersSettingsDialog(context, agent: widget.agent);
-  }
+  void _openSettings() => _showSettings(SettingsTab.providers);
 
-  void _openManageTools() {
-    showManageToolsDialog(context, toolchains: widget.toolchains);
+  void _openManageTools() => _showSettings(SettingsTab.tools);
+
+  void _showSettings(SettingsTab tab) {
+    showSettingsDialog(
+      context,
+      agent: widget.agent,
+      toolchains: widget.toolchains,
+      initialTab: tab,
+    );
   }
 
   void _newProject() {
@@ -354,8 +358,8 @@ class _ToolchainBadge extends StatelessWidget {
         return ShadTooltip(
           builder: (context) => Text(
             missing > 0
-                ? 'Some tools are missing — open Manage Tools'
-                : 'Manage Tools',
+                ? 'Some tools are missing — open Settings \u2192 Tools'
+                : 'Settings \u2192 Tools',
           ),
           child: MouseRegion(
             cursor: SystemMouseCursors.click,

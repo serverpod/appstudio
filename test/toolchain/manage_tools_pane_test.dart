@@ -6,7 +6,7 @@ import 'package:appstudio/toolchain/toolchain_controller.dart';
 import 'package:appstudio/toolchain/toolchain_manifest.dart';
 import 'package:appstudio/toolchain/toolchain_paths.dart';
 import 'package:appstudio/toolchain/toolchain_requirements.dart';
-import 'package:appstudio/ui/toolchain/manage_tools_dialog.dart';
+import 'package:appstudio/ui/toolchain/manage_tools_pane.dart';
 import 'package:appstudio/ui/toolchain/tool_row.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -77,21 +77,21 @@ void main() {
     manifest = await loadTestManifest();
   });
 
-  Future<void> pumpDialog(
+  Future<void> pumpPane(
     WidgetTester tester,
     ToolchainController toolchains,
   ) async {
     await tester.pumpWidget(
       ShadApp(
         theme: buildLightTheme(),
-        home: Scaffold(body: ManageToolsDialog(toolchains: toolchains)),
+        home: Scaffold(body: ManageToolsPane(toolchains: toolchains)),
       ),
     );
     await tester.pump();
   }
 
   testWidgets('shows a row per tool with its source', (tester) async {
-    await pumpDialog(
+    await pumpPane(
       tester,
       controllerWith({
         ToolId.flutter: [
@@ -110,7 +110,7 @@ void main() {
 
   testWidgets('a too-old host tool reads as an update, not a failure',
       (tester) async {
-    await pumpDialog(
+    await pumpPane(
       tester,
       controllerWith({
         ToolId.serverpodCli: [
@@ -136,7 +136,7 @@ void main() {
   });
 
   testWidgets('warns once per missing required tool', (tester) async {
-    await pumpDialog(
+    await pumpPane(
       tester,
       controllerWith({
         ToolId.opencode: [
@@ -153,7 +153,7 @@ void main() {
   });
 
   testWidgets('a complete toolchain shows no warning banner', (tester) async {
-    await pumpDialog(
+    await pumpPane(
       tester,
       controllerWith({
         for (final id in ToolId.values)
@@ -163,5 +163,21 @@ void main() {
 
     expect(find.textContaining('missing'), findsNothing);
     expect(find.byType(ToolRow), findsNWidgets(ToolId.values.length));
+  });
+
+  testWidgets('no longer offers "Uninstall all tools"', (tester) async {
+    // It moved to the App Studio menu and became a full uninstall — settings
+    // and shell PATH included — so a tools-scoped button here would understate
+    // what it does.
+    await pumpPane(
+      tester,
+      controllerWith({
+        ToolId.flutter: [
+          satisfied(ToolId.flutter, ToolSource.managed, '3.44.2'),
+        ],
+      }),
+    );
+
+    expect(find.text('Uninstall all tools'), findsNothing);
   });
 }

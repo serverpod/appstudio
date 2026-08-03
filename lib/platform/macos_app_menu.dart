@@ -20,8 +20,8 @@ class MacAppMenu {
     required this.agent,
     required this.themeController,
     required this.onNewProject,
-    required this.onManageTools,
     required this.onCheckForUpdates,
+    required this.onUninstall,
     required this.canCheckForUpdates,
     required this.updatesUnavailableReason,
     required this.onSetAutomaticUpdates,
@@ -31,12 +31,12 @@ class MacAppMenu {
     themeController.addListener(_sync);
   }
 
-  static const _toolsMenuId = 'tools';
-  static const _manageToolsId = 'tools_manage';
-  static const _manageToolsIcon = 'wrench.and.screwdriver';
   static const _checkUpdatesId = 'app_check_updates';
   static const _checkUpdatesIcon = 'arrow.down.circle';
   static const _autoUpdatesId = 'app_auto_updates';
+  static const _uninstallId = 'app_uninstall';
+  static const _uninstallSepId = 'app_uninstall_sep';
+  static const _uninstallIcon = 'trash';
   static const _checkUpdatesTitle = 'Check for Updates...';
   static const _viewMenuId = 'View';
   static const _fileMenuId = 'file';
@@ -65,8 +65,8 @@ class MacAppMenu {
   final AgentController agent;
   final ThemeController themeController;
   final VoidCallback onNewProject;
-  final VoidCallback onManageTools;
   final VoidCallback onCheckForUpdates;
+  final VoidCallback onUninstall;
   final ValueChanged<bool> onSetAutomaticUpdates;
 
   /// Current value of the "check automatically" preference, read at sync time
@@ -102,94 +102,98 @@ class MacAppMenu {
     });
 
     await _installFileMenu();
-    await _installToolsMenu();
     await _installViewMenu();
-    await _installCheckForUpdates();
+    await _installAppMenuItems();
 
     _installed = true;
     await _syncRecents();
     await _syncAppearance();
   }
 
-  Future<void> _installToolsMenu() async {
-    await MacMenuBar.addSubmenu(
-      parentMenuId: 'main',
-      submenuId: _toolsMenuId,
-      title: 'Tools',
-      index: 2,
-    );
-
-    await MacMenuBar.addMenuItem(
-      menuId: _toolsMenuId,
-      itemId: _manageToolsId,
-      title: 'Manage Tools...',
-      index: 0,
-      systemImage: _manageToolsIcon,
-    );
-  }
-
-  /// Puts "Check for Updates…" in the application menu, next to About.
-  ///
-  /// `mac_menu_bar` addresses menus by their NSMenu *title*. For the
-  /// application menu that title is `APP_NAME` — the literal placeholder from
-  /// `MainMenu.xib`, which nothing ever substitutes; macOS renders the menu
-  /// using the bundle name instead, so users still read "App Studio".
-  /// Verified by running the release build and reading the log line below.
-  ///
-  /// The product name is tried too, in case a future Flutter template starts
-  /// substituting it, and the Tools menu is the last resort — we own that one
-  /// outright. The item has to end up *somewhere*: a build with no way to check
-  /// for updates is worse than one where the item sits in an odd place.
   String get _checkUpdatesLabel {
     final reason = updatesUnavailableReason();
     return reason == null ? _checkUpdatesTitle : 'Check for Updates ($reason)';
   }
 
-  Future<void> _installCheckForUpdates() async {
+  /// Puts the update items next to About, and Uninstall directly below
+  /// Settings.
+  ///
+  /// `mac_menu_bar` addresses menus by their NSMenu *title*. For the
+  /// application menu that title is `APP_NAME` — the literal placeholder from
+  /// `MainMenu.xib`, which nothing ever substitutes; macOS renders the menu
+  /// using the bundle name instead, so users still read "App Studio". Verified
+  /// by running the release build and reading the log line below. The product
+  /// name is tried too, in case a future Flutter template starts substituting
+  /// it.
+  ///
+  /// The File menu is the last resort. It is a strange home for these, but a
+  /// build with no way to check for updates — or worse, no way to uninstall —
+  /// is worse than one where the items sit somewhere unexpected.
+  Future<void> _installAppMenuItems() async {
     const candidates = ['APP_NAME', 'App Studio', 'AppStudio'];
 
     for (final menuId in candidates) {
       final added = await MacMenuBar.addMenuItem(
         menuId: menuId,
         itemId: _checkUpdatesId,
-        // Index 1: directly under "About App Studio", above the separator.
+        // Directly under "About App Studio", above the first separator.
         index: 1,
         title: _checkUpdatesLabel,
         systemImage: _checkUpdatesIcon,
         enabled: canCheckForUpdates(),
       );
-      if (added) {
-        debugPrint('MacAppMenu: Check for Updates installed in "$menuId" menu');
-        await _addAutomaticUpdatesItem(menuId, index: 2);
-        return;
-      }
+      if (!added) continue;
+
+      debugPrint('MacAppMenu: app menu items installed in "$menuId" menu');
+      await _addAutomaticUpdatesItem(menuId, index: 2);
+      // The stock menu is About(0), separator, Settings…; the two items above
+      // shift Settings… to index 4, so 5 puts Uninstall immediately below it.
+      // The separator that already follows Settings… ends up under Uninstall,
+      // which keeps it out of the Services group.
+      await _addUninstallItem(menuId, index: 5);
+      return;
     }
 
     debugPrint(
       'MacAppMenu: could not reach the application menu; '
-      'Check for Updates went to the Tools menu instead',
+      'update and uninstall items went to the File menu instead',
     );
     await MacMenuBar.addMenuSeparator(
-      menuId: _toolsMenuId,
-      itemId: 'tools_updates_sep',
-      index: 1,
+      menuId: _fileMenuId,
+      itemId: _uninstallSepId,
+      index: 90,
     );
     await MacMenuBar.addMenuItem(
-      menuId: _toolsMenuId,
+      menuId: _fileMenuId,
       itemId: _checkUpdatesId,
       title: _checkUpdatesLabel,
-      index: 2,
+      index: 91,
       systemImage: _checkUpdatesIcon,
       enabled: canCheckForUpdates(),
     );
-    await _addAutomaticUpdatesItem(_toolsMenuId, index: 3);
+    await _addAutomaticUpdatesItem(_fileMenuId, index: 92);
+    await _addUninstallItem(_fileMenuId, index: 93);
+  }
+
+  /// "Uninstall..." — removes every supporting file, not the app bundle.
+  ///
+  /// Sits with Settings because that is what it clears: preferences, the shell
+  /// PATH entry and the downloaded tools. No separator of its own — the stock
+  /// one that follows Settings… lands underneath it.
+  Future<void> _addUninstallItem(String menuId, {required int index}) async {
+    await MacMenuBar.addMenuItem(
+      menuId: menuId,
+      itemId: _uninstallId,
+      title: 'Uninstall...',
+      index: index,
+      systemImage: _uninstallIcon,
+    );
   }
 
   /// The "check automatically" preference, as a checked menu item.
   ///
-  /// Deliberately not a switch in the settings dialog — that dialog is about
-  /// AI providers, and Sparkle already owns this preference. A checked item
-  /// next to the action it governs is the macOS-native place for it.
+  /// A checked item next to the action it governs, which is the macOS-native
+  /// place for it, and keeps Sparkle as the single owner of the preference.
   Future<void> _addAutomaticUpdatesItem(String menuId, {required int index}) async {
     await MacMenuBar.addMenuItem(
       menuId: menuId,
@@ -320,10 +324,10 @@ class MacAppMenu {
     switch (itemId) {
       case _newProjectId:
         onNewProject();
-      case _manageToolsId:
-        onManageTools();
       case _checkUpdatesId:
         onCheckForUpdates();
+      case _uninstallId:
+        onUninstall();
       case _autoUpdatesId:
         // Sparkle owns the value; toggle it and let the sync reflect whatever
         // it actually became.

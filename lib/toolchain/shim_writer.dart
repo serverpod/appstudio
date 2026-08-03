@@ -67,7 +67,7 @@ class ShimWriter {
       buffer
         ..writeln('echo "App Studio: $command is not installed." >&2')
         ..writeln(
-          'echo "Open App Studio → Tools → Manage Tools to install it." >&2',
+          'echo "Open App Studio → Settings → Tools to install it." >&2',
         )
         ..writeln('exit 127');
       return buffer.toString();
