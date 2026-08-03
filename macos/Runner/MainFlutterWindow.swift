@@ -4,6 +4,9 @@ import UserNotifications
 
 class MainFlutterWindow: NSWindow {
   private var notificationsChannel: FlutterMethodChannel?
+  // Held for the window's lifetime: Sparkle's updater stops scheduling checks
+  // the moment its controller is deallocated.
+  private let sparkleUpdater = SparkleUpdater()
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -26,6 +29,7 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     registerNotificationsChannel(flutterViewController)
+    sparkleUpdater.start(flutterViewController)
 
     super.awakeFromNib()
   }

@@ -90,3 +90,6 @@ app.*.map.json
 /packages/webview_cef/pubspec.lock
 .cursor/skills
 .dart_skills
+
+# Sparkle release tools, fetched by tool/ensure_sparkle_tools.sh
+.sparkle-tools/

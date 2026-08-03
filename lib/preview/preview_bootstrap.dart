@@ -25,7 +25,7 @@ const previewBootstrapScript = r'''
         try {
           window.$dartRunMain();
         } catch (e) {
-          console.error('AppStudio preview bootstrap failed:', e);
+          console.error('App Studio preview bootstrap failed:', e);
         }
         return;
       }

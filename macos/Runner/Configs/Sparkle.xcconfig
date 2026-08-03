@@ -1,0 +1,27 @@
+// Sparkle auto-update settings.
+//
+// Included from Release.xcconfig only. Debug builds therefore get an empty
+// SPARKLE_FEED_URL, SparkleUpdater.swift reports `configured: false`, and the
+// menu item greys out — which is what you want while developing, since a debug
+// build must never replace itself with a release one.
+//
+// SPARKLE_PUBLIC_ED_KEY is the ed25519 *public* key; it is public by
+// definition and belongs in version control. Its private half lives in the
+// release engineer's login Keychain (see tool/publish_appcast.sh).
+//
+// Changing either of these changes what an installed copy will accept as a
+// valid update. Do not edit casually.
+
+// xcconfig treats "//" as a comment ANYWHERE on a line, including inside a
+// value — so writing the URL literally silently truncates it to "https:" and
+// every update check fails against a malformed URL. Build the slashes from a
+// variable so the two characters are never adjacent in the source text.
+// (Verify with: PlistBuddy -c 'Print :SUFeedURL' on the built Info.plist.)
+SPARKLE_SLASH = /
+SPARKLE_FEED_URL = https:$(SPARKLE_SLASH)$(SPARKLE_SLASH)storage.googleapis.com/serverpod-appstudio-toolchain/appcast/macos/appcast.xml
+
+// The ed25519 public key. Its private half is in the release engineer's login
+// Keychain — see "Back up the signing key" in AGENTS.md. Changing this value
+// invalidates every update signed with the old key, and losing the private key
+// makes every already-installed copy permanently un-updatable.
+SPARKLE_PUBLIC_ED_KEY = isULE6yi+oglEsXdoR0/8H32mvVddMKN7MCr8pFqChk=

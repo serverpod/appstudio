@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
-import 'package:webview_cef/webview_cef.dart';
 
 import 'agent/agent_controller.dart';
 import 'process/dev_session_cleanup.dart';
@@ -12,6 +11,8 @@ import 'terminal/studio_terminal.dart';
 import 'theme/app_theme.dart';
 import 'theme/theme_controller.dart';
 import 'toolchain/toolchain_controller.dart';
+import 'update/session_teardown.dart';
+import 'update/update_controller.dart';
 import 'platform/macos_app_menu.dart';
 import 'ui/new_project_dialog.dart';
 import 'ui/toolchain/manage_tools_dialog.dart';
@@ -41,6 +42,10 @@ Future<void> main() async {
     process: process,
   );
 
+  // Never blocks launch: create() swallows its own failures and reports the
+  // updater as unavailable.
+  final updates = await UpdateController.create(process: process, agent: agent);
+
   runApp(
     AppStudioApp(
       themeController: themeController,
@@ -49,6 +54,7 @@ Future<void> main() async {
       terminal: terminal,
       process: process,
       agent: agent,
+      updates: updates,
     ),
   );
 }
@@ -62,6 +68,7 @@ class AppStudioApp extends StatefulWidget {
     required this.terminal,
     required this.process,
     required this.agent,
+    required this.updates,
   });
 
   final ThemeController themeController;
@@ -70,6 +77,7 @@ class AppStudioApp extends StatefulWidget {
   final StudioTerminal terminal;
   final ServerpodProcessController process;
   final AgentController agent;
+  final UpdateController updates;
 
   @override
   State<AppStudioApp> createState() => _AppStudioAppState();
@@ -91,13 +99,25 @@ class _AppStudioAppState extends State<AppStudioApp> {
       themeController: widget.themeController,
       onNewProject: _showNewProjectDialog,
       onManageTools: _showManageToolsDialog,
+      onCheckForUpdates: () => unawaited(widget.updates.checkForUpdates()),
+      canCheckForUpdates: () => widget.updates.state.canCheck,
+      updatesUnavailableReason: () =>
+          widget.updates.state.unavailableReason,
+      onSetAutomaticUpdates: (enabled) =>
+          unawaited(widget.updates.setAutomaticallyChecks(enabled)),
+      automaticUpdatesEnabled: () => widget.updates.state.automaticallyChecks,
     );
+    // The menu item starts disabled if the updater is not ready yet; re-sync
+    // when it settles.
+    widget.updates.addListener(_syncMenu);
     unawaited(_macMenu!.install());
     // Clear anything a crashed install left behind, then offer to fetch what
     // is missing. Both after the first frame, so neither delays launch.
     unawaited(widget.toolchains.collectGarbage());
     WidgetsBinding.instance.addPostFrameCallback((_) => _offerToolchainSetup());
   }
+
+  void _syncMenu() => _macMenu?.refresh();
 
   Future<void> _offerToolchainSetup() async {
     final navigatorContext = _navigatorKey.currentContext;
@@ -130,12 +150,14 @@ class _AppStudioAppState extends State<AppStudioApp> {
 
   @override
   void dispose() {
+    widget.updates.removeListener(_syncMenu);
     _macMenu?.dispose();
-    try {
-      WebviewManager().quit();
-    } catch (_) {}
-    unawaited(widget.process.stop());
-    widget.agent.dispose();
+    // Same teardown Sparkle runs before it relaunches, so the two paths cannot
+    // drift apart.
+    unawaited(
+      teardownSession(process: widget.process, agent: widget.agent),
+    );
+    widget.updates.dispose();
     widget.process.dispose();
     widget.terminal.dispose();
     widget.session.dispose();

@@ -5,7 +5,7 @@
 # target (installed via the Podfile post_install hook in macos/embed_cef_helpers.rb).
 #
 # App Studio patch: do NOT embed "Helper (Alerts)". That helper triggers a
-# separate macOS notification-permission dialog ("AppStudio Helper (Alerts)")
+# separate macOS notification-permission dialog ("<App> Helper (Alerts)")
 # on first launch. Preview web content does not need Chromium desktop alerts;
 # App Studio posts its own notifications from the main app when needed.
 #

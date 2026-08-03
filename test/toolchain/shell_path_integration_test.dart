@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:appstudio/toolchain/shell_path_integration.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-const binDir = '/Users/test/Library/Application Support/AppStudio/bin';
+const binDir = '/Users/test/Library/Application Support/App Studio/bin';
 
 void main() {
   final block = renderShellBlock(binDir);

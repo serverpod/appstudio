@@ -28,5 +28,25 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- Sparkle. SUFeedURL and SUPublicEDKey come from Configs/Sparkle.xcconfig,
+	     which Release.xcconfig includes and Debug.xcconfig does not — so a debug
+	     build resolves both to empty and reports "updates unavailable" instead of
+	     trying to replace itself with a release build. -->
+	<key>SUFeedURL</key>
+	<string>$(SPARKLE_FEED_URL)</string>
+	<key>SUPublicEDKey</key>
+	<string>$(SPARKLE_PUBLIC_ED_KEY)</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
+	<!-- Removes the "install updates automatically" option from Sparkle's UI
+	     entirely. An unattended relaunch would kill a running Serverpod server,
+	     the CEF preview and the agent session with no warning. -->
+	<key>SUAllowsAutomaticUpdates</key>
+	<false/>
+	<!-- Verify the EdDSA signature before unpacking, not after. -->
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
 </dict>
 </plist>

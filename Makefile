@@ -6,9 +6,12 @@
 #   make clean_all         Also drop CEF, Pods and the dev toolchain
 #   make dev_toolchain     Build a local toolchain/ tree (optional)
 #   make publish_toolchain Upload tools to GCS and refresh the manifest
-#   make dist              Signed + notarized DMG, published to the bucket
-#   make publish_dist      Upload an already-built DMG
-#   make dist_debug        Unsigned DMG, local only
+#   make set_version V=…   Set the version and bump the build counter
+#   make release V=…       set_version + dist, in one step
+#   make dist              Signed + notarized zip, published to the bucket
+#   make publish_dist      Upload an already-built zip
+#   make publish_appcast   Regenerate + upload the Sparkle update feed
+#   make dist_debug        Unsigned zip, local only
 #
 .DEFAULT_GOAL := help
 
@@ -16,7 +19,8 @@ ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 CEF_STAMP := $(ROOT)/packages/webview_cef/macos/third/cef/version.txt
 
 .PHONY: help start deps ensure_deps clean clean_all dev_toolchain \
-        publish_toolchain publish_dist dist dist_debug
+        publish_toolchain publish_dist publish_appcast dist dist_debug \
+        set_version release
 
 help:
 	@echo "App Studio targets:"
@@ -26,10 +30,13 @@ help:
 	@echo "  make clean_all         Also remove CEF, Pods and <repo>/toolchain"
 	@echo "  make dev_toolchain     Build <repo>/toolchain for offline dev (optional)"
 	@echo "  make publish_toolchain Dry-run the toolchain publish"
-	@echo "  make dist              Build, notarize AND publish the DMG to the bucket"
-	@echo "                         (PUBLISH=0 make dist stops at the local DMG)"
-	@echo "  make publish_dist      Upload an already-built DMG"
-	@echo "  make dist_debug        Local unsigned DMG, never uploaded"
+	@echo "  make set_version V=1.2.3   Set the version (or V=patch|minor|major|build)"
+	@echo "  make release V=1.2.3       set_version, then dist — one step"
+	@echo "  make dist              Build, notarize AND publish the zip to the bucket"
+	@echo "                         (PUBLISH=0 make dist stops at the local zip)"
+	@echo "  make publish_dist      Upload an already-built zip"
+	@echo "  make publish_appcast   Regenerate + upload the Sparkle update feed"
+	@echo "  make dist_debug        Local unsigned zip, never uploaded"
 	@echo ""
 	@echo "The app downloads its own tools on first run, so no toolchain is"
 	@echo "needed to build or ship it. dev_toolchain is only for working offline."
@@ -93,25 +100,54 @@ start: ensure_deps
 	@echo "==> flutter run -d macos"
 	cd "$(ROOT)" && flutter run -d macos
 
-# Build, sign, notarize, then publish the DMG to the public bucket.
+# Set the version. The build counter is bumped automatically and never reset —
+# Sparkle compares CFBundleVersion, so a repeat or a rollback would make every
+# installed copy stop seeing updates.
+#
+#   make set_version V=1.2.3     make set_version V=patch
+set_version:
+	@test -n "$(V)" || { \
+		echo "usage: make set_version V=1.2.3   (or V=patch|minor|major|build)"; \
+		exit 1; \
+	}
+	cd "$(ROOT)" && ./tool/set_version.sh "$(V)"
+
+# The whole release in one action: set the version, build, sign, notarize,
+# publish. PUBLISH=0 stops after the local zip.
+release: set_version
+	@$(MAKE) dist
+
+# Build, sign, notarize, then publish the zip to the public bucket.
 #
 # This uploads. Object names are immutable, so a mistake means bumping the
 # build number in pubspec.yaml rather than replacing anything. Use
-# `PUBLISH=0 make dist` to stop after the local DMG.
+# `PUBLISH=0 make dist` to stop after the local zip.
 dist: ensure_deps
 	@echo "==> distribute (signed + notarized)"
 	cd "$(ROOT)" && NOTARIZE=1 ./tool/distribute_macos.sh
 	@if [ "$(PUBLISH)" = "0" ]; then \
 		echo "==> PUBLISH=0 — built locally, not uploaded"; \
 	else \
-		cd "$(ROOT)" && ./tool/publish_dist.sh; \
+		cd "$(ROOT)" && ./tool/publish_dist.sh && ./tool/publish_appcast.sh; \
 	fi
 
-# Re-upload an already-built DMG (e.g. the upload failed but the build is fine).
+# Re-upload an already-built zip (e.g. the upload failed but the build is fine).
 publish_dist:
 	cd "$(ROOT)" && ./tool/publish_dist.sh
 
-# Unsigned DMG for local smoke tests on other Macs (xattr -cr may still be needed).
+# Rebuild the Sparkle feed from everything published and upload it.
+#
+# The appcast is the only mutable object in the bucket, and it is what every
+# installed copy asks for updates. Signing needs the private key from the login
+# Keychain, so macOS may prompt. Dry-run first; the target does that for you and
+# leaves appcast-dry-run.xml to inspect.
+publish_appcast:
+	cd "$(ROOT)" && ./tool/publish_appcast.sh --dry-run
+	@echo ""
+	@echo "Dry run above. To publish for real:"
+	@echo "  ./tool/publish_appcast.sh"
+
+# Unsigned zip for local smoke tests on other Macs (xattr -cr may still be needed).
 dist_debug: ensure_deps
 	@echo "==> distribute (unsigned, no notarization)"
 	cd "$(ROOT)" && SIGN_IDENTITY="" NOTARIZE=0 ./tool/distribute_macos.sh

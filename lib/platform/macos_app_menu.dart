@@ -21,6 +21,11 @@ class MacAppMenu {
     required this.themeController,
     required this.onNewProject,
     required this.onManageTools,
+    required this.onCheckForUpdates,
+    required this.canCheckForUpdates,
+    required this.updatesUnavailableReason,
+    required this.onSetAutomaticUpdates,
+    required this.automaticUpdatesEnabled,
   }) {
     session.addListener(_sync);
     themeController.addListener(_sync);
@@ -29,6 +34,10 @@ class MacAppMenu {
   static const _toolsMenuId = 'tools';
   static const _manageToolsId = 'tools_manage';
   static const _manageToolsIcon = 'wrench.and.screwdriver';
+  static const _checkUpdatesId = 'app_check_updates';
+  static const _checkUpdatesIcon = 'arrow.down.circle';
+  static const _autoUpdatesId = 'app_auto_updates';
+  static const _checkUpdatesTitle = 'Check for Updates...';
   static const _viewMenuId = 'View';
   static const _fileMenuId = 'file';
   static const _openRecentId = 'file_open_recent';
@@ -57,6 +66,23 @@ class MacAppMenu {
   final ThemeController themeController;
   final VoidCallback onNewProject;
   final VoidCallback onManageTools;
+  final VoidCallback onCheckForUpdates;
+  final ValueChanged<bool> onSetAutomaticUpdates;
+
+  /// Current value of the "check automatically" preference, read at sync time
+  /// rather than captured — it changes whenever Sparkle's own UI changes it.
+  final bool Function() automaticUpdatesEnabled;
+
+  /// False in debug builds and when the app is running translocated, in which
+  /// case the item is installed but greyed out — a missing menu item is a
+  /// worse question than a disabled one.
+  final bool Function() canCheckForUpdates;
+
+  /// Why checking is unavailable, or null when it is available. Shown in the
+  /// item's own title: a greyed-out entry that does not say why reads as a
+  /// bug, and the commonest cause (running from ~/Downloads) has a fix the
+  /// user can act on.
+  final String? Function() updatesUnavailableReason;
 
   bool _installed = false;
   List<String> _recentItemIds = [];
@@ -78,6 +104,7 @@ class MacAppMenu {
     await _installFileMenu();
     await _installToolsMenu();
     await _installViewMenu();
+    await _installCheckForUpdates();
 
     _installed = true;
     await _syncRecents();
@@ -98,6 +125,82 @@ class MacAppMenu {
       title: 'Manage Tools...',
       index: 0,
       systemImage: _manageToolsIcon,
+    );
+  }
+
+  /// Puts "Check for Updates…" in the application menu, next to About.
+  ///
+  /// `mac_menu_bar` addresses menus by their NSMenu *title*. For the
+  /// application menu that title is `APP_NAME` — the literal placeholder from
+  /// `MainMenu.xib`, which nothing ever substitutes; macOS renders the menu
+  /// using the bundle name instead, so users still read "App Studio".
+  /// Verified by running the release build and reading the log line below.
+  ///
+  /// The product name is tried too, in case a future Flutter template starts
+  /// substituting it, and the Tools menu is the last resort — we own that one
+  /// outright. The item has to end up *somewhere*: a build with no way to check
+  /// for updates is worse than one where the item sits in an odd place.
+  String get _checkUpdatesLabel {
+    final reason = updatesUnavailableReason();
+    return reason == null ? _checkUpdatesTitle : 'Check for Updates ($reason)';
+  }
+
+  Future<void> _installCheckForUpdates() async {
+    const candidates = ['APP_NAME', 'App Studio', 'AppStudio'];
+
+    for (final menuId in candidates) {
+      final added = await MacMenuBar.addMenuItem(
+        menuId: menuId,
+        itemId: _checkUpdatesId,
+        // Index 1: directly under "About App Studio", above the separator.
+        index: 1,
+        title: _checkUpdatesLabel,
+        systemImage: _checkUpdatesIcon,
+        enabled: canCheckForUpdates(),
+      );
+      if (added) {
+        debugPrint('MacAppMenu: Check for Updates installed in "$menuId" menu');
+        await _addAutomaticUpdatesItem(menuId, index: 2);
+        return;
+      }
+    }
+
+    debugPrint(
+      'MacAppMenu: could not reach the application menu; '
+      'Check for Updates went to the Tools menu instead',
+    );
+    await MacMenuBar.addMenuSeparator(
+      menuId: _toolsMenuId,
+      itemId: 'tools_updates_sep',
+      index: 1,
+    );
+    await MacMenuBar.addMenuItem(
+      menuId: _toolsMenuId,
+      itemId: _checkUpdatesId,
+      title: _checkUpdatesLabel,
+      index: 2,
+      systemImage: _checkUpdatesIcon,
+      enabled: canCheckForUpdates(),
+    );
+    await _addAutomaticUpdatesItem(_toolsMenuId, index: 3);
+  }
+
+  /// The "check automatically" preference, as a checked menu item.
+  ///
+  /// Deliberately not a switch in the settings dialog — that dialog is about
+  /// AI providers, and Sparkle already owns this preference. A checked item
+  /// next to the action it governs is the macOS-native place for it.
+  Future<void> _addAutomaticUpdatesItem(String menuId, {required int index}) async {
+    await MacMenuBar.addMenuItem(
+      menuId: menuId,
+      itemId: _autoUpdatesId,
+      title: 'Check for Updates Automatically',
+      index: index,
+      enabled: canCheckForUpdates(),
+    );
+    await MacMenuBar.setMenuItemChecked(
+      _autoUpdatesId,
+      automaticUpdatesEnabled(),
     );
   }
 
@@ -219,6 +322,12 @@ class MacAppMenu {
         onNewProject();
       case _manageToolsId:
         onManageTools();
+      case _checkUpdatesId:
+        onCheckForUpdates();
+      case _autoUpdatesId:
+        // Sparkle owns the value; toggle it and let the sync reflect whatever
+        // it actually became.
+        onSetAutomaticUpdates(!automaticUpdatesEnabled());
       case _openId:
         unawaited(session.openProjectPicker());
       case _closeId:
@@ -247,9 +356,26 @@ class MacAppMenu {
     session.closeProject();
   }
 
+  /// Re-applies enabled/checked state. Public so `main.dart` can call it when
+  /// the updater settles after launch.
+  void refresh() => _sync();
+
   void _sync() {
     if (!_installed) return;
     unawaited(MacMenuBar.setMenuItemEnabled(_closeId, session.hasProject));
+    unawaited(
+      MacMenuBar.updateMenuItem(
+        itemId: _checkUpdatesId,
+        title: _checkUpdatesLabel,
+        enabled: canCheckForUpdates(),
+      ),
+    );
+    unawaited(
+      MacMenuBar.setMenuItemEnabled(_autoUpdatesId, canCheckForUpdates()),
+    );
+    unawaited(
+      MacMenuBar.setMenuItemChecked(_autoUpdatesId, automaticUpdatesEnabled()),
+    );
     unawaited(_syncRecents());
     unawaited(_syncAppearance());
   }

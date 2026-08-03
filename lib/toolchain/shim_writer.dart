@@ -5,7 +5,7 @@ import 'package:path/path.dart' as p;
 import 'tool_status.dart';
 import 'toolchain.dart';
 
-/// Generates `~/Library/Application Support/AppStudio/bin/*`.
+/// Generates `~/Library/Application Support/App Studio/bin/*`.
 ///
 /// Wrappers, not symlinks: a symlink cannot set `FLUTTER_ROOT`,
 /// `GIT_EXEC_PATH` or `DYLD_LIBRARY_PATH`, and those are what make the tools

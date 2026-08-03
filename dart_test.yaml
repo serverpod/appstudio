@@ -1,0 +1,5 @@
+# Declared so `flutter test` does not warn about an unknown tag.
+tags:
+  # Tests that shell out to scripts in tool/. They are fast and hermetic (temp
+  # pubspecs, file:// feeds), but they do need bash, curl and python3.
+  tool:

@@ -62,15 +62,39 @@ host tools when the local `toolchain/` pin is incomplete.
 Portable Git avoids the macOS `/usr/bin/git` stub that otherwise prompts for
 Xcode Command Line Tools on machines without developer tools installed.
 
+## Auto-updates
+
+App Studio updates itself with [Sparkle](https://sparkle-project.org) 2.x. The
+feed lives at `appcast/macos/appcast.xml` in the public bucket and is signed
+with an ed25519 key held in the release engineer's login Keychain.
+
+Checks run automatically once a day, but installing is always a user action —
+a silent relaunch would kill a running Serverpod server, the CEF preview and the
+agent session. Before Sparkle relaunches, the app shuts those down cleanly.
+
+Debug builds have no feed URL and report updates as unavailable, so a debug
+build never replaces itself with a release one.
+
+**Move the app to /Applications.** A zip extracted into `~/Downloads` runs
+translocated on a read-only mount and cannot update itself; App Studio detects
+this and disables the check rather than offering an update that would fail.
+
+See `AGENTS.md` for the signing, key-backup and release details.
+
 ## Distribute
 
 Bundle ID: `dev.serverpod.appstudio` · Team: Serverpod AB (`WK2NRY4GS4`).
 
 ```bash
-make dist              # ensure toolchain, signed + notarized DMG
-make dist_debug        # ensure toolchain, unsigned DMG (no notarization)
+make release V=1.2.3   # set the version, then build + sign + notarize + publish
+make dist              # same, using the version already in pubspec.yaml
+make dist_debug        # unsigned zip, local only (no notarization)
 # or: NOTARIZE=1 ./tool/distribute_macos.sh
 ```
+
+The artifact is a `.zip` (built with `ditto`, so CEF's symlinks survive), not a
+DMG. Never hand-edit `version:` in `pubspec.yaml` — `+N` is a global counter
+that Sparkle compares and that must never reset. `make set_version` picks it.
 
 Defaults (override via env):
 
@@ -92,6 +116,6 @@ xcrun notarytool store-credentials "appstudio" \
 ### Unsigned builds on another Mac
 
 Skip signing with `SIGN_IDENTITY="" ./tool/distribute_macos.sh`. Gatekeeper may
-then show **“AppStudio is damaged and can't be opened”** after copy — clear
-quarantine with `xattr -cr /Applications/AppStudio.app`, or distribute a
+then show **“App Studio is damaged and can't be opened”** after copy — clear
+quarantine with `xattr -cr "/Applications/App Studio.app"`, or distribute a
 notarized build instead.

@@ -219,7 +219,7 @@ String? devRepoRoot() {
   return null;
 }
 
-/// `AppStudio.app/Contents/Resources/toolchain`, kept so an offline/enterprise
+/// `App Studio.app/Contents/Resources/toolchain`, kept so an offline/enterprise
 /// build that still embeds the toolchain keeps working.
 String? bundledToolchainRoot() {
   final exe = File(Platform.resolvedExecutable);

@@ -36,6 +36,9 @@ class ToolchainController extends ChangeNotifier {
   /// stop the app from launching, and "no tools" is a state the UI can explain.
   static Future<ToolchainController> create() async {
     final paths = ToolchainPaths.resolve();
+    // The product was renamed AppStudio → App Studio. Move an existing install
+    // instead of stranding it; a same-volume rename, so instant even at 1.9 GB.
+    final migrated = await paths.migrateLegacyDirectory();
     ToolManifest? manifest;
     try {
       manifest = await ToolManifest.loadBaked(rootBundle.loadString);
@@ -64,12 +67,17 @@ class ToolchainController extends ChangeNotifier {
       );
     }
 
-    return ToolchainController(
+    final controller = ToolchainController(
       initial: toolchain,
       manifest: manifest,
       paths: paths,
       requirements: requirements,
     );
+    if (migrated) {
+      // Shims and the shell rc block embed absolute paths that just moved.
+      unawaited(controller._repairAfterMigration());
+    }
+    return controller;
   }
 
   final ToolManifest manifest;
@@ -199,6 +207,22 @@ class ToolchainController extends ChangeNotifier {
       return e.message;
     } catch (e) {
       return '$e';
+    }
+  }
+
+  /// Rewrites everything that hardcoded the pre-rename directory.
+  Future<void> _repairAfterMigration() async {
+    try {
+      await refreshShellPathState();
+      if (_shellPathState == ShellPathState.present) {
+        // Re-render both the shims and the rc block against the new root.
+        await setShellPathEnabled(true);
+      } else {
+        await ShimWriter(binDir: paths.shimBinDir).write(_current);
+      }
+      await refresh();
+    } catch (e) {
+      debugPrint('ToolchainController: post-migration repair failed: $e');
     }
   }
 

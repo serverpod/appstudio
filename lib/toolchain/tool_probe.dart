@@ -222,7 +222,7 @@ class ToolProbe {
   /// `<repo>/toolchain` when running from a source checkout.
   final String? devRepoRoot;
 
-  /// `AppStudio.app/Contents/Resources/toolchain`, kept as an escape hatch.
+  /// `App Studio.app/Contents/Resources/toolchain`, kept as an escape hatch.
   final String? bundledRoot;
 
   final ProcessRunner _run;
