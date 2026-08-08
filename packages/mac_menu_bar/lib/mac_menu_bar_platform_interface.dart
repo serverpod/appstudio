@@ -178,6 +178,13 @@ abstract class MacMenuBarPlatform extends PlatformInterface {
   /// Sets whether a menu item shows a checkmark.
   Future<bool> setMenuItemChecked(String itemId, bool checked);
 
+  /// Enables or disables the stock Settings (Preferences…) item.
+  ///
+  /// Separate from [setMenuItemEnabled], which is keyed by the id this plugin
+  /// stamps on items it added. Settings is a MainMenu.xib item the plugin only
+  /// takes the action of, so it has no such id.
+  Future<bool> setSettingsEnabled(bool enabled);
+
   /// Sets the callback handler for custom menu item selections.
   ///
   /// The handler receives the item ID when a custom menu item is selected.

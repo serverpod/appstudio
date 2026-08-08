@@ -85,9 +85,13 @@ class MacAppMenu {
   /// user can act on.
   final String? Function() updatesUnavailableReason;
 
-  /// False while the toolchain is still being installed. Opening a project then
-  /// would auto-start a server with no Flutter SDK to build it, and the setup
-  /// screen deliberately offers no way to get there — the menu must agree.
+  /// False while first-run setup still owns the screen.
+  ///
+  /// Gates File → Open / Open Recent and the App Studio → Settings item.
+  /// Opening a project then would auto-start a server with no Flutter SDK to
+  /// build it, and Settings configures an agent whose binary is one of the
+  /// things still being downloaded. The setup screen deliberately offers no way
+  /// to either, so the menu has to agree.
   final bool Function() canOpenProjects;
 
   bool _installed = false;
@@ -118,6 +122,10 @@ class MacAppMenu {
     await _installAppMenuItems();
 
     _installed = true;
+    // The plugin installs its Settings override at registration and defaults it
+    // to enabled, so the initial state has to be pushed here — on a fresh Mac
+    // the very first frame is the setup screen.
+    await MacMenuBar.setSettingsEnabled(canOpenProjects());
     await _syncRecents();
     await _syncAppearance();
   }
@@ -383,6 +391,7 @@ class MacAppMenu {
     if (!_installed) return;
     final canOpen = canOpenProjects();
     unawaited(MacMenuBar.setMenuItemEnabled(_openId, canOpen));
+    unawaited(MacMenuBar.setSettingsEnabled(canOpen));
     unawaited(MacMenuBar.setMenuItemEnabled(_closeId, session.hasProject));
     unawaited(
       MacMenuBar.updateMenuItem(

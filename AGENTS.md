@@ -75,6 +75,8 @@ make dist              # Developer ID + notarized zip
 - `Toolchain.resolve()` short-circuits at the first satisfied candidate (~350 ms). `deep: true` enumerates every candidate (~900 ms) and is only for the Tools Manager — the full sweep is too slow to run before `runApp`.
 - **Never probe `/usr/bin/{git,otool,install_name_tool,clang,ar,ld}`** — all confirmed CLT shims (identical 118,928-byte stub) that pop a modal installer. `codesign` at /usr/bin *is* real. Candidates come from Homebrew, `/Library/Developer/CommandLineTools`, and `$(xcode-select -p)`.
 - Flutter is version-detected from `bin/cache/flutter.version.json`, never by running `flutter --version` — that can trigger a precache download on a cold SDK.
+- **`PATH` is searched by `whichOnPath`, in Dart — never by shelling out to `/usr/bin/which`.** Every probe subprocess runs with `includeParentEnvironment: false` so a user's environment cannot sway version output, and `which` inherited that empty environment, so it had no `PATH` and returned null for *everything*. Tools were then only ever found at the hardcoded candidate paths, which silently missed a `dart install`ed Serverpod CLI (`~/Library/Application Support/Dart/install/bin`, **not** `~/.pub-cache/bin` — the stale copy there was the only one the probe saw) and any Flutter SDK outside `~/development`.
+- A GUI launch still only sees launchd's `PATH`, not the shell's, so a tool on a custom `PATH` is invisible when App Studio is opened from Finder. Nothing to fix in the probe — that is what the managed install is for — but it does mean detection differs between Finder and a terminal launch.
 - `PUB_CACHE` is deliberately **not** set: `package_config.json` stores absolute paths, so a private cache would make every switch to an external editor re-resolve the project.
 - Version rules live in `tool_version.dart`. A numeric-only suffix is a *packaging revision*, not a prerelease — dugite's `2.53.0-3` is newer than `2.53.0`, while `4.0.0-beta.1` is older than `4.0.0`.
 
@@ -454,7 +456,19 @@ that could not work — there is no Flutter SDK to build with yet.
   `isComplete`. A required tool we cannot supply is unfixable by this screen, so
   blocking on it would be a dead end; those surface as the toolbar's destructive
   badge instead. `MacAppMenu.canOpenProjects` reads the same condition, because
-  ⌘O and Open Recent would otherwise walk straight past the gate.
+  ⌘O, Open Recent and Settings would otherwise walk straight past the gate.
+- **Disabling the stock Settings item sets `isEnabled`, not `validateMenuItem`.**
+  `addMenuItem` turns `autoenablesItems` off on whatever menu it adds to, and
+  this app adds Check for Updates and Uninstall to the App menu — so AppKit
+  stops validating that whole menu and `validateMenuItem` is never consulted for
+  anything in it. `MacMenuBar.setSettingsEnabled` therefore writes `isEnabled`
+  directly, the same mechanism the plugin's own items use. It cannot reuse
+  `setMenuItemEnabled`: that is keyed by the String `representedObject` stamped
+  on items the plugin *added*, and `reset()` deletes exactly those, so giving a
+  MainMenu.xib item one would make reset strip it.
+- The plugin re-applies the flag when it installs the override, because that
+  runs from a block queued at registration and can land either side of the first
+  channel call — and the override force-enables the item.
 - **Both screens share one backdrop.** `ui/landing_scaffold.dart` owns the black
   logo banner and the gradient; `StartPage` and `ToolchainSetupScreen` supply
   only what sits on top. They are two states of the same moment — the app open

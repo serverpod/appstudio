@@ -46,6 +46,18 @@ public class MacMenuBarPlugin: NSObject, FlutterPlugin {
     /// Standard MainMenu.xib items whose target/action this plugin replaced.
     /// Weak, because the menu owns them. See `validateMenuItem`.
     private let overriddenItems = NSHashTable<NSMenuItem>.weakObjects()
+
+    /// The stock Settings item, once overridden. Weak for the same reason.
+    ///
+    /// Held separately because the enabled-state map is keyed by the String
+    /// `representedObject` this plugin stamps on items it adds, and `reset()`
+    /// removes exactly those — stamping one on a MainMenu.xib item to reuse that
+    /// machinery would make reset delete it.
+    private weak var settingsMenuItem: NSMenuItem?
+
+    /// Whether Settings can currently be chosen. App Studio turns this off while
+    /// first-run setup owns the screen.
+    private var settingsEnabled = true
     
     /// A dictionary that maps custom menu item IDs to their enabled state.
     private var menuItemEnabledStates: [String: Bool] = [:]
@@ -93,6 +105,12 @@ public class MacMenuBarPlugin: NSObject, FlutterPlugin {
             handleAddMenuSeparator(call: call, result: result)
         case "setMenuItemChecked":
             handleSetMenuItemChecked(call: call, result: result)
+        case "setSettingsEnabled":
+            let enabled = (call.arguments as? [String: Any])?["enabled"] as? Bool ?? true
+            DispatchQueue.main.async { [weak self] in
+                self?.setSettingsEnabled(enabled)
+                result(true)
+            }
         case "reset":
             DispatchQueue.main.async { [weak self] in
                 self?.resetManagedItems()
@@ -534,6 +552,9 @@ public class MacMenuBarPlugin: NSObject, FlutterPlugin {
         // forever. MainMenu.xib ships "Preferences…" with no action at all, so
         // AppKit disabled it before this plugin ever installed its override —
         // which is why Settings could never be selected.
+        if let settingsMenuItem, menuItem === settingsMenuItem {
+            return settingsEnabled
+        }
         if overriddenItems.contains(menuItem) {
             return true
         }
@@ -719,7 +740,26 @@ public class MacMenuBarPlugin: NSObject, FlutterPlugin {
                 selector: #selector(handleSettings(_:)),
                 handler: #selector(handleSettings(_:))
             )
+            settingsMenuItem = settingsItem
+            // `overrideMenuItem` force-enables, and Dart may already have asked
+            // for the opposite: the override is installed from an async block
+            // queued at registration, so its order against the first channel
+            // call is not guaranteed.
+            setSettingsEnabled(settingsEnabled)
         }
+    }
+
+    /// Enables or disables the stock Settings item.
+    ///
+    /// Sets `isEnabled` rather than relying on `validateMenuItem`, which is never
+    /// consulted here: `addMenuItem` turns `autoenablesItems` off on whatever menu
+    /// it adds to, and this plugin adds items to the App menu, so AppKit stops
+    /// validating that whole menu. `isEnabled` is what actually greys it out —
+    /// the same mechanism the plugin's own items use. The flag is still kept for
+    /// `handleSettings`, which ⌘, reaches without the menu ever being drawn.
+    private func setSettingsEnabled(_ enabled: Bool) {
+        settingsEnabled = enabled
+        settingsMenuItem?.isEnabled = enabled
     }
 
     /// Finds the Settings (Preferences) menu item by its standard keyboard shortcut (Cmd+,).
@@ -805,6 +845,9 @@ public class MacMenuBarPlugin: NSObject, FlutterPlugin {
     }
 
     @objc func handleSettings(_ sender: Any?) {
+        // Validation already greys the item out, but ⌘, reaches the action
+        // directly when the menu was never opened.
+        if !settingsEnabled { return }
         channel.invokeMethod("onSettingsFromMenu", arguments: nil) { [weak self] handled in
             if let didHandle = handled as? Bool, didHandle {
                 return

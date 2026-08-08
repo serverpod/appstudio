@@ -6,6 +6,7 @@ import 'package:appstudio/toolchain/tool_version.dart';
 import 'package:appstudio/toolchain/toolchain_manifest.dart';
 import 'package:appstudio/toolchain/toolchain_requirements.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 
 late ToolManifest manifest;
 const requirements = ToolchainRequirements.empty;
@@ -257,6 +258,72 @@ void main() {
       await empty.writeAsBytes(const []);
       expect(await isMachO(empty.path), isFalse);
       expect(await isMachO('${dir.path}/nope'), isFalse);
+    });
+  });
+
+  group('whichOnPath', () {
+    /// A directory with [name] in it, executable unless told otherwise.
+    Future<Directory> dirContaining(String name, {bool executable = true}) async {
+      final dir = await Directory.systemTemp.createTemp('appstudio_which');
+      addTearDown(() => dir.delete(recursive: true));
+      final file = File(p.join(dir.path, name));
+      await file.writeAsString('#!/bin/sh\n');
+      await Process.run('/bin/chmod', [executable ? '755' : '644', file.path]);
+      return dir;
+    }
+
+    test('finds an executable on the path', () async {
+      final dir = await dirContaining('serverpod');
+      expect(
+        await whichOnPath('serverpod', dir.path),
+        p.join(dir.path, 'serverpod'),
+      );
+    });
+
+    test('takes the first match, so PATH order decides', () async {
+      // This is the whole bug: a stale ~/.pub-cache/bin/serverpod was the only
+      // candidate the probe ever saw, while the `dart install` copy earlier on
+      // PATH — the one the user's shell runs — was invisible.
+      final first = await dirContaining('serverpod');
+      final second = await dirContaining('serverpod');
+      expect(
+        await whichOnPath('serverpod', '${first.path}:${second.path}'),
+        p.join(first.path, 'serverpod'),
+      );
+    });
+
+    test('skips a match it could not execute', () async {
+      final dir = await dirContaining('serverpod', executable: false);
+      expect(await whichOnPath('serverpod', dir.path), isNull);
+    });
+
+    test('skips directories that do not have it, and empty entries', () async {
+      final dir = await dirContaining('serverpod');
+      expect(
+        await whichOnPath('serverpod', '/nonexistent::${dir.path}'),
+        p.join(dir.path, 'serverpod'),
+      );
+    });
+
+    test('returns null with no path to search', () async {
+      // The old implementation shelled out to `which`, which the probe ran with
+      // no environment at all — so this was the answer for *every* lookup.
+      expect(await whichOnPath('serverpod', null), isNull);
+      expect(await whichOnPath('serverpod', ''), isNull);
+    });
+
+    test('resolves a symlink into bin, which is how dart install ships',
+        () async {
+      final target = await dirContaining('serverpod-real');
+      final linkDir = await Directory.systemTemp.createTemp('appstudio_link');
+      addTearDown(() => linkDir.delete(recursive: true));
+      await Link(p.join(linkDir.path, 'serverpod'))
+          .create(p.join(target.path, 'serverpod-real'));
+
+      expect(
+        await whichOnPath('serverpod', linkDir.path),
+        p.join(linkDir.path, 'serverpod'),
+      );
     });
   });
 }

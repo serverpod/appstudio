@@ -365,6 +365,22 @@ class MethodChannelMacMenuBar extends MacMenuBarPlatform {
   }
 
   @override
+  Future<bool> setSettingsEnabled(bool enabled) async {
+    if (!_isMacOS && kReleaseMode) return false;
+
+    try {
+      final result = await methodChannel.invokeMethod<bool>(
+        'setSettingsEnabled',
+        <String, dynamic>{'enabled': enabled},
+      );
+      return result ?? false;
+    } on PlatformException catch (e) {
+      debugPrint('Error setting Settings enabled state: ${e.message}');
+      return false;
+    }
+  }
+
+  @override
   Future<bool> updateMenuItem({
     required String itemId,
     String? title,

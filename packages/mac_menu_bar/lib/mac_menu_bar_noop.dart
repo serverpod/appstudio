@@ -60,6 +60,9 @@ class MacMenuBarNoop extends MacMenuBarPlatform {
   Future<bool> setMenuItemChecked(String itemId, bool checked) async => false;
 
   @override
+  Future<bool> setSettingsEnabled(bool enabled) async => false;
+
+  @override
   Future<bool> reset() async => false;
 
   @override

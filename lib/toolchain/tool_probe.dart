@@ -662,16 +662,8 @@ class ToolProbe {
     }
   }
 
-  Future<String?> _which(String command) async {
-    try {
-      final result = await _run('/usr/bin/which', [command]);
-      if (result.exitCode != 0) return null;
-      final path = (result.stdout as String).trim();
-      return path.isEmpty ? null : path;
-    } catch (_) {
-      return null;
-    }
-  }
+  Future<String?> _which(String command) =>
+      whichOnPath(command, Platform.environment['PATH']);
 
   Future<String> _resolveSymlink(String path) async {
     try {
@@ -691,6 +683,35 @@ class ToolProbe {
       return null;
     }
   }
+}
+
+/// First executable named [command] in the colon-separated [searchPath], or
+/// null when there is none.
+///
+/// Scanned here rather than shelled out to `/usr/bin/which`, which is what this
+/// used to do. Every subprocess in [ToolProbe] runs with
+/// `includeParentEnvironment: false` so version output cannot be swayed by the
+/// user's environment — but `which` with no `PATH` can only ever fail, and it
+/// did, silently, for every tool installed somewhere the hardcoded candidate
+/// lists do not name. A `dart install`ed Serverpod CLI and a Flutter SDK outside
+/// `~/development` were both invisible because of it.
+///
+/// Top-level and pure so it is testable without a machine that happens to have
+/// the tool installed.
+Future<String?> whichOnPath(String command, String? searchPath) async {
+  if (searchPath == null || searchPath.isEmpty) return null;
+  // 0o111 — `which` skips a match it could not execute, and so do we.
+  const executableBits = 0x49;
+  for (final dir in searchPath.split(':')) {
+    if (dir.isEmpty) continue;
+    final candidate = p.join(dir, command);
+    // Follows symlinks: `dart install` and Homebrew both link into their bin.
+    final stat = await FileStat.stat(candidate);
+    if (stat.type != FileSystemEntityType.file) continue;
+    if (stat.mode & executableBits == 0) continue;
+    return candidate;
+  }
+  return null;
 }
 
 /// True when [path] starts with a Mach-O magic number. Used before executing

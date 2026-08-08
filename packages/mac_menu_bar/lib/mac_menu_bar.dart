@@ -336,6 +336,11 @@ class MacMenuBar {
     return instance.setMenuItemChecked(itemId, checked);
   }
 
+  /// Enables or disables the stock Settings (Preferences…) item.
+  static Future<bool> setSettingsEnabled(bool enabled) {
+    return instance.setSettingsEnabled(enabled);
+  }
+
   /// Sets the callback handler for custom menu item selections.
   ///
   /// The [handler] function will be called when the user selects a custom menu item

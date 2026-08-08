@@ -155,7 +155,11 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
     final rowHeight = theme.tableTheme.cellHeight ?? 48;
     final tableHeight = rowHeight * rowCount;
 
-    Widget toolCell(String name, Object? version) => Row(
+    /// [replacing] is the version already on this Mac when we found one and
+    /// rejected it. Without it a too-old copy is indistinguishable from nothing
+    /// installed, and "OpenCode 1.18.4 — 45 MB" beside a working `opencode`
+    /// command reads as a failed detection rather than an upgrade.
+    Widget toolCell(String name, Object? version, {Object? replacing}) => Row(
           children: [
             Flexible(
               child: Text(
@@ -167,7 +171,11 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
             ),
             if (version != null) ...[
               const ShadGap(1.5),
-              ShadBadge.secondary(child: Text('$version')),
+              ShadBadge.secondary(
+                child: Text(
+                  replacing == null ? '$version' : '$replacing → $version',
+                ),
+              ),
             ],
           ],
         );
@@ -204,6 +212,7 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
                           child: toolCell(
                             status.spec.displayName,
                             status.spec.version,
+                            replacing: status.bestRejected?.detectedVersion,
                           ),
                         ),
                         ShadTableCell(
