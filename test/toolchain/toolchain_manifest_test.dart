@@ -112,6 +112,51 @@ void main() {
       final enriched = await manifest.withLiveDownloadBytes(client: client);
       expect(identical(enriched, manifest), isTrue);
     });
+
+    test('probeArtifacts names the tools whose artifact is not there', () async {
+      final manifest = ToolManifest.tryParse(published())!;
+      final client = MockClient((_) async => http.Response('', 404));
+
+      final probe = await manifest.probeArtifacts(client: client);
+
+      // A 404 on the artifact means the download would fail, so it has to be
+      // reported rather than silently kept at the manifest's size.
+      expect(probe.unreachable, [ToolId.flutter]);
+    });
+
+    test('probeArtifacts reports nothing when every artifact answers', () async {
+      final manifest = ToolManifest.tryParse(published())!;
+      final client = MockClient(
+        (_) async => http.Response('', 200, headers: {'content-length': '999'}),
+      );
+
+      final probe = await manifest.probeArtifacts(client: client);
+
+      expect(probe.unreachable, isEmpty);
+      expect(
+        probe.manifest[ToolId.flutter]!.artifactForCurrentPlatform!.downloadBytes,
+        999,
+      );
+    });
+
+    test('probeArtifacts skips tools outside `only`', () async {
+      // A tool already satisfied on this Mac is never downloaded, so an
+      // unreachable artifact for it must not block anything.
+      final manifest = ToolManifest.tryParse(published())!;
+      var requests = 0;
+      final client = MockClient((_) async {
+        requests++;
+        return http.Response('', 404);
+      });
+
+      final probe = await manifest.probeArtifacts(
+        client: client,
+        only: const [ToolId.git],
+      );
+
+      expect(requests, 0);
+      expect(probe.unreachable, isEmpty);
+    });
   });
 
   group('parse', () {

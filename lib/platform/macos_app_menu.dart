@@ -26,6 +26,7 @@ class MacAppMenu {
     required this.updatesUnavailableReason,
     required this.onSetAutomaticUpdates,
     required this.automaticUpdatesEnabled,
+    required this.canOpenProjects,
   }) {
     session.addListener(_sync);
     themeController.addListener(_sync);
@@ -83,6 +84,11 @@ class MacAppMenu {
   /// bug, and the commonest cause (running from ~/Downloads) has a fix the
   /// user can act on.
   final String? Function() updatesUnavailableReason;
+
+  /// False while the toolchain is still being installed. Opening a project then
+  /// would auto-start a server with no Flutter SDK to build it, and the setup
+  /// screen deliberately offers no way to get there — the menu must agree.
+  final bool Function() canOpenProjects;
 
   bool _installed = false;
   List<String> _recentItemIds = [];
@@ -245,6 +251,9 @@ class MacAppMenu {
         LogicalKeyboardKey.keyO,
         meta: true,
       ),
+      // Correct from the first frame: install() runs before the first _sync,
+      // and on a fresh Mac that frame is the toolchain setup screen.
+      enabled: canOpenProjects(),
     );
 
     await MacMenuBar.addSubmenu(
@@ -372,6 +381,8 @@ class MacAppMenu {
 
   void _sync() {
     if (!_installed) return;
+    final canOpen = canOpenProjects();
+    unawaited(MacMenuBar.setMenuItemEnabled(_openId, canOpen));
     unawaited(MacMenuBar.setMenuItemEnabled(_closeId, session.hasProject));
     unawaited(
       MacMenuBar.updateMenuItem(
@@ -397,7 +408,10 @@ class MacAppMenu {
     _recentItemIds = [];
 
     final recents = session.recents;
-    await MacMenuBar.setMenuItemEnabled(_openRecentId, recents.isNotEmpty);
+    await MacMenuBar.setMenuItemEnabled(
+      _openRecentId,
+      recents.isNotEmpty && canOpenProjects(),
+    );
 
     for (var i = 0; i < recents.length; i++) {
       final id = 'file_recent_$i';

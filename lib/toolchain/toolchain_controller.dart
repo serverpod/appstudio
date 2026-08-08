@@ -110,10 +110,6 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
   @override
   bool get isRefreshing => _refreshing;
 
-  /// True while the setup dialog is fetching a live manifest from the bucket.
-  @override
-  bool get isFetchingManifest => _fetchingManifest;
-
   /// Non-null while an install is running, and until the next one starts.
   @override
   InstallProgress? get progress => _progress;
@@ -130,34 +126,63 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
       _installer ??= ToolchainInstaller(paths: paths, manifest: _manifest);
 
   /// Pulls the live manifest from the bucket when it is newer than the current
-  /// pin, HEADs each artifact for its current size, then re-probes so the UI
-  /// shows what would actually be downloaded.
+  /// pin, HEADs each artifact we would download for its current size, then
+  /// re-probes so the UI shows what would actually be fetched.
+  ///
+  /// **A failed manifest fetch is not an error here.** `manifest.json` is an
+  /// optional upgrade over the pin baked into the app; it is not published
+  /// today, so treating its absence as fatal would mean no first run ever gets
+  /// past this. An unreachable *artifact* is fatal — that download is about to
+  /// fail — and that is what this reports.
   @override
-  Future<void> refreshPublishedManifest() async {
-    if (_fetchingManifest || isInstalling) return;
+  Future<String?> preflight() async {
+    if (_fetchingManifest || isInstalling) return null;
     _fetchingManifest = true;
     notifyListeners();
     try {
-      var manifest = _manifest;
       final fetched = await ToolManifest.fetchPublished(
         _manifest.baseUrl,
         cacheFile: paths.cachedManifestFile,
       );
-      if (fetched != null && fetched.isNewerThan(manifest)) {
-        manifest = fetched;
-      }
-      final enriched = await manifest.withLiveDownloadBytes();
-      if (!identical(enriched, _manifest)) {
-        _manifest = enriched;
+      if (fetched != null && fetched.isNewerThan(_manifest)) {
+        _manifest = fetched;
         _installer = null;
+        // Re-resolve before reading `installable`: a newer pin can change which
+        // tools qualify, and those are the only ones worth probing.
         await refresh(deep: false);
       }
+
+      final wanted = [for (final t in inventory.installable) t.id];
+      if (wanted.isEmpty) return null;
+
+      final probe = await _manifest.probeArtifacts(only: wanted);
+      if (!identical(probe.manifest, _manifest)) {
+        _manifest = probe.manifest;
+        _installer = null;
+        // Sizes live on the specs the inventory holds, so the dialog would
+        // quote the baked numbers without this.
+        await refresh(deep: false);
+      }
+      if (probe.unreachable.isEmpty) return null;
+      return _unreachableMessage(probe.unreachable);
     } catch (e) {
-      debugPrint('ToolchainController: manifest fetch failed: $e');
+      debugPrint('ToolchainController: preflight failed: $e');
+      return 'Could not prepare the download: $e';
     } finally {
       _fetchingManifest = false;
       _notify();
     }
+  }
+
+  String _unreachableMessage(List<ToolId> ids) {
+    final names = [for (final id in ids) id.displayName];
+    final list = switch (names.length) {
+      1 => names.single,
+      2 => '${names.first} and ${names.last}',
+      _ => '${names.take(names.length - 1).join(', ')} and ${names.last}',
+    };
+    return 'Could not reach the download server for $list. '
+        'Check your internet connection and try again.';
   }
 
   /// Clears crashed installs left behind by a previous run. Cheap; fire and

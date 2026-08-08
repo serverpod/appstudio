@@ -163,7 +163,8 @@ class FakeToolsView extends ChangeNotifier implements ToolsView {
     this.isBusy = false,
     this.isInstalling = false,
     this.isRefreshing = false,
-    this.isFetchingManifest = false,
+    this.preflightError,
+    this.preflightDelay = Duration.zero,
     this.shellPathState = ShellPathState.absent,
     this.toolchainRootLabel = '~/Library/Application Support/App Studio/toolchain',
     this.manifestId = 'preview-1',
@@ -185,8 +186,15 @@ class FakeToolsView extends ChangeNotifier implements ToolsView {
   bool isInstalling;
   @override
   bool isRefreshing;
-  @override
-  bool isFetchingManifest;
+
+  /// What [preflight] reports back. Non-null drives the setup screen's failure
+  /// path, which is otherwise only reachable by unplugging the network.
+  String? preflightError;
+
+  /// Held before [preflight] answers, so the setup screen's spinner is visible
+  /// long enough to look at.
+  Duration preflightDelay;
+
   @override
   ShellPathState shellPathState;
   @override
@@ -216,7 +224,11 @@ class FakeToolsView extends ChangeNotifier implements ToolsView {
   @override
   Future<void> refreshShellPathState() async {}
   @override
-  Future<void> refreshPublishedManifest() async => notifyListeners();
+  Future<String?> preflight() async {
+    if (preflightDelay > Duration.zero) await Future.delayed(preflightDelay);
+    notifyListeners();
+    return preflightError;
+  }
   @override
   Future<void> install(List<ToolId> ids) async => notifyListeners();
   @override

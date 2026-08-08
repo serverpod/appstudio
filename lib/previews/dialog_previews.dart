@@ -4,6 +4,7 @@ import 'package:flutter/widget_previews.dart';
 import '../ui/project_startup_dialog.dart';
 import '../ui/settings/settings_dialog.dart';
 import '../ui/toolchain/toolchain_setup_dialog.dart';
+import '../ui/toolchain/toolchain_setup_screen.dart';
 import '../ui/uninstall/uninstall_confirm_dialog.dart';
 import '../ui/uninstall/uninstalled_screen.dart';
 import '../uninstall/uninstall_result.dart';
@@ -116,6 +117,31 @@ Widget toolchainSetup() => previewShell(
 Widget toolchainSetupDark() => previewShell(
       ToolchainSetupDialog(toolchains: FakeToolsView(inventory: emptyInventory)),
       dark: true,
+    );
+
+/// The screen the dialog sits on, held at the spinner it shows while the plan
+/// is still being fetched.
+@Preview(name: 'Setup screen — loading', group: 'First run')
+Widget toolchainSetupLoading() => previewShell(
+      ToolchainSetupScreen(
+        toolchains: FakeToolsView(
+          inventory: emptyInventory,
+          preflightDelay: const Duration(days: 1),
+        ),
+      ),
+    );
+
+/// What a first run with no network looks like — the one state that decides
+/// whether someone can get started at all.
+@Preview(name: 'Setup screen — offline', group: 'First run')
+Widget toolchainSetupOffline() => previewShell(
+      ToolchainSetupScreen(
+        toolchains: FakeToolsView(
+          inventory: emptyInventory,
+          preflightError: 'Could not reach the download server for Flutter SDK '
+              'and Serverpod CLI. Check your internet connection and try again.',
+        ),
+      ),
     );
 
 // --- Uninstall --------------------------------------------------------------

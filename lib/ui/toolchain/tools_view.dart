@@ -29,9 +29,6 @@ abstract interface class ToolsView implements Listenable {
   bool get isInstalling;
   bool get isRefreshing;
 
-  /// True while a live manifest is being downloaded from the bucket.
-  bool get isFetchingManifest;
-
   ShellPathState get shellPathState;
 
   /// The shell we would edit, e.g. "zsh". Shown when we cannot edit it.
@@ -60,8 +57,13 @@ abstract interface class ToolsView implements Listenable {
   Future<void> refreshDeep();
   Future<void> refreshShellPathState();
 
-  /// Fetches the live toolchain manifest when it is newer than the current pin.
-  Future<void> refreshPublishedManifest();
+  /// Works out what a first-run download would fetch: the newest published
+  /// manifest, and the live size of every artifact it names.
+  ///
+  /// Returns null once the plan is ready, or a message to put in front of the
+  /// user. Awaited rather than watched through a flag, because the setup screen
+  /// has nothing to show until it answers.
+  Future<String?> preflight();
 
   Future<void> install(List<ToolId> ids);
   Future<void> installMissing();

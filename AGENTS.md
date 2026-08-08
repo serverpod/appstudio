@@ -390,8 +390,8 @@ install. Sparkle would also catch it, but later and less clearly.
   the Application Support directory, the shell `PATH` block in the user's rc
   file (in `$HOME`, so deleting the directory alone would leave a dead entry in
   every new terminal), and preferences (NSUserDefaults), which is what makes a
-  relaunch behave like a fresh install — the toolchain-setup dismissal lives
-  there, not on disk.
+  relaunch behave like a fresh install — the recents list and the startup-notice
+  dismissal live there, not on disk.
 - It never aborts on a failed step: stopping halfway leaves neither a working
   install nor a clean machine. Failures are collected and named on the final
   screen, which never claims a clean uninstall that did not happen.
@@ -441,6 +441,53 @@ so it has no preview yet.
 - The menu bar lives above `ShadApp`, so menu-triggered dialogs use the `navigatorKey` context from `main.dart`.
 - **`MacAppMenu.install()` calls `MacMenuBar.reset()` first, and must keep doing so.** A hot restart replaces the Dart isolate but not the engine, its plugins or the native `NSMenu`, so without it every menu is added again on each restart — and `_recentItemIds` comes back empty, so Open Recent duplicates too. `reset()` removes exactly the items this plugin added: those are the ones carrying a String `representedObject`, which is also how the plugin finds items by id, so stock MainMenu.xib entries cannot be stripped.
 - **Never return `menuItem.isEnabled` from `validateMenuItem`** for an item the plugin overrode. Under automatic enabling AppKit *writes* `isEnabled` from the previous validation pass, so reading it back is a latch, not a query. MainMenu.xib ships `Preferences…` with no action at all, so AppKit disabled it before the override was installed and it could never re-enable — the Settings item was permanently greyed out. Overridden standard items are tracked in `overriddenItems` and validate to `true`; the Dart handler decides what happens when they fire.
+
+## First run
+
+`main.dart` picks the whole screen from `toolchains.inventory.installable`:
+non-empty means `ToolchainSetupScreen`, empty means `StudioShell`. **The start
+page and the setup flow are two screens, never stacked.** The dialog used to
+float over the start page, which offered New Project and Open Project buttons
+that could not work — there is no Flutter SDK to build with yet.
+
+- The gate is `installable` (missing **and** we have an artifact), not
+  `isComplete`. A required tool we cannot supply is unfixable by this screen, so
+  blocking on it would be a dead end; those surface as the toolbar's destructive
+  badge instead. `MacAppMenu.canOpenProjects` reads the same condition, because
+  ⌘O and Open Recent would otherwise walk straight past the gate.
+- **Both screens share one backdrop.** `ui/landing_scaffold.dart` owns the black
+  logo banner and the gradient; `StartPage` and `ToolchainSetupScreen` supply
+  only what sits on top. They are two states of the same moment — the app open
+  with no project — so a different backdrop on each read as a different app. It
+  is its own file rather than something exported from `start_page.dart` because
+  that one imports `ProjectSession` and so drags in `dart:io`.
+- The setup spinner is explicitly `Colors.white`. The backdrop is a fixed brand
+  image in both themes and the spinner sits over its saturated middle, where the
+  default (`primary`, brand blue) all but disappears — the same reason the banner
+  hardcodes black.
+- **The screen is a spinner and nothing else until the plan is ready.** Every
+  number in the dialog — versions, download sizes — comes from the bucket, so
+  `ToolsView.preflight()` is awaited before the dialog is raised. Raising it
+  first and filling the table in afterwards is what made a slow network read as
+  a stuck dialog.
+- **A failed published-manifest fetch is not a preflight failure.**
+  `manifest.json` is an optional upgrade over the pin baked into the app and is
+  *not published today* (404), so treating its absence as fatal would mean no
+  first run ever gets past this screen. What `preflight` reports is an
+  unreachable **artifact** — `ToolManifest.probeArtifacts` HEADs each one, and a
+  miss means that download is about to fail. It probes only the tools actually
+  about to be fetched (`only:`), so a host copy of Flutter cannot be blocked by
+  an artifact nobody would download.
+- Failure raises `ToolchainSetupErrorDialog` — the message plus **Try again**,
+  which loops back to the preflight, and **Quit**. There is no third option:
+  the app cannot build a Serverpod project without these tools and cannot fetch
+  them without a network.
+- Both dialogs are `canPop: false`. The plan dialog closes *itself* when the
+  inventory comes back complete, which is why that uses `Navigator.pop` and not
+  `maybePop` — `maybePop` honours the same `PopScope` that refuses the user.
+- `_drive()` re-checks `installable` after the preflight. A newer manifest can
+  pin versions the host already satisfies, and the plan dialog only self-closes
+  once an install has run, so an empty one would strand a modal over the shell.
 
 ## New projects
 

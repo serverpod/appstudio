@@ -237,22 +237,36 @@ class ToolManifest {
   /// [installedBytes] stays manifest-only — that is the on-disk footprint
   /// after extraction, which GCS does not know. Failures are silent: the
   /// manifest value is kept when a HEAD misses or errors.
-  Future<ToolManifest> withLiveDownloadBytes({http.Client? client}) async {
+  Future<ToolManifest> withLiveDownloadBytes({http.Client? client}) async =>
+      (await probeArtifacts(client: client)).manifest;
+
+  /// HEADs the artifacts this platform would download, both to pick up their
+  /// current sizes and to find out whether they are there at all.
+  ///
+  /// [only] restricts the probe to the tools actually about to be fetched. A
+  /// tool already satisfied on this Mac must not gate anything: whether its
+  /// artifact is reachable is irrelevant when nobody is going to download it.
+  Future<ArtifactProbe> probeArtifacts({
+    http.Client? client,
+    Iterable<ToolId>? only,
+  }) async {
     final ownClient = client == null;
     final c = client ?? http.Client();
     try {
       var changed = false;
       final platform = currentPlatformKey();
       final tools = <ToolId, ToolSpec>{};
+      final unreachable = <ToolId>[];
 
       for (final entry in this.tools.entries) {
         final spec = entry.value;
         final artifact = spec.platforms[platform];
-        if (artifact == null) {
+        if (artifact == null || (only != null && !only.contains(entry.key))) {
           tools[entry.key] = spec;
           continue;
         }
         final live = await _headDownloadBytes(c, urlFor(artifact));
+        if (live == null) unreachable.add(entry.key);
         if (live != null && live != artifact.downloadBytes) {
           changed = true;
           final platforms = Map<String, ToolArtifact>.from(spec.platforms);
@@ -263,11 +277,15 @@ class ToolManifest {
         }
       }
 
-      if (!changed) return this;
-      return ToolManifest(
-        manifestId: manifestId,
-        baseUrl: baseUrl,
-        tools: Map.unmodifiable(tools),
+      return ArtifactProbe(
+        manifest: changed
+            ? ToolManifest(
+                manifestId: manifestId,
+                baseUrl: baseUrl,
+                tools: Map.unmodifiable(tools),
+              )
+            : this,
+        unreachable: List.unmodifiable(unreachable),
       );
     } finally {
       if (ownClient) c.close();
@@ -325,6 +343,19 @@ class ToolManifest {
     }
     return manifest;
   }
+}
+
+/// What [ToolManifest.probeArtifacts] found in the bucket.
+class ArtifactProbe {
+  const ArtifactProbe({required this.manifest, required this.unreachable});
+
+  /// The manifest with live download sizes, or the original when every size
+  /// already matched.
+  final ToolManifest manifest;
+
+  /// Tools whose artifact did not answer a HEAD. Downloading these would fail,
+  /// so a caller about to install them should say so rather than start.
+  final List<ToolId> unreachable;
 }
 
 int _asInt(Object? value) => switch (value) {

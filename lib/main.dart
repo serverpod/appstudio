@@ -20,7 +20,7 @@ import 'ui/uninstall/uninstall_confirm_dialog.dart';
 import 'util/pretty_path.dart';
 import 'ui/uninstall/uninstalled_screen.dart';
 import 'uninstall/uninstaller.dart';
-import 'ui/toolchain/toolchain_setup_dialog.dart';
+import 'ui/toolchain/toolchain_setup_screen.dart';
 import 'ui/studio_shell.dart';
 
 Future<void> main() async {
@@ -104,6 +104,13 @@ class _AppStudioAppState extends State<AppStudioApp> {
   /// first one, but `hasProject` never changes across that.
   String? _noticedProjectPath;
 
+  /// Last value the File menu was synced against.
+  ///
+  /// `ToolchainController` notifies on every download progress tick, and
+  /// `_sync` tears down and rebuilds the Open Recent items each time — two of
+  /// those overlapping would duplicate entries. Only the transition matters.
+  bool? _menuCanOpenProjects;
+
   @override
   void initState() {
     super.initState();
@@ -121,20 +128,40 @@ class _AppStudioAppState extends State<AppStudioApp> {
       onSetAutomaticUpdates: (enabled) =>
           unawaited(widget.updates.setAutomaticallyChecks(enabled)),
       automaticUpdatesEnabled: () => widget.updates.state.automaticallyChecks,
+      canOpenProjects: () => !_needsToolchainSetup,
     );
     // The menu item starts disabled if the updater is not ready yet; re-sync
     // when it settles.
     widget.updates.addListener(_syncMenu);
+    // File → Open and Open Recent follow the toolchain, so the menu has to
+    // re-sync when the last install lands.
+    _menuCanOpenProjects = !_needsToolchainSetup;
+    widget.toolchains.addListener(_onToolchainsChanged);
     _noticedProjectPath = widget.session.projectPath;
     widget.session.addListener(_onSessionChanged);
     unawaited(_macMenu!.install());
-    // Clear anything a crashed install left behind, then offer to fetch what
-    // is missing. Both after the first frame, so neither delays launch.
+    // Clear anything a crashed install left behind. Fire and forget, so it
+    // never delays launch; ToolchainSetupScreen drives the install itself.
     unawaited(widget.toolchains.collectGarbage());
-    WidgetsBinding.instance.addPostFrameCallback((_) => _offerToolchainSetup());
   }
 
   void _syncMenu() => _macMenu?.refresh();
+
+  void _onToolchainsChanged() {
+    final canOpen = !_needsToolchainSetup;
+    if (canOpen == _menuCanOpenProjects) return;
+    _menuCanOpenProjects = canOpen;
+    _syncMenu();
+  }
+
+  /// Whether the first-run setup screen owns the window.
+  ///
+  /// Gated on `installable`, not on a complete toolchain: a required tool we
+  /// have no artifact for cannot be fixed by the setup screen, so blocking on
+  /// it would be a dead end. Those surface as the toolbar's destructive badge,
+  /// pointing at Settings → Tools.
+  bool get _needsToolchainSetup =>
+      widget.toolchains.inventory.installable.isNotEmpty;
 
   /// Opening a project auto-starts the server, so this is the moment the long
   /// first compile begins — say so before it looks like a hang.
@@ -184,15 +211,6 @@ class _AppStudioAppState extends State<AppStudioApp> {
     });
   }
 
-  Future<void> _offerToolchainSetup() async {
-    final navigatorContext = _navigatorKey.currentContext;
-    if (!mounted || navigatorContext == null) return;
-    await maybeShowToolchainSetup(
-      navigatorContext,
-      toolchains: widget.toolchains,
-    );
-  }
-
   void _showNewProjectDialog() {
     final navigatorContext = _navigatorKey.currentContext;
     if (!mounted || navigatorContext == null) return;
@@ -208,6 +226,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
   @override
   void dispose() {
     widget.updates.removeListener(_syncMenu);
+    widget.toolchains.removeListener(_onToolchainsChanged);
     widget.session.removeListener(_onSessionChanged);
     _macMenu?.dispose();
     // Same teardown Sparkle runs before it relaunches, so the two paths cannot
@@ -226,7 +245,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: widget.themeController,
+      listenable: Listenable.merge([widget.themeController, widget.toolchains]),
       builder: (context, _) {
         return ShadApp(
           navigatorKey: _navigatorKey,
@@ -241,6 +260,10 @@ class _AppStudioAppState extends State<AppStudioApp> {
             // moment; the shell would otherwise keep rendering panes for a
             // session that is being dismantled underneath it.
             null when _uninstalling => const _UninstallingScreen(),
+            // Before the start page, not over it: there is nothing to create or
+            // open a project with yet.
+            null when _needsToolchainSetup =>
+              ToolchainSetupScreen(toolchains: widget.toolchains),
             null => StudioShell(
                 toolchains: widget.toolchains,
                 session: widget.session,

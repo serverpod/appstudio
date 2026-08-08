@@ -12,19 +12,37 @@ import '../../widgets/determinate_progress.dart';
 import '../../widgets/error_banner.dart';
 import 'tools_view.dart';
 
-/// Shows the setup dialog if anything required is missing and installable.
-Future<void> maybeShowToolchainSetup(
+/// Raises the download plan. Completes when the toolchain is in place — the
+/// dialog closes itself — or never, if the user quits from it.
+///
+/// The caller is expected to have run [ToolsView.preflight] first: the plan is
+/// the *whole* content of this dialog, so opening it before the sizes and
+/// versions have arrived leaves an empty box on screen.
+Future<void> showToolchainSetupDialog(
   BuildContext context, {
   required ToolsView toolchains,
 }) async {
-  if (toolchains.inventory.installable.isEmpty) return;
-  if (!context.mounted) return;
-
   await showShadDialog<void>(
     context: context,
     barrierDismissible: false,
     barrierBlurSigma: 0,
     builder: (context) => ToolchainSetupDialog(toolchains: toolchains),
+  );
+}
+
+/// Reports a preflight that could not produce a plan, and offers to retry.
+///
+/// Completes when the user asks to try again; quitting exits the process, so
+/// there is no second return path to handle.
+Future<void> showToolchainSetupErrorDialog(
+  BuildContext context, {
+  required String message,
+}) async {
+  await showShadDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    barrierBlurSigma: 0,
+    builder: (context) => ToolchainSetupErrorDialog(message: message),
   );
 }
 
@@ -41,11 +59,14 @@ class ToolchainSetupDialog extends StatefulWidget {
 class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
   bool _installGlobally = true;
 
+  /// Guards the self-close: the controller notifies several times as the last
+  /// install settles, and popping a route twice throws.
+  bool _closing = false;
+
   @override
   void initState() {
     super.initState();
     widget.toolchains.addListener(_onToolchains);
-    unawaited(widget.toolchains.refreshPublishedManifest());
   }
 
   @override
@@ -59,11 +80,15 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
     setState(() {});
     // Close once everything required is in place.
     final toolchains = widget.toolchains;
-    if (!toolchains.isInstalling &&
+    if (!_closing &&
+        !toolchains.isInstalling &&
         toolchains.progress != null &&
         toolchains.inventory.installable.isEmpty &&
         toolchains.installError == null) {
-      Navigator.of(context).maybePop();
+      _closing = true;
+      // `pop`, not `maybePop`: the PopScope below refuses the user's own
+      // dismissal, and maybePop honours it, so it would refuse this too.
+      Navigator.of(context).pop();
     }
   }
 
@@ -78,10 +103,12 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
     final theme = ShadTheme.of(context);
     final toolchains = widget.toolchains;
     final installing = toolchains.isInstalling;
-    final fetchingManifest = toolchains.isFetchingManifest;
 
     return PopScope(
-      canPop: !installing,
+      // Nothing downstream works without these tools, and this is the only
+      // thing on screen, so a dismissal would strand the user on an empty
+      // window. Quit is the way out; the dialog closes itself when done.
+      canPop: false,
       child: ShadDialog.alert(
         title: const Text('Set up toolchain'),
         description: const Text(
@@ -101,7 +128,7 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
                   child: const Text('Quit'),
                 ),
                 ShadButton(
-                  onPressed: fetchingManifest ? null : _download,
+                  onPressed: _download,
                   child: const Text('Download'),
                 ),
               ],
@@ -115,13 +142,6 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
 
   Widget _buildPlan(ShadThemeData theme) {
     final toolchains = widget.toolchains;
-    if (toolchains.isFetchingManifest) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 32),
-        child: Center(child: ShadSpinner()),
-      );
-    }
-
     final inventory = toolchains.inventory;
     final cellStyle = theme.textTheme.muted;
 
@@ -284,6 +304,46 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// Shown when the preflight could not work out what to download — in practice,
+/// no route to the bucket.
+///
+/// There is no degraded mode to offer: the app cannot build a Serverpod project
+/// without these tools, and it cannot fetch them without a network. So the two
+/// honest choices are to retry and to quit.
+class ToolchainSetupErrorDialog extends StatelessWidget {
+  const ToolchainSetupErrorDialog({super.key, required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      child: ShadDialog.alert(
+        title: const Text('Could not prepare the download'),
+        description: const Text(
+          'App Studio needs to download the tools it builds and runs Serverpod '
+          'projects with before it can open a project.',
+        ),
+        actions: [
+          ShadButton.outline(
+            onPressed: quitApp,
+            child: const Text('Quit'),
+          ),
+          ShadButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Try again'),
+          ),
+        ],
+        child: SizedBox(
+          width: double.infinity,
+          child: ErrorBanner(message: message),
+        ),
+      ),
     );
   }
 }

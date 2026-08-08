@@ -5,15 +5,12 @@ import 'package:shad/shad.dart';
 import '../theme/app_theme.dart';
 import '../session/project_session.dart';
 import '../widgets/menu_item_tile.dart';
+import 'landing_scaffold.dart';
 
-const _kBannerHeight = 56.0;
-const _kLogoAsset = 'assets/logo-horizontal.webp';
-const _kBackgroundAsset = 'assets/background.webp';
-
-/// Natural pixel size of [assets/background.webp].
-const _kBackgroundAspectRatio = 2394 / 1247;
-
-/// Landing screen shown before a project is opened.
+/// Landing screen shown once the toolchain is in place and no project is open.
+///
+/// The branded backdrop lives in [LandingScaffold] because first-run setup shows
+/// the same one.
 class StartPage extends StatelessWidget {
   const StartPage({
     super.key,
@@ -26,85 +23,8 @@ class StartPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const _StartPageBanner(),
-        Expanded(
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              const _StartPageBackground(),
-              _StartPageContent(session: session, onNewProject: onNewProject),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _StartPageBanner extends StatelessWidget {
-  const _StartPageBanner();
-
-  @override
-  Widget build(BuildContext context) {
-    return ColoredBox(
-      color: Colors.black,
-      child: SizedBox(
-        height: _kBannerHeight,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Image.asset(
-              _kLogoAsset,
-              height: 28,
-              fit: BoxFit.contain,
-              alignment: Alignment.centerLeft,
-              filterQuality: FilterQuality.medium,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _StartPageBackground extends StatelessWidget {
-  const _StartPageBackground();
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final height = constraints.maxHeight;
-        final width = constraints.maxWidth;
-        final naturalWidth = height * _kBackgroundAspectRatio;
-
-        if (naturalWidth < width) {
-          return Image.asset(
-            _kBackgroundAsset,
-            width: width,
-            height: height,
-            fit: BoxFit.fill,
-            alignment: Alignment.center,
-            filterQuality: FilterQuality.medium,
-          );
-        }
-
-        return ClipRect(
-          child: Align(
-            alignment: Alignment.center,
-            child: Image.asset(
-              _kBackgroundAsset,
-              height: height,
-              fit: BoxFit.fitHeight,
-              filterQuality: FilterQuality.medium,
-            ),
-          ),
-        );
-      },
+    return LandingScaffold(
+      child: _StartPageContent(session: session, onNewProject: onNewProject),
     );
   }
 }
