@@ -68,7 +68,7 @@ final previewManifest = ToolManifest(
         _spec(ToolId.opencode, 'OpenCode', '1.18.4', required: false, sizeMb: 43),
     ToolId.git: _spec(ToolId.git, 'Git', '2.53.0-3', sizeMb: 57),
     ToolId.llvmTools:
-        _spec(ToolId.llvmTools, 'Native tools', '20.1.8', sizeMb: 9),
+        _spec(ToolId.llvmTools, 'Developer tools', '20.1.8', sizeMb: 9),
   },
 );
 
@@ -129,6 +129,33 @@ final mixedInventory = _inventory({
   ToolId.llvmTools: [_found(ToolId.llvmTools, ToolSource.managed, '20.1.8')],
 });
 
+/// Every required tool already on this Mac, so the global-install opt-in has
+/// nothing to add and shows satisfied and inert. OpenCode is managed on purpose
+/// — it does not count towards this.
+final allNativeInventory = _inventory({
+  ToolId.flutter: [_found(ToolId.flutter, ToolSource.host, '3.44.2')],
+  ToolId.serverpodCli: [
+    _found(ToolId.serverpodCli, ToolSource.host, '4.0.0-beta.1'),
+  ],
+  ToolId.opencode: [_found(ToolId.opencode, ToolSource.managed, '1.18.4')],
+  ToolId.git: [_found(ToolId.git, ToolSource.host, '2.53.0-3')],
+  ToolId.llvmTools: [_found(ToolId.llvmTools, ToolSource.host, '20.1.8')],
+});
+
+/// Everything healthy, but two managed installs behind the pinned versions —
+/// the only state in which "Update All" is enabled.
+final outdatedInventory = _inventory({
+  ToolId.flutter: [_found(ToolId.flutter, ToolSource.managed, '3.44.0')],
+  ToolId.serverpodCli: [
+    _found(ToolId.serverpodCli, ToolSource.managed, '4.0.0-beta.1'),
+  ],
+  ToolId.opencode: [_found(ToolId.opencode, ToolSource.host, '1.18.4')],
+  // A host copy behind the pin stays put: we did not install it, so it is not
+  // ours to replace, and Update All must leave it alone.
+  ToolId.git: [_found(ToolId.git, ToolSource.host, '2.40.0')],
+  ToolId.llvmTools: [_found(ToolId.llvmTools, ToolSource.managed, '20.1.0')],
+});
+
 /// A download in flight, so the progress banner can be seen without waiting
 /// for a real 662 MB transfer.
 /// Fixed [startedAt] and [now] so the banner's elapsed/remaining text is
@@ -162,12 +189,9 @@ class FakeToolsView extends ChangeNotifier implements ToolsView {
     this.installError,
     this.isBusy = false,
     this.isInstalling = false,
-    this.isRefreshing = false,
     this.preflightError,
     this.preflightDelay = Duration.zero,
     this.shellPathState = ShellPathState.absent,
-    this.toolchainRootLabel = '~/Library/Application Support/App Studio/toolchain',
-    this.manifestId = 'preview-1',
     this.shellName = 'zsh',
     this.shellRcLabel = '~/.zshrc',
     this.shellExportLine =
@@ -184,8 +208,6 @@ class FakeToolsView extends ChangeNotifier implements ToolsView {
   bool isBusy;
   @override
   bool isInstalling;
-  @override
-  bool isRefreshing;
 
   /// What [preflight] reports back. Non-null drives the setup screen's failure
   /// path, which is otherwise only reachable by unplugging the network.
@@ -198,26 +220,11 @@ class FakeToolsView extends ChangeNotifier implements ToolsView {
   @override
   ShellPathState shellPathState;
   @override
-  String toolchainRootLabel;
-  @override
-  String manifestId;
-  @override
   String shellName;
   @override
   String shellRcLabel;
   @override
   String shellExportLine;
-
-  @override
-  String requirementLabel(ToolSpec spec) => '${spec.version} or newer';
-
-  @override
-  String? upgradeCommand(ToolId id) => switch (id) {
-        ToolId.flutter => 'flutter upgrade',
-        ToolId.serverpodCli => 'dart install serverpod_cli@4.0.0-beta.1',
-        ToolId.opencode => 'brew upgrade opencode',
-        _ => null,
-      };
 
   @override
   Future<void> refreshDeep() async => notifyListeners();
@@ -244,8 +251,6 @@ class FakeToolsView extends ChangeNotifier implements ToolsView {
     return null;
   }
 
-  @override
-  Future<void> revealToolchainFolder() async {}
 }
 
 /// A [ProvidersView] with a fixed set of keys and models.

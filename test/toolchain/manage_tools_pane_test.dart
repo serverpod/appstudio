@@ -7,7 +7,7 @@ import 'package:appstudio/toolchain/toolchain_manifest.dart';
 import 'package:appstudio/toolchain/toolchain_paths.dart';
 import 'package:appstudio/toolchain/toolchain_requirements.dart';
 import 'package:appstudio/ui/toolchain/manage_tools_pane.dart';
-import 'package:appstudio/ui/toolchain/tool_row.dart';
+import 'package:appstudio/widgets/settings_table.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shad/shad.dart';
@@ -37,8 +37,8 @@ ToolCandidate rejected(ToolId id, String version, String reason) =>
       reason: reason,
     );
 
-/// A controller whose inventory is fixed, so the dialog is tested against
-/// known state rather than whatever is installed on the machine.
+/// A controller whose inventory is fixed, so the pane is tested against known
+/// state rather than whatever is installed on the machine.
 ToolchainController controllerWith(Map<ToolId, List<ToolCandidate>> byTool) {
   final tools = {
     for (final entry in byTool.entries)
@@ -57,7 +57,8 @@ ToolchainController controllerWith(Map<ToolId, List<ToolCandidate>> byTool) {
   );
 }
 
-/// Refresh would re-probe the real machine and overwrite the fixture.
+/// Refresh would re-probe the real machine and overwrite the fixture; preflight
+/// would go to the network.
 class _FixedToolchainController extends ToolchainController {
   _FixedToolchainController({
     required super.initial,
@@ -68,6 +69,9 @@ class _FixedToolchainController extends ToolchainController {
 
   @override
   Future<void> refresh({bool deep = false}) async {}
+
+  @override
+  Future<String?> preflight() async => null;
 }
 
 void main() {
@@ -90,7 +94,8 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('shows a row per tool with its source', (tester) async {
+  testWidgets('lists every tool with its version and where it came from',
+      (tester) async {
     await pumpPane(
       tester,
       controllerWith({
@@ -101,42 +106,19 @@ void main() {
       }),
     );
 
-    expect(find.byType(ToolRow), findsNWidgets(2));
+    expect(find.byType(SettingsTable), findsOneWidget);
     expect(find.text('Flutter SDK'), findsOneWidget);
-    expect(find.text('Managed'), findsOneWidget);
-    expect(find.text('On your Mac'), findsOneWidget);
-    // The version badge stands in for the old "Ready" label.
     expect(find.text('3.44.2'), findsOneWidget);
     expect(find.text('2.53.0'), findsOneWidget);
+    // A host copy reads as "Native" now — "On your Mac" was a sentence where a
+    // badge belongs.
+    expect(find.text('Managed'), findsOneWidget);
+    expect(find.text('Native'), findsOneWidget);
+    expect(find.text('On your Mac'), findsNothing);
   });
 
-  testWidgets('a too-old host tool reads as an update, not a failure',
+  testWidgets('a tool with nothing usable gets a Missing badge',
       (tester) async {
-    await pumpPane(
-      tester,
-      controllerWith({
-        ToolId.serverpodCli: [
-          rejected(
-            ToolId.serverpodCli,
-            '3.5.0-beta.7',
-            '3.5.0-beta.7 (needs >=4.0.0-beta.1 <4.1.0)',
-          ),
-        ],
-      }),
-    );
-
-    // Named as an update rather than a failure, with the version that is
-    // actually installed shown beside it.
-    expect(find.text('Update needed'), findsOneWidget);
-    expect(find.text('3.5.0-beta.7'), findsOneWidget);
-    // The requirement is stated even when nothing qualifies.
-    expect(
-      find.textContaining('Requires >=4.0.0-beta.1 <4.1.0'),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('warns once per missing required tool', (tester) async {
     await pumpPane(
       tester,
       controllerWith({
@@ -147,23 +129,186 @@ void main() {
     );
 
     expect(find.text('Missing'), findsOneWidget);
-    expect(
-      find.textContaining('OpenCode is missing'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('OpenCode is missing'), findsOneWidget);
   });
 
-  testWidgets('a complete toolchain shows no warning banner', (tester) async {
+  testWidgets('a too-old host copy shows what would replace it',
+      (tester) async {
+    await pumpPane(
+      tester,
+      controllerWith({
+        ToolId.serverpodCli: [
+          rejected(ToolId.serverpodCli, '3.5.0-beta.7', 'too old'),
+        ],
+      }),
+    );
+
+    // The version that is there, then the one that would land — otherwise a
+    // working `serverpod` command beside a plain "Missing" reads as a failed
+    // detection rather than an upgrade.
+    expect(find.text('3.5.0-beta.7 → 4.0.0-beta.1'), findsOneWidget);
+    expect(find.text('Missing'), findsOneWidget);
+  });
+
+  testWidgets('Update All is disabled when everything is current',
+      (tester) async {
+    await pumpPane(
+      tester,
+      controllerWith({
+        ToolId.flutter: [
+          satisfied(ToolId.flutter, ToolSource.managed, '3.44.2'),
+        ],
+      }),
+    );
+
+    final button = tester.widget<ShadButton>(
+      find.widgetWithText(ShadButton, 'Update All'),
+    );
+    // Disabled rather than hidden: "is there anything newer?" is a question the
+    // tab should answer even when the answer is no.
+    expect(button.onPressed, isNull);
+    // And `enabled`, which is what shad actually dims on — a null onPressed
+    // alone leaves it looking live.
+    expect(button.enabled, isFalse);
+  });
+
+  testWidgets('Update All lights up for a managed install behind the pin',
+      (tester) async {
+    await pumpPane(
+      tester,
+      controllerWith({
+        ToolId.flutter: [
+          satisfied(ToolId.flutter, ToolSource.managed, '3.44.0'),
+        ],
+      }),
+    );
+
+    final button = tester.widget<ShadButton>(
+      find.widgetWithText(ShadButton, 'Update All'),
+    );
+    expect(button.onPressed, isNotNull);
+    expect(button.enabled, isTrue);
+    // The row states the move rather than just the installed version.
+    expect(find.text('3.44.0 → 3.44.2'), findsOneWidget);
+  });
+
+  testWidgets('a host copy behind our pin is not ours to update',
+      (tester) async {
+    // We did not install it and must not overwrite it.
+    await pumpPane(
+      tester,
+      controllerWith({
+        ToolId.git: [satisfied(ToolId.git, ToolSource.host, '2.30.0')],
+      }),
+    );
+
+    final button = tester.widget<ShadButton>(
+      find.widgetWithText(ShadButton, 'Update All'),
+    );
+    expect(button.enabled, isFalse);
+    expect(find.text('2.30.0'), findsOneWidget);
+  });
+
+  testWidgets('offers the global install with the setup dialog\'s wording',
+      (tester) async {
+    await pumpPane(
+      tester,
+      controllerWith({
+        ToolId.flutter: [
+          satisfied(ToolId.flutter, ToolSource.managed, '3.44.2'),
+        ],
+      }),
+    );
+
+    expect(find.text('Install tools globally'), findsOneWidget);
+    expect(
+      find.textContaining('external AI agents'),
+      findsOneWidget,
+    );
+    expect(find.text('Add the tools to your PATH'), findsNothing);
+  });
+
+  testWidgets('global install is checked and inert when nothing to add',
+      (tester) async {
+    // Every required tool is already on this Mac, so our PATH block would add
+    // nothing. Shown satisfied rather than inviting an edit that changes
+    // nothing — and the shell config is never touched.
     await pumpPane(
       tester,
       controllerWith({
         for (final id in ToolId.values)
-          id: [satisfied(id, ToolSource.managed, '1.0.0')],
+          if (id != ToolId.opencode)
+            id: [satisfied(id, ToolSource.host, '99.0.0')],
+        // Managed, and deliberately not counted: OpenCode *is* the agent, so an
+        // external one has no reason to look for it.
+        ToolId.opencode: [
+          satisfied(ToolId.opencode, ToolSource.managed, '1.18.4'),
+        ],
       }),
     );
 
-    expect(find.textContaining('missing'), findsNothing);
-    expect(find.byType(ToolRow), findsNWidgets(ToolId.values.length));
+    final box = tester.widget<ShadCheckbox>(find.byType(ShadCheckbox));
+    expect(box.value, isTrue);
+    expect(box.enabled, isFalse);
+  });
+
+  testWidgets('global install stays live while a tool is only managed',
+      (tester) async {
+    await pumpPane(
+      tester,
+      controllerWith({
+        ToolId.flutter: [
+          satisfied(ToolId.flutter, ToolSource.managed, '3.44.2'),
+        ],
+        ToolId.git: [satisfied(ToolId.git, ToolSource.host, '2.53.0')],
+      }),
+    );
+
+    final box = tester.widget<ShadCheckbox>(find.byType(ShadCheckbox));
+    expect(box.value, isFalse);
+    expect(box.enabled, isTrue);
+  });
+
+  testWidgets('Developer tools, not "Native tools"', (tester) async {
+    // The row would otherwise read "Native tools … Native", and these are the
+    // Xcode command-line utilities by any other name.
+    await pumpPane(
+      tester,
+      controllerWith({
+        ToolId.llvmTools: [
+          satisfied(ToolId.llvmTools, ToolSource.host, '21.0.0'),
+        ],
+      }),
+    );
+
+    expect(find.text('Developer tools'), findsOneWidget);
+    expect(find.text('Native tools'), findsNothing);
+  });
+
+  testWidgets('drops the folder controls and the install path', (tester) async {
+    await pumpPane(
+      tester,
+      controllerWith({
+        ToolId.flutter: [
+          satisfied(ToolId.flutter, ToolSource.managed, '3.44.2'),
+        ],
+      }),
+    );
+
+    expect(find.text('Reveal'), findsNothing);
+    expect(find.text('Re-check'), findsNothing);
+    expect(find.textContaining('Application Support'), findsNothing);
+  });
+
+  testWidgets('renders with an inventory that could not be read',
+      (tester) async {
+    // `ToolchainController.create` falls back to an empty inventory when the
+    // probe throws rather than refusing to launch, and ShadTable asserts on an
+    // empty child list — so this pane has to survive it.
+    await pumpPane(tester, controllerWith({}));
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(SettingsTable), findsOneWidget);
   });
 
   testWidgets('no longer offers "Uninstall all tools"', (tester) async {

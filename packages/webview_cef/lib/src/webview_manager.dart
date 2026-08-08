@@ -24,7 +24,7 @@ class WebviewManager extends ValueNotifier<bool> {
 
   int nextIndex = 1;
 
-  get ready => _creatingCompleter.future;
+  Future<void> get ready => _creatingCompleter.future;
 
   WebViewController createWebView({
     Widget? loading,
@@ -107,7 +107,7 @@ class WebviewManager extends ValueNotifier<bool> {
         return;
       case 'javascriptChannelMessage':
         int browserId = call.arguments['browserId'] as int;
-        _webViews[browserId]?.onJavascriptChannelMessage?.call(
+        _webViews[browserId]?.onJavascriptChannelMessage.call(
             call.arguments['channel'] as String,
             call.arguments['message'] as String,
             call.arguments['callbackId'] as String,
@@ -126,7 +126,9 @@ class WebviewManager extends ValueNotifier<bool> {
       case 'onFocusedNodeChangeMessage':
         int browserId = call.arguments['browserId'] as int;
         bool editable = call.arguments['editable'] as bool;
-        _webViews[browserId]?.onFocusedNodeChangeMessage(editable);
+        // `?.call`, like every sibling case: the callback is only set once
+        // a WebView registers for it, and CEF can report a focus change first.
+        _webViews[browserId]?.onFocusedNodeChangeMessage?.call(editable);
         return;
       case 'onImeCompositionRangeChangedMessage':
         int browserId = call.arguments['browserId'] as int;

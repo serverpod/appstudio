@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:shad/shad.dart';
 
 import '../../theme/app_theme.dart';
@@ -10,13 +9,20 @@ import '../../toolchain/shell_path_state.dart';
 import '../../toolchain/tool_status.dart';
 import '../../widgets/determinate_progress.dart';
 import '../../widgets/error_banner.dart';
-import 'tool_row.dart';
+import '../../widgets/settings_table.dart';
+import 'install_globally_checkbox.dart';
 import 'tools_view.dart';
 
-/// Where every tool came from, whether it is usable, and what to do about it.
+/// Which tools are in play, which version, and what can be done about them.
 ///
 /// A pane inside the Settings dialog, so it owns no chrome of its own — the
 /// install button lives in the dialog's footer.
+///
+/// Deliberately the same [ToolTable] first-run setup shows. This used to be a
+/// stack of cards carrying a requirement line, an install path and per-tool
+/// buttons, which answered questions nobody was asking and made the same
+/// toolchain look like two different things depending on which screen you
+/// reached it from.
 class ManageToolsPane extends StatefulWidget {
   const ManageToolsPane({super.key, required this.toolchains});
 
@@ -41,6 +47,10 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
       // wants the alternatives too ("you also have a host Flutter").
       unawaited(widget.toolchains.refreshDeep());
       unawaited(widget.toolchains.refreshShellPathState());
+      // Pulls a newer published manifest, which is the only way a managed
+      // install can turn out to be behind — without it "Update All" could
+      // never light up.
+      unawaited(widget.toolchains.preflight());
     });
   }
 
@@ -60,6 +70,7 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
     final toolchains = widget.toolchains;
     final inventory = toolchains.inventory;
     final missing = inventory.missingRequired;
+    final updatable = inventory.updatable;
     final busy = toolchains.isBusy;
 
     return SingleChildScrollView(
@@ -86,47 +97,81 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
             ),
             const ShadGap(3),
           ],
-          for (final id in ToolId.values)
-            if (inventory[id] case final status?) ...[
-              ToolRow(
-                status: status,
-                requirement: toolchains.requirementLabel(status.spec),
-                progress: toolchains.progress?[id],
-                actions: _actionsFor(status, busy),
-              ),
-              const ShadGap(2),
+          SettingsTable(
+            rows: [
+              for (final id in ToolId.values)
+                if (inventory[id] case final status?)
+                  _rowFor(theme, status),
             ],
-          const ShadSeparator.horizontal(
-            margin: EdgeInsets.symmetric(vertical: 12),
           ),
           const ShadGap(3),
-          _ShellPathToggle(toolchains: toolchains),
-          const ShadGap(3),
-          const ShadSeparator.horizontal(
-            margin: EdgeInsets.symmetric(vertical: 12),
-          ),
-          const ShadGap(2),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Text(
-                  toolchains.toolchainRootLabel,
-                  style: theme.textTheme.muted,
-                  overflow: TextOverflow.ellipsis,
+                child: _ShellPathToggle(
+                  toolchains: toolchains,
+                  alreadyGlobal: inventory.requiredToolsAreNative,
                 ),
               ),
-              ShadButton.ghost(
-                onPressed: () => unawaited(toolchains.revealToolchainFolder()),
-                child: const Text('Reveal'),
-              ),
-              ShadButton.ghost(
-                onPressed: busy ? null : toolchains.refreshDeep,
-                child: Text(toolchains.isRefreshing ? 'Checking…' : 'Re-check'),
+              const ShadGap(2),
+              Builder(
+                builder: (context) {
+                  // Disabled rather than hidden: "is there anything newer?" is a
+                  // question the tab should answer even when the answer is no.
+                  final canUpdate = !busy && updatable.isNotEmpty;
+                  return ShadButton.outline(
+                    // `enabled` as well as `onPressed`. shad dims from
+                    // `ShadButton.enabled`, which defaults to true — a null
+                    // `onPressed` alone makes a button inert while it still looks
+                    // live, which is worse than either state on its own.
+                    enabled: canUpdate,
+                    onPressed: canUpdate
+                        ? () => unawaited(
+                              toolchains.install(
+                                [for (final t in updatable) t.id],
+                              ),
+                            )
+                        : null,
+                    child: const Text('Update All'),
+                  );
+                },
               ),
             ],
           ),
         ],
       ),
+    );
+  }
+
+  /// The version in play, then what it means: where a usable copy came from, or
+  /// that there is not one.
+  SettingsTableRow _rowFor(ShadThemeData theme, ToolStatus status) {
+    final resolved = status.resolved;
+    final rejected = status.bestRejected;
+    final pinned = status.spec.version;
+    final installed = resolved?.detectedVersion;
+    final isBehind = resolved != null &&
+        resolved.source == ToolSource.managed &&
+        installed != null &&
+        installed < pinned;
+
+    return SettingsTableRow(
+      name: status.spec.displayName,
+      // For anything usable, the version that is actually there. For a tool we
+      // cannot run, the one we would install, with the rejected copy beside it.
+      badge: versionBadge(
+        resolved != null ? (isBehind ? pinned : installed!) : pinned,
+        replacing: resolved != null
+            ? (isBehind ? installed : null)
+            : rejected?.detectedVersion,
+      ),
+      trailing: switch (resolved) {
+        // `success`/`warning` ride in the scheme's custom map; there is no
+        // shadcn token for either.
+        final r? => appSuccessBadge(theme, child: Text(r.source.label)),
+        null => appWarningBadge(theme, child: const Text('Missing')),
+      },
     );
   }
 
@@ -146,36 +191,6 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
               'not work until it is installed.'
         : '${missing.length} tools are missing. Some features will not work '
               'until they are installed.';
-  }
-
-  List<Widget> _actionsFor(ToolStatus status, bool busy) {
-    final toolchains = widget.toolchains;
-    final resolved = status.resolved;
-    final isManaged = resolved?.source == ToolSource.managed;
-    final rejected = status.bestRejected;
-
-    return [
-      if (!status.isSatisfied && status.canInstall)
-        ShadButton(
-          onPressed: busy ? null : () => toolchains.install([status.id]),
-          child: const Text('Install'),
-        ),
-      // A too-old host tool is theirs to upgrade, not ours to overwrite.
-      if (rejected != null &&
-          rejected.source == ToolSource.host &&
-          rejected.fitness == ToolFitness.wrongVersion &&
-          toolchains.upgradeCommand(status.id) != null) ...[
-        const SizedBox(width: 6),
-        _UpgradeHint(command: toolchains.upgradeCommand(status.id)!),
-      ],
-      if (isManaged) ...[
-        const SizedBox(width: 6),
-        ShadButton.ghost(
-          onPressed: busy ? null : () => toolchains.uninstall(status.id),
-          child: const Text('Remove'),
-        ),
-      ],
-    ];
   }
 }
 
@@ -213,53 +228,17 @@ class _InstallBanner extends StatelessWidget {
   }
 }
 
-/// Shows the command that upgrades a host install, with a copy button.
-class _UpgradeHint extends StatefulWidget {
-  const _UpgradeHint({required this.command});
-
-  final String command;
-
-  @override
-  State<_UpgradeHint> createState() => _UpgradeHintState();
-}
-
-class _UpgradeHintState extends State<_UpgradeHint> {
-  bool _copied = false;
-  Timer? _timer;
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _copy() async {
-    await Clipboard.setData(ClipboardData(text: widget.command));
-    if (!mounted) return;
-    setState(() => _copied = true);
-    _timer?.cancel();
-    _timer = Timer(const Duration(seconds: 2), () {
-      if (mounted) setState(() => _copied = false);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ShadTooltip(
-      builder: (context) => Text('Copy “${widget.command}”'),
-      child: ShadButton.ghost(
-        onPressed: _copy,
-        child: Text(_copied ? 'Copied' : 'Upgrade yours'),
-      ),
-    );
-  }
-}
-
-/// Opt-in switch for putting the tools on the user's own `PATH`.
+/// Opt-in for putting the tools on the user's own `PATH`.
 class _ShellPathToggle extends StatefulWidget {
-  const _ShellPathToggle({required this.toolchains});
+  const _ShellPathToggle({
+    required this.toolchains,
+    this.alreadyGlobal = false,
+  });
 
   final ToolsView toolchains;
+
+  /// The tools are reachable outside App Studio without our help.
+  final bool alreadyGlobal;
 
   @override
   State<_ShellPathToggle> createState() => _ShellPathToggleState();
@@ -291,12 +270,14 @@ class _ShellPathToggleState extends State<_ShellPathToggle> {
     final theme = ShadTheme.of(context);
     final state = widget.toolchains.shellPathState;
 
-    if (state == ShellPathState.unsupported) {
+    // The "do it yourself" instructions are for a shell we cannot edit. With
+    // the tools already reachable there is nothing to instruct.
+    if (state == ShellPathState.unsupported && !widget.alreadyGlobal) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Add the tools to your PATH',
+            'Install tools globally',
             style: theme.textTheme.small.semibold,
           ),
           const ShadGap(1),
@@ -317,18 +298,13 @@ class _ShellPathToggleState extends State<_ShellPathToggle> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        ShadSwitch(
-          value: state == ShellPathState.present,
+        InstallGloballyCheckbox(
+          value: widget.alreadyGlobal || state == ShellPathState.present,
+          enabled: !widget.alreadyGlobal,
           onChanged: _working ? null : (v) => _set(v),
-          label: const Text('Add the tools to your PATH'),
-          sublabel: Text(
-            'App Studio does not need this — it already finds the '
-            'tools. Turn it on so an external editor or AI agent can '
-            'find them too. Edits a fenced block in '
-            '${widget.toolchains.shellRcLabel}.',
-          ),
         ),
-        if (state == ShellPathState.edited) ...[
+        // Our block is not in play, so neither are the states that report on it.
+        if (!widget.alreadyGlobal && state == ShellPathState.edited) ...[
           const SizedBox(height: 8),
           ErrorBanner(
             message:

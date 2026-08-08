@@ -143,13 +143,22 @@ extension AppColorScheme on ShadColorScheme {
 
 /// A soft green badge for installed or host-reused tools — same tint pattern
 /// as shad's destructive badge (`bg-destructive/10 text-destructive`).
-ShadBadge appSuccessBadge(ShadThemeData theme, {required Widget child}) {
-  final success = theme.colorScheme.success;
-  final wash = success.withValues(
+ShadBadge appSuccessBadge(ShadThemeData theme, {required Widget child}) =>
+    _washBadge(theme, theme.colorScheme.success, child);
+
+/// The amber counterpart, for a tool that is not there yet.
+///
+/// Warning rather than destructive: nothing is broken and nothing was lost —
+/// there is a button on this very screen that fixes it.
+ShadBadge appWarningBadge(ShadThemeData theme, {required Widget child}) =>
+    _washBadge(theme, theme.colorScheme.warning, child);
+
+ShadBadge _washBadge(ShadThemeData theme, Color color, Widget child) {
+  final wash = color.withValues(
     alpha: theme.brightness == Brightness.dark ? 0.2 : 0.1,
   );
   return ShadBadge(
-    foregroundColor: success,
+    foregroundColor: color,
     backgroundColor: wash,
     hoverBackgroundColor: wash,
     child: child,

@@ -10,6 +10,8 @@ import '../../util/byte_format.dart';
 import '../../util/quit_app.dart';
 import '../../widgets/determinate_progress.dart';
 import '../../widgets/error_banner.dart';
+import '../../widgets/settings_table.dart';
+import 'install_globally_checkbox.dart';
 import 'tools_view.dart';
 
 /// Raises the download plan. Completes when the toolchain is in place — the
@@ -143,42 +145,12 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
   Widget _buildPlan(ShadThemeData theme) {
     final toolchains = widget.toolchains;
     final inventory = toolchains.inventory;
-    final cellStyle = theme.textTheme.muted;
 
-    final installable = inventory.installable;
     final reused = [
       for (final status in inventory.tools.values)
         if (status.resolved case final r? when r.source == ToolSource.host)
           status,
     ];
-    final rowCount = installable.length + reused.length;
-    final rowHeight = theme.tableTheme.cellHeight ?? 48;
-    final tableHeight = rowHeight * rowCount;
-
-    /// [replacing] is the version already on this Mac when we found one and
-    /// rejected it. Without it a too-old copy is indistinguishable from nothing
-    /// installed, and "OpenCode 1.18.4 — 45 MB" beside a working `opencode`
-    /// command reads as a failed detection rather than an upgrade.
-    Widget toolCell(String name, Object? version, {Object? replacing}) => Row(
-          children: [
-            Flexible(
-              child: Text(
-                name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: cellStyle,
-              ),
-            ),
-            if (version != null) ...[
-              const ShadGap(1.5),
-              ShadBadge.secondary(
-                child: Text(
-                  replacing == null ? '$version' : '$replacing → $version',
-                ),
-              ),
-            ],
-          ],
-        );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -188,75 +160,37 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
           ErrorBanner(message: error),
           const SizedBox(height: 12),
         ],
-        ShadCard(
-          padding: EdgeInsets.zero,
-          clipBehavior: Clip.antiAlias,
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              const sizeColumnWidth = 120.0;
-              final toolColumnWidth =
-                  (constraints.maxWidth - sizeColumnWidth).clamp(0.0, double.infinity);
-
-              return SizedBox(
-                height: tableHeight,
-                child: ShadTable.list(
-                  horizontalScrollPhysics: const NeverScrollableScrollPhysics(),
-                  columnSpanExtent: (index) => switch (index) {
-                    0 => FixedTableSpanExtent(toolColumnWidth),
-                    _ => const FixedTableSpanExtent(sizeColumnWidth),
-                  },
-                  children: [
-                    for (final status in installable)
-                      [
-                        ShadTableCell(
-                          child: toolCell(
-                            status.spec.displayName,
-                            status.spec.version,
-                            replacing: status.bestRejected?.detectedVersion,
-                          ),
-                        ),
-                        ShadTableCell(
-                          alignment: Alignment.centerRight,
-                          child: Text(
-                            formatBytes(
-                              status
-                                  .spec.artifactForCurrentPlatform!.downloadBytes,
-                            ),
-                            style: cellStyle,
-                          ),
-                        ),
-                      ],
-                    for (final status in reused)
-                      [
-                        ShadTableCell(
-                          child: toolCell(
-                            status.spec.displayName,
-                            status.resolved?.detectedVersion,
-                          ),
-                        ),
-                        ShadTableCell(
-                          alignment: Alignment.centerRight,
-                          child: appSuccessBadge(
-                            theme,
-                            child: const Text('Installed'),
-                          ),
-                        ),
-                      ],
-                  ],
+        SettingsTable(
+          rows: [
+            for (final status in inventory.installable)
+              SettingsTableRow(
+                name: status.spec.displayName,
+                badge: versionBadge(
+                  status.spec.version,
+                  replacing: status.bestRejected?.detectedVersion,
                 ),
-              );
-            },
-          ),
+                trailing: Text(
+                  formatBytes(
+                    status.spec.artifactForCurrentPlatform!.downloadBytes,
+                  ),
+                  style: theme.textTheme.muted,
+                ),
+              ),
+            for (final status in reused)
+              SettingsTableRow(
+                name: status.spec.displayName,
+                badge: versionBadge(status.resolved!.detectedVersion!),
+                trailing: appSuccessBadge(
+                  theme,
+                  child: const Text('Installed'),
+                ),
+              ),
+          ],
         ),
         const ShadGap(3),
-        ShadCheckbox(
+        InstallGloballyCheckbox(
           value: _installGlobally,
           onChanged: (v) => setState(() => _installGlobally = v),
-          label: Text('Install tools globally', style: kWeightMedium),
-          sublabel: const Text(
-            'You need to install the tools globally to use external AI agents '
-            'together with App Studio.',
-          ),
         ),
       ],
     );

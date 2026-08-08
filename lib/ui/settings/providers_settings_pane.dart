@@ -3,14 +3,22 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 
-import '../../theme/app_theme.dart';
 import '../../agent/agent_transcript.dart';
+import '../../theme/app_theme.dart';
+import '../../widgets/settings_table.dart';
+import 'add_provider_dialog.dart';
 import 'providers_view.dart';
 
 /// Provider keys and the default model, as a pane inside the Settings dialog.
 ///
 /// Deliberately not a dialog of its own: it shares a window with the Tools
-/// pane, so it owns no chrome, no title and no Done button.
+/// pane, so it owns no chrome, no title and no Done button — and it uses the
+/// same [SettingsTable], so the two tabs read as one window rather than two
+/// screens that happen to be adjacent.
+///
+/// Only *connected* providers are listed. The pane used to render a card with a
+/// key field for all seventeen curated providers, so the answer to "which keys
+/// do I have?" was buried in a wall of empty inputs.
 class ProvidersSettingsPane extends StatefulWidget {
   const ProvidersSettingsPane({super.key, required this.agent});
 
@@ -21,11 +29,12 @@ class ProvidersSettingsPane extends StatefulWidget {
 }
 
 class _ProvidersSettingsPaneState extends State<ProvidersSettingsPane> {
-  final Map<String, TextEditingController> _keyControllers = {};
-  final Map<String, bool> _saving = {};
   List<ProviderModel> _models = [];
   bool _loadingModels = false;
   String? _error;
+
+  /// Providers with a write in flight, so their row cannot be acted on twice.
+  final Set<String> _busy = {};
 
   /// Tracks the edge into [ProvidersView.agentReady], so the retry fires once.
   bool _wasReady = false;
@@ -33,9 +42,6 @@ class _ProvidersSettingsPaneState extends State<ProvidersSettingsPane> {
   @override
   void initState() {
     super.initState();
-    for (final p in curatedProviders) {
-      _keyControllers[p.id] = TextEditingController();
-    }
     widget.agent.addListener(_onAgent);
     _wasReady = widget.agent.agentReady;
     unawaited(_loadModels());
@@ -44,9 +50,6 @@ class _ProvidersSettingsPaneState extends State<ProvidersSettingsPane> {
   @override
   void dispose() {
     widget.agent.removeListener(_onAgent);
-    for (final c in _keyControllers.values) {
-      c.dispose();
-    }
     super.dispose();
   }
 
@@ -76,40 +79,60 @@ class _ProvidersSettingsPaneState extends State<ProvidersSettingsPane> {
     }
   }
 
-  Future<void> _save(String providerId) async {
-    final key = _keyControllers[providerId]?.text.trim() ?? '';
-    if (key.isEmpty) return;
-    setState(() => _saving[providerId] = true);
+  Future<void> _addProvider() async {
+    final added = await showAddProviderDialog(
+      context,
+      connected: widget.agent.connectedProviders.toSet(),
+      onConnect: _connect,
+    );
+    if (added && mounted) await _loadModels();
+  }
+
+  /// Stores a key and checks the agent actually took it.
+  ///
+  /// Nothing here validates the key itself — `saveApiKey` writes it to the auth
+  /// store and treats that as the source of truth, so a well-formed but wrong
+  /// key succeeds. What this can catch is the write failing, and the agent not
+  /// reporting the provider as connected afterwards, which is the difference
+  /// between "your key is wrong" and "that did not take effect".
+  Future<String?> _connect(String providerId, String apiKey) async {
     try {
-      await widget.agent.saveApiKey(providerId, key);
-      _keyControllers[providerId]?.clear();
-      await _loadModels();
+      await widget.agent.saveApiKey(providerId, apiKey);
     } catch (e) {
-      setState(() => _error = e.toString());
-    } finally {
-      if (mounted) setState(() => _saving[providerId] = false);
+      return '$e';
     }
+    if (!widget.agent.connectedProviders.contains(providerId)) {
+      return 'The key was saved, but the agent did not report the provider as '
+          'connected. It may still be starting up.';
+    }
+    return null;
   }
 
   Future<void> _remove(String providerId) async {
-    setState(() => _saving[providerId] = true);
+    setState(() => _busy.add(providerId));
     try {
       await widget.agent.removeApiKey(providerId);
       await _loadModels();
     } catch (e) {
-      setState(() => _error = e.toString());
+      if (mounted) setState(() => _error = e.toString());
     } finally {
-      if (mounted) setState(() => _saving[providerId] = false);
+      if (mounted) setState(() => _busy.remove(providerId));
     }
   }
+
+  String _labelFor(String id) => curatedProviders
+      .firstWhere(
+        (p) => p.id == id,
+        // A key for something not on the curated list still deserves a row.
+        orElse: () => CuratedProvider(id: id, label: id),
+      )
+      .label;
 
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final scheme = theme.colorScheme;
-    final connected = widget.agent.connectedProviders.toSet();
-    // Also treat auth-store keys as connected for display when serve is down.
-    final defaultModel = widget.agent.defaultModel;
+    final connected = widget.agent.connectedProviders.toList()..sort();
 
     // Before the agent answers, "which providers hold a key" and "which models
     // exist" are unknown rather than empty. Rendering the list anyway would
@@ -143,7 +166,7 @@ class _ProvidersSettingsPaneState extends State<ProvidersSettingsPane> {
             )
           else
             ShadSelect<String>(
-              initialValue: defaultModel,
+              initialValue: widget.agent.defaultModel,
               placeholder: const Text('Select model'),
               options: [
                 for (final m in _models)
@@ -161,26 +184,70 @@ class _ProvidersSettingsPaneState extends State<ProvidersSettingsPane> {
                 return Text(value);
               },
               onChanged: (value) {
-                if (value != null) {
-                  widget.agent.setDefaultModel(value);
-                }
+                if (value != null) widget.agent.setDefaultModel(value);
               },
             ),
           const ShadGap(4),
-          for (final provider in curatedProviders) ...[
-            _ProviderRow(
-              provider: provider,
-              connected: connected.contains(provider.id),
-              controller: _keyControllers[provider.id]!,
-              saving: _saving[provider.id] == true,
-              onSave: () => _save(provider.id),
-              onRemove: connected.contains(provider.id)
-                  ? () => _remove(provider.id)
-                  : null,
+          Text('Providers', style: theme.textTheme.small.semibold),
+          const ShadGap(1.5),
+          if (connected.isEmpty)
+            Text(
+              'No API keys yet. Add one to pick a model for the agent.',
+              style: theme.textTheme.muted,
+            )
+          else
+            SettingsTable(
+              rows: [
+                for (final id in connected)
+                  SettingsTableRow(
+                    name: _labelFor(id),
+                    badge: appSuccessBadge(
+                      theme,
+                      child: const Text('Connected'),
+                    ),
+                    trailing: _RemoveKeyButton(
+                      key: ValueKey('remove-key-$id'),
+                      label: _labelFor(id),
+                      onPressed: _busy.contains(id) ? null : () => _remove(id),
+                    ),
+                  ),
+              ],
             ),
-            const ShadGap(2),
-          ],
+          const ShadGap(3),
+          Align(
+            alignment: Alignment.centerRight,
+            child: ShadButton.outline(
+              onPressed: _addProvider,
+              child: const Text('Add Provider'),
+            ),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+/// Removes a stored key. Icon-only, because the row already names the provider.
+class _RemoveKeyButton extends StatelessWidget {
+  const _RemoveKeyButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final String label;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPressed != null;
+    return ShadTooltip(
+      builder: (context) => Text('Remove the $label key'),
+      child: ShadIconButton.ghost(
+        // `enabled` as well as `onPressed`: shad dims from the flag alone.
+        enabled: enabled,
+        onPressed: onPressed,
+        icon: const Icon(LucideIcons.trash2, size: 16),
       ),
     );
   }
@@ -201,75 +268,6 @@ class _WaitingForAgent extends StatelessWidget {
       description: Text(
         'Your provider keys and the list of models come from the agent, '
         'which starts with the open project.',
-      ),
-    );
-  }
-}
-
-class _ProviderRow extends StatelessWidget {
-  const _ProviderRow({
-    required this.provider,
-    required this.connected,
-    required this.controller,
-    required this.saving,
-    required this.onSave,
-    required this.onRemove,
-  });
-
-  final CuratedProvider provider;
-  final bool connected;
-  final TextEditingController controller;
-  final bool saving;
-  final VoidCallback onSave;
-  final VoidCallback? onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    final scheme = theme.colorScheme;
-
-    return ShadCard(
-      // `card` is the page background in slate, so a card only reads by its
-      // border. `muted` is the palette's alternate surface — the same token
-      // the pane headers use — which separates the rows from the dialog.
-      backgroundColor: scheme.muted,
-      title: Text(provider.label),
-      // `action`, not `trailing`: trailing sits beside the card's whole content
-      // column and would squeeze the input row: `action` occupies only the
-      // header, so the body keeps the card's full width.
-      action: Text(
-        connected ? 'Connected' : 'Not connected',
-        style: theme.textTheme.muted.copyWith(
-          color: connected ? scheme.success : scheme.mutedForeground,
-        ),
-      ),
-      child: ShadRow(
-        spacing: 2,
-        children: [
-          Expanded(
-            child: ShadInput(
-              controller: controller,
-              obscureText: true,
-              // The card is a muted fill, which the input's own transparent
-              // one disappears into.
-              decoration: ShadDecoration(color: scheme.background),
-              placeholder: Text(
-                connected
-                    ? 'Replace ${provider.label} API key…'
-                    : 'Add ${provider.label} API key…',
-              ),
-            ),
-          ),
-          ShadButton(
-            onPressed: saving ? null : onSave,
-            child: Text(saving ? '…' : 'Save'),
-          ),
-          if (onRemove != null)
-            ShadButton.destructive(
-              onPressed: saving ? null : onRemove,
-              child: const Text('Remove'),
-            ),
-        ],
       ),
     );
   }

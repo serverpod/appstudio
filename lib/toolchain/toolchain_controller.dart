@@ -28,10 +28,12 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
     required ToolManifest manifest,
     required this.paths,
     required ToolchainRequirements requirements,
-  })  : _manifest = manifest,
+  })  : // Both fields are mutable and private; initializing formals would leak
+        // the underscores into the named-argument list. The ignore only covers
+        // the line after it, so each assignment needs its own.
+        // ignore: prefer_initializing_formals
+        _manifest = manifest,
         _current = initial,
-        // The field is mutable and private; an initializing formal would leak
-        // the underscore into the named-argument list.
         // ignore: prefer_initializing_formals
         _requirements = requirements;
 
@@ -107,7 +109,6 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
   @override
   ToolchainInventory get inventory => _current.inventory;
   ToolchainRequirements get requirements => _requirements;
-  @override
   bool get isRefreshing => _refreshing;
 
   /// Non-null while an install is running, and until the next one starts.
@@ -347,18 +348,12 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
   // --- ToolsView -----------------------------------------------------------
   //
   // The tools pane talks to this interface rather than to the controller, so
-  // it never imports dart:io and stays previewable. These three exist only so
-  // the widget layer does not have to reach through `manifest`, `paths` and
-  // `requirements` to build strings.
+  // it never imports dart:io and stays previewable. What is left exists only so
+  // the widget layer does not have to reach through `paths` and `shellPath` to
+  // build strings.
 
   @override
   Future<void> refreshDeep() => refresh(deep: true);
-
-  @override
-  String get toolchainRootLabel => prettyPath(paths.toolchainRoot);
-
-  @override
-  String get manifestId => _manifest.manifestId;
 
   @override
   String get shellName => shellPath.target.shell;
@@ -368,25 +363,6 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
 
   @override
   String get shellExportLine => shellPath.exportLine;
-
-  @override
-  String requirementLabel(ToolSpec spec) => requirements.describe(spec);
-
-  @override
-  String? upgradeCommand(ToolId id) => switch (id) {
-        ToolId.flutter => 'flutter upgrade',
-        ToolId.serverpodCli => 'dart install serverpod_cli@${_manifest[id]?.version}',
-        ToolId.opencode => 'brew upgrade opencode',
-        _ => null,
-      };
-
-  @override
-  Future<void> revealToolchainFolder() async {
-    final dir = paths.toolchainRoot;
-    // Finder cannot reveal a path that does not exist yet.
-    await Directory(dir).create(recursive: true);
-    unawaited(Process.run('/usr/bin/open', [dir]));
-  }
 
   /// Removes every managed tool. Host copies and `~/.pub-cache` are untouched.
   Future<void> uninstallAll() async {

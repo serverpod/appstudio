@@ -11,7 +11,12 @@ import 'providers_settings_pane.dart';
 enum SettingsTab { providers, tools }
 
 const _kDialogWidth = 580.0;
-const _kDialogMaxHeight = 520.0;
+
+/// Fixed, not a maximum. Both panes scroll internally, so sizing to content
+/// made the window jump every time a tab changed, a provider was added or a
+/// tool finished installing. A steady frame with whitespace under a short pane
+/// is the cheaper trade.
+const _kPaneHeight = 460.0;
 
 Future<void> showSettingsDialog(
   BuildContext context, {
@@ -121,11 +126,9 @@ class _SettingsDialogState extends State<SettingsDialog> {
     );
   }
 
-  /// Both panes scroll internally, so the box only has to stop the dialog from
-  /// growing past the screen. A fixed height would leave the shorter pane with
-  /// dead space, so this caps rather than sets.
-  Widget _paneBox(Widget child) => ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: _kDialogMaxHeight),
+  /// Both panes scroll internally, so this only has to hold the frame still.
+  Widget _paneBox(Widget child) => SizedBox(
+        height: _kPaneHeight,
         child: Padding(
           padding: const EdgeInsets.only(top: 8),
           child: child,

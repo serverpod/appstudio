@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/widget_previews.dart';
 
 import '../ui/project_startup_dialog.dart';
+import '../ui/settings/add_provider_dialog.dart';
 import '../ui/settings/settings_dialog.dart';
 import '../ui/toolchain/toolchain_setup_dialog.dart';
 import '../ui/toolchain/toolchain_setup_screen.dart';
@@ -49,6 +50,33 @@ Widget settingsProvidersWaiting() => previewShell(
       ),
     );
 
+/// The Add Provider dialog, with two providers already holding keys — the
+/// dropdown leaves those out.
+@Preview(name: 'Providers — add', group: 'Settings')
+Widget settingsAddProvider() => previewShell(
+      AddProviderDialog(
+        connected: const {'anthropic', 'openai'},
+        onConnect: previewConnectSucceeds,
+      ),
+    );
+
+/// The failure path, which needs a broken agent to reach for real.
+@Preview(name: 'Providers — add fails', group: 'Settings')
+Widget settingsAddProviderError() => previewShell(
+      AddProviderDialog(
+        connected: const {'anthropic'},
+        onConnect: previewConnectFails,
+      ),
+    );
+
+/// Must be static, non-private functions to be usable from an annotation.
+Future<String?> previewConnectSucceeds(String providerId, String apiKey) async =>
+    null;
+
+Future<String?> previewConnectFails(String providerId, String apiKey) async =>
+    'The key was saved, but the agent did not report the provider as '
+    'connected. It may still be starting up.';
+
 @Preview(name: 'Tools — all installed', group: 'Settings')
 Widget settingsToolsComplete() => previewShell(
       SettingsDialog(
@@ -59,12 +87,34 @@ Widget settingsToolsComplete() => previewShell(
     );
 
 /// One tool missing and a host copy too old — the state that produces both the
-/// warning banner and the "upgrade it yourself" hint.
+/// warning banner and a `3.44.2 → 4.0.0-beta.1` row.
 @Preview(name: 'Tools — missing and outdated', group: 'Settings')
 Widget settingsToolsMixed() => previewShell(
       SettingsDialog(
         agent: connectedProvidersFake(),
         toolchains: FakeToolsView(inventory: mixedInventory),
+        initialTab: SettingsTab.tools,
+      ),
+    );
+
+/// Everything already on the user's own PATH, so the global-install opt-in is
+/// checked and inert — there is nothing our shell block would add.
+@Preview(name: 'Tools — nothing to add globally', group: 'Settings')
+Widget settingsToolsAllNative() => previewShell(
+      SettingsDialog(
+        agent: connectedProvidersFake(),
+        toolchains: FakeToolsView(inventory: allNativeInventory),
+        initialTab: SettingsTab.tools,
+      ),
+    );
+
+/// The only state where "Update All" is enabled: managed installs behind the
+/// pin, with a host copy that is also behind and must be left alone.
+@Preview(name: 'Tools — updates available', group: 'Settings')
+Widget settingsToolsOutdated() => previewShell(
+      SettingsDialog(
+        agent: connectedProvidersFake(),
+        toolchains: FakeToolsView(inventory: outdatedInventory),
         initialTab: SettingsTab.tools,
       ),
     );

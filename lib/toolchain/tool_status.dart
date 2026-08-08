@@ -6,7 +6,7 @@ enum ToolId {
   serverpodCli('serverpod_cli', 'Serverpod CLI'),
   opencode('opencode', 'OpenCode'),
   git('git', 'Git'),
-  llvmTools('llvm-tools', 'Native tools');
+  llvmTools('llvm-tools', 'Developer tools');
 
   const ToolId(this.manifestId, this.displayName);
 
@@ -30,7 +30,7 @@ enum ToolSource {
 
   /// Already on this Mac — Homebrew, an SDK manager, a manual install. Ours to
   /// use, never ours to update.
-  host('On your Mac');
+  host('Native');
 
   const ToolSource(this.label);
 
@@ -173,7 +173,45 @@ class ToolchainInventory {
   List<ToolStatus> get installable =>
       [for (final t in tools.values) if (t.needsDownload) t];
 
+  /// Managed installs older than the version this manifest pins — what
+  /// "Update All" acts on.
+  ///
+  /// Host copies are excluded deliberately. We did not put them there and must
+  /// not overwrite them, so a newer pin is advice for the user rather than an
+  /// action for us; the Tools tab shows their version and leaves it alone.
+  List<ToolStatus> get updatable => [
+        for (final t in tools.values)
+          if (t.canInstall)
+            if (t.resolved case final r?
+                when r.source == ToolSource.managed &&
+                    r.detectedVersion != null &&
+                    r.detectedVersion! < t.spec.version)
+              t,
+      ];
+
   bool get isComplete => missingRequired.isEmpty;
+
+  /// Whether every required tool an outside program would look for is already
+  /// on this Mac rather than only inside our managed directory.
+  ///
+  /// This is the whole point of the global-install opt-in — so an external
+  /// editor or AI agent can find the toolchain — so when it is already true
+  /// there is nothing left for us to add, and the switch is shown satisfied and
+  /// inert rather than inviting an edit to the user's shell config that would
+  /// change nothing.
+  ///
+  /// OpenCode is left out: it *is* the agent, so an external one has no reason
+  /// to look for it, and whether we happen to manage our own copy should not
+  /// decide this.
+  bool get requiredToolsAreNative {
+    final relevant = [
+      for (final t in tools.values)
+        if (t.spec.required && t.id != ToolId.opencode) t,
+    ];
+    // An inventory we could not read is not evidence of anything.
+    if (relevant.isEmpty) return false;
+    return relevant.every((t) => t.resolved?.source == ToolSource.host);
+  }
 
   /// Bytes to fetch for everything installable, for the preflight dialog.
   int get downloadBytes => installable.fold(

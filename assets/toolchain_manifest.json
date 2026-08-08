@@ -110,7 +110,7 @@
     },
     {
       "id": "llvm-tools",
-      "displayName": "Native tools",
+      "displayName": "Developer tools",
       "description": "otool and install_name_tool, used by Serverpod to relocate native libraries. macOS ships stubs that prompt to install Xcode.",
       "version": "20.1.8",
       "build": 1,

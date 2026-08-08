@@ -48,7 +48,8 @@ class WebViewController extends ValueNotifier<bool> {
   WebviewEventsListener? _listener;
   WebviewEventsListener? get listener => _listener;
 
-  get onJavascriptChannelMessage => (final String channelName,
+  void Function(String, String, String, String)
+      get onJavascriptChannelMessage => (final String channelName,
           final String message, final String callbackId, final String frameId) {
         if (_javascriptChannels.containsKey(channelName)) {
           _javascriptChannels[channelName]!.onMessageReceived(
@@ -58,10 +59,11 @@ class WebViewController extends ValueNotifier<bool> {
         }
       };
 
-  get onToolTip => _onToolTip;
-  get onCursorChanged => _onCursorChanged;
-  get onFocusedNodeChangeMessage => _onFocusedNodeChangeMessage;
-  get onImeCompositionRangeChangedMessage =>
+  Function(String)? get onToolTip => _onToolTip;
+  Function(int)? get onCursorChanged => _onCursorChanged;
+  Function(bool editable)? get onFocusedNodeChangeMessage =>
+      _onFocusedNodeChangeMessage;
+  Function(int, int, int)? get onImeCompositionRangeChangedMessage =>
       _onImeCompositionRangeChangedMessage;
 
   /// Initializes the underlying platform view.
@@ -102,7 +104,7 @@ class WebViewController extends ValueNotifier<bool> {
     );
   }
 
-  setWebviewListener(WebviewEventsListener listener) {
+  void setWebviewListener(WebviewEventsListener listener) {
     _listener = listener;
   }
 
