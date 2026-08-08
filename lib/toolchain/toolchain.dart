@@ -173,8 +173,6 @@ class Toolchain {
       manifest: resolvedManifest,
       requirements:
           requirements ?? await ToolchainRequirements.load(resolvedPaths.requirementsFile),
-      devRepoRoot: devRepoToolchainRoot(),
-      bundledRoot: bundledToolchainRoot(),
     );
     return Toolchain(await probe.inventory(deep: deep));
   }
@@ -196,14 +194,6 @@ class Toolchain {
   }
 }
 
-/// `<repo>/toolchain` when running from a source checkout, else null.
-String? devRepoToolchainRoot() {
-  final root = devRepoRoot();
-  if (root == null) return null;
-  final candidate = p.join(root, 'toolchain');
-  return Directory(candidate).existsSync() ? candidate : null;
-}
-
 /// Walks up from the cwd looking for the repo root (pubspec.yaml + toolchain/).
 String? devRepoRoot() {
   var dir = Directory.current;
@@ -219,11 +209,3 @@ String? devRepoRoot() {
   return null;
 }
 
-/// `App Studio.app/Contents/Resources/toolchain`, kept so an offline/enterprise
-/// build that still embeds the toolchain keeps working.
-String? bundledToolchainRoot() {
-  final exe = File(Platform.resolvedExecutable);
-  final contents = exe.parent.parent.path;
-  final candidate = p.join(contents, 'Resources', 'toolchain');
-  return Directory(candidate).existsSync() ? candidate : null;
-}

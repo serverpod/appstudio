@@ -2,38 +2,28 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../theme/app_theme.dart';
 import '../../toolchain/install_progress.dart';
 import '../../toolchain/tool_status.dart';
-import 'tools_view.dart';
 import '../../util/byte_format.dart';
+import '../../util/quit_app.dart';
 import '../../widgets/determinate_progress.dart';
 import '../../widgets/error_banner.dart';
+import 'tools_view.dart';
 
-const _kDialogWidth = 520.0;
-
-/// Remembers a "Not now" per manifest, so a new pin re-asks.
-const _kDismissedKey = 'toolchain.dismissed_manifest';
-
-/// Shows the setup dialog if anything required is missing and installable, and
-/// the user has not already declined *this* manifest.
+/// Shows the setup dialog if anything required is missing and installable.
 Future<void> maybeShowToolchainSetup(
   BuildContext context, {
   required ToolsView toolchains,
 }) async {
   if (toolchains.inventory.installable.isEmpty) return;
-
-  final prefs = await SharedPreferences.getInstance();
-  if (prefs.getString(_kDismissedKey) == toolchains.manifestId) {
-    return;
-  }
   if (!context.mounted) return;
 
   await showShadDialog<void>(
     context: context,
     barrierDismissible: false,
+    barrierBlurSigma: 0,
     builder: (context) => ToolchainSetupDialog(toolchains: toolchains),
   );
 }
@@ -49,10 +39,13 @@ class ToolchainSetupDialog extends StatefulWidget {
 }
 
 class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
+  bool _installGlobally = true;
+
   @override
   void initState() {
     super.initState();
     widget.toolchains.addListener(_onToolchains);
+    unawaited(widget.toolchains.refreshPublishedManifest());
   }
 
   @override
@@ -74,36 +67,27 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
     }
   }
 
-  Future<void> _notNow() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      _kDismissedKey,
-      widget.toolchains.manifestId,
-    );
-    if (mounted) Navigator.of(context).pop();
+  Future<void> _download() async {
+    await widget.toolchains.installMissing();
+    if (!mounted || !_installGlobally) return;
+    await widget.toolchains.setShellPathEnabled(true);
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final toolchains = widget.toolchains;
-    final inventory = toolchains.inventory;
     final installing = toolchains.isInstalling;
-    final reused = [
-      for (final status in inventory.tools.values)
-        if (status.resolved case final r? when r.source == ToolSource.host)
-          status,
-    ];
+    final fetchingManifest = toolchains.isFetchingManifest;
 
     return PopScope(
       canPop: !installing,
-      child: ShadDialog(
-        title: const Text('Set up the toolchain'),
+      child: ShadDialog.alert(
+        title: const Text('Set up toolchain'),
         description: const Text(
-          'App Studio needs these tools to create and run Serverpod projects. '
-          'They install into your home folder and can be removed at any time.',
+          'App Studio will download these tools to Application Support. '
+          'Use the Uninstall command to remove them from your computer.',
         ),
-        closeIcon: installing ? const SizedBox.shrink() : null,
         actions: installing
             ? [
                 ShadButton.outline(
@@ -113,28 +97,60 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
               ]
             : [
                 ShadButton.outline(
-                  onPressed: _notNow,
-                  child: const Text('Not now'),
+                  onPressed: quitApp,
+                  child: const Text('Quit'),
                 ),
                 ShadButton(
-                  onPressed: toolchains.installMissing,
+                  onPressed: fetchingManifest ? null : _download,
                   child: const Text('Download'),
                 ),
               ],
         child: SizedBox(
-          width: _kDialogWidth,
-          child: installing
-              ? _buildProgress(theme)
-              : _buildPlan(theme, reused),
+          width: double.infinity,
+          child: installing ? _buildProgress(theme) : _buildPlan(theme),
         ),
       ),
     );
   }
 
-  Widget _buildPlan(ShadThemeData theme, List<ToolStatus> reused) {
+  Widget _buildPlan(ShadThemeData theme) {
     final toolchains = widget.toolchains;
+    if (toolchains.isFetchingManifest) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 32),
+        child: Center(child: ShadSpinner()),
+      );
+    }
+
     final inventory = toolchains.inventory;
-    final scheme = theme.colorScheme;
+    final cellStyle = theme.textTheme.muted;
+
+    final installable = inventory.installable;
+    final reused = [
+      for (final status in inventory.tools.values)
+        if (status.resolved case final r? when r.source == ToolSource.host)
+          status,
+    ];
+    final rowCount = installable.length + reused.length;
+    final rowHeight = theme.tableTheme.cellHeight ?? 48;
+    final tableHeight = rowHeight * rowCount;
+
+    Widget toolCell(String name, Object? version) => Row(
+          children: [
+            Flexible(
+              child: Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: cellStyle,
+              ),
+            ),
+            if (version != null) ...[
+              const ShadGap(1.5),
+              ShadBadge.secondary(child: Text('$version')),
+            ],
+          ],
+        );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -144,64 +160,74 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
           ErrorBanner(message: error),
           const SizedBox(height: 12),
         ],
-        for (final status in inventory.installable)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '${status.spec.displayName} ${status.spec.version}',
-                    style: theme.textTheme.small,
-                  ),
+        ShadCard(
+          padding: EdgeInsets.zero,
+          clipBehavior: Clip.antiAlias,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              const sizeColumnWidth = 120.0;
+              final toolColumnWidth =
+                  (constraints.maxWidth - sizeColumnWidth).clamp(0.0, double.infinity);
+
+              return SizedBox(
+                height: tableHeight,
+                child: ShadTable.list(
+                  horizontalScrollPhysics: const NeverScrollableScrollPhysics(),
+                  columnSpanExtent: (index) => switch (index) {
+                    0 => FixedTableSpanExtent(toolColumnWidth),
+                    _ => const FixedTableSpanExtent(sizeColumnWidth),
+                  },
+                  children: [
+                    for (final status in installable)
+                      [
+                        ShadTableCell(
+                          child: toolCell(
+                            status.spec.displayName,
+                            status.spec.version,
+                          ),
+                        ),
+                        ShadTableCell(
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            formatBytes(
+                              status
+                                  .spec.artifactForCurrentPlatform!.downloadBytes,
+                            ),
+                            style: cellStyle,
+                          ),
+                        ),
+                      ],
+                    for (final status in reused)
+                      [
+                        ShadTableCell(
+                          child: toolCell(
+                            status.spec.displayName,
+                            status.resolved?.detectedVersion,
+                          ),
+                        ),
+                        ShadTableCell(
+                          alignment: Alignment.centerRight,
+                          child: appSuccessBadge(
+                            theme,
+                            child: const Text('Installed'),
+                          ),
+                        ),
+                      ],
+                  ],
                 ),
-                Text(
-                  formatBytes(
-                    status.spec.artifactForCurrentPlatform!.downloadBytes,
-                  ),
-                  style: theme.textTheme.muted.copyWith(fontSize: 11),
-                ),
-              ],
-            ),
+              );
+            },
           ),
-        // Reassure that an existing install is being reused, not duplicated.
-        for (final status in reused)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Text(
-              '${status.spec.displayName} '
-              '${status.resolved?.detectedVersion} — found on your Mac, '
-              'will be reused',
-              style: theme.textTheme.muted.copyWith(
-                fontSize: 11,
-                color: scheme.success,
-              ),
-            ),
-          ),
-        const SizedBox(height: 8),
-        Divider(color: scheme.border, height: 1),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Total download',
-                style: theme.textTheme.small
-                    .copyWith(fontWeight: FontWeight.w600),
-              ),
-            ),
-            Text(
-              '${formatBytes(inventory.downloadBytes)} · '
-              '${formatBytes(inventory.installedBytes)} on disk',
-              style: theme.textTheme.small
-                  .copyWith(fontWeight: FontWeight.w600),
-            ),
-          ],
         ),
-        const SizedBox(height: 10),
-        Text(
-          toolchains.toolchainRootLabel,
-          style: theme.textTheme.muted.copyWith(fontSize: 11),
+        const ShadGap(3),
+        ShadCheckbox(
+          value: _installGlobally,
+          onChanged: (v) => setState(() => _installGlobally = v),
+          label: Text('Install tools globally', style: kWeightMedium),
+          sublabel: const Text(
+            'You need to install the tools globally to use external AI agents '
+            'together with App Studio.',
+          ),
         ),
       ],
     );
@@ -222,7 +248,7 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
         const SizedBox(height: 4),
         Text(
           '${active.phase.label} ${active.id.displayName}…',
-          style: theme.textTheme.small.copyWith(fontWeight: FontWeight.w600),
+          style: theme.textTheme.small.semibold,
         ),
         const SizedBox(height: 12),
         DeterminateProgress(

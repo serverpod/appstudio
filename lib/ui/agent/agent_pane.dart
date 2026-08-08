@@ -11,11 +11,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/menu_item_tile.dart';
 
 class AgentPane extends StatefulWidget {
-  const AgentPane({
-    super.key,
-    required this.controller,
-    required this.process,
-  });
+  const AgentPane({super.key, required this.controller, required this.process});
 
   final AgentController controller;
   final ServerpodProcessController process;
@@ -95,9 +91,7 @@ class _AgentPaneState extends State<AgentPane> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(
-          child: _buildBody(context, scheme, theme, c, widget.process),
-        ),
+        Expanded(child: _buildBody(context, scheme, theme, c, widget.process)),
         if (serverUp)
           DecoratedBox(
             decoration: BoxDecoration(
@@ -127,7 +121,8 @@ class _AgentPaneState extends State<AgentPane> {
       return _EmptyHint(
         icon: LucideIcons.folderOpen,
         title: 'Open a project',
-        subtitle: 'The agent works inside the currently open Serverpod project.',
+        subtitle:
+            'The agent works inside the currently open Serverpod project.',
       );
     }
 
@@ -135,14 +130,11 @@ class _AgentPaneState extends State<AgentPane> {
       final starting = switch (process.state) {
         ProcessState.starting ||
         ProcessState.stopping ||
-        ProcessState.running =>
-          true,
+        ProcessState.running => true,
         ProcessState.idle => false,
       };
       return _GateMessage(
-        text: starting
-            ? 'Serverpod is starting'
-            : 'Serverpod is not running',
+        text: starting ? 'Serverpod is starting' : 'Serverpod is not running',
       );
     }
 
@@ -222,9 +214,9 @@ class _AgentPaneState extends State<AgentPane> {
     return switch (c.connection) {
       AgentConnectionState.starting => 'Starting agent',
       AgentConnectionState.ready ||
-      AgentConnectionState.busy =>
-        'Ready when you are',
-      AgentConnectionState.idle || AgentConnectionState.error => 'Starting agent',
+      AgentConnectionState.busy => 'Ready when you are',
+      AgentConnectionState.idle ||
+      AgentConnectionState.error => 'Starting agent',
     };
   }
 }
@@ -262,8 +254,7 @@ class _AgentIdleArt extends StatelessWidget {
     final theme = ShadTheme.of(context);
     return LayoutBuilder(
       builder: (context, constraints) {
-        final artSize =
-            ((constraints.maxWidth * 0.45).clamp(96.0, 220.0)) / 2;
+        final artSize = ((constraints.maxWidth * 0.45).clamp(96.0, 220.0)) / 2;
         return Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
@@ -321,7 +312,7 @@ class _EmptyHint extends StatelessWidget {
             const SizedBox(height: 12),
             Text(
               title,
-              style: theme.textTheme.p.copyWith(fontWeight: FontWeight.w600),
+              style: theme.textTheme.p.semibold,
               textAlign: TextAlign.center,
             ),
             if (subtitle.isNotEmpty) ...[
@@ -386,9 +377,9 @@ class _MessageBubble extends StatelessWidget {
 
   final AgentChatMessage message;
   final void Function(AgentPermissionPart part, AgentPermissionReply reply)
-      onPermission;
+  onPermission;
   final void Function(AgentQuestionPart part, List<List<String>> answers)
-      onAnswer;
+  onAnswer;
   final void Function(AgentQuestionPart part) onSkipQuestion;
 
   @override
@@ -452,17 +443,9 @@ class _MessageBubble extends StatelessWidget {
                                 ),
                                 a: bodyStyle.copyWith(color: scheme.primary),
                                 listBullet: bodyStyle,
-                                h1: bodyStyle.copyWith(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                                h2: bodyStyle.copyWith(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                                h3: bodyStyle.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                ),
+                                h1: bodyStyle.copyWith(fontSize: 15).semibold,
+                                h2: bodyStyle.copyWith(fontSize: 14).semibold,
+                                h3: bodyStyle.semibold,
                               ),
                             )
                     else if (part is AgentReasoningPart &&
@@ -534,8 +517,8 @@ class _ToolRowState extends State<_ToolRow> {
     final scheme = theme.colorScheme;
     final part = widget.part;
     final statusIcon = switch (part.status) {
-      AgentToolStatus.pending || AgentToolStatus.running =>
-        LucideIcons.loaderCircle,
+      AgentToolStatus.pending ||
+      AgentToolStatus.running => LucideIcons.loaderCircle,
       AgentToolStatus.completed => LucideIcons.circleCheck,
       AgentToolStatus.error => LucideIcons.circleX,
     };
@@ -544,7 +527,8 @@ class _ToolRowState extends State<_ToolRow> {
       AgentToolStatus.completed => scheme.success,
       AgentToolStatus.error => scheme.destructive,
     };
-    final spinning = part.status == AgentToolStatus.pending ||
+    final spinning =
+        part.status == AgentToolStatus.pending ||
         part.status == AgentToolStatus.running;
 
     return DecoratedBox(
@@ -561,8 +545,10 @@ class _ToolRowState extends State<_ToolRow> {
               behavior: HitTestBehavior.opaque,
               onTap: () => setState(() => _expanded = !_expanded),
               child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
                 child: Row(
                   children: [
                     if (spinning)
@@ -579,12 +565,13 @@ class _ToolRowState extends State<_ToolRow> {
                         part.title?.isNotEmpty == true
                             ? part.title!
                             : part.tool,
-                        style: theme.textTheme.small.copyWith(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          fontFamily: kMacMonoFont,
-                          height: 1.35,
-                        ),
+                        style: theme.textTheme.small
+                            .copyWith(
+                              fontSize: 12,
+                              fontFamily: kMacMonoFont,
+                              height: 1.35,
+                            )
+                            .medium,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -744,10 +731,7 @@ class _ReasoningBlockState extends State<_ReasoningBlock> {
 }
 
 class _PermissionCard extends StatelessWidget {
-  const _PermissionCard({
-    required this.part,
-    required this.onReply,
-  });
+  const _PermissionCard({required this.part, required this.onReply});
 
   final AgentPermissionPart part;
   final ValueChanged<AgentPermissionReply> onReply;
@@ -797,21 +781,24 @@ class _PermissionCard extends StatelessWidget {
             children: [
               ShadButton.outline(
                 size: ShadButtonSize.sm,
-                onPressed:
-                    busy ? null : () => onReply(AgentPermissionReply.reject),
+                onPressed: busy
+                    ? null
+                    : () => onReply(AgentPermissionReply.reject),
                 child: const Text('Deny'),
               ),
               if (part.canRemember)
                 ShadButton.outline(
                   size: ShadButtonSize.sm,
-                  onPressed:
-                      busy ? null : () => onReply(AgentPermissionReply.always),
+                  onPressed: busy
+                      ? null
+                      : () => onReply(AgentPermissionReply.always),
                   child: const Text('Always allow'),
                 ),
               ShadButton(
                 size: ShadButtonSize.sm,
-                onPressed:
-                    busy ? null : () => onReply(AgentPermissionReply.once),
+                onPressed: busy
+                    ? null
+                    : () => onReply(AgentPermissionReply.once),
                 child: const Text('Allow'),
               ),
             ],
@@ -929,9 +916,9 @@ class _QuestionCardState extends State<_QuestionCard> {
             part.rejected
                 ? 'Skipped'
                 : (part.answers ?? const <List<String>>[])
-                    .map((a) => a.join(', '))
-                    .where((a) => a.isNotEmpty)
-                    .join(' · '),
+                      .map((a) => a.join(', '))
+                      .where((a) => a.isNotEmpty)
+                      .join(' · '),
             style: theme.textTheme.small.copyWith(
               fontSize: 12,
               color: scheme.mutedForeground,
@@ -944,7 +931,8 @@ class _QuestionCardState extends State<_QuestionCard> {
     return _RequestCard(
       accent: scheme.primary,
       icon: LucideIcons.messageCircleQuestion,
-      title: part.questions.length == 1 && part.questions.first.header.isNotEmpty
+      title:
+          part.questions.length == 1 && part.questions.first.header.isNotEmpty
           ? part.questions.first.header
           : 'A question for you',
       children: [
@@ -954,12 +942,13 @@ class _QuestionCardState extends State<_QuestionCard> {
               part.questions[i].header.isNotEmpty) ...[
             Text(
               part.questions[i].header.toUpperCase(),
-              style: theme.textTheme.small.copyWith(
-                fontSize: 10,
-                letterSpacing: 0.6,
-                fontWeight: FontWeight.w600,
-                color: scheme.mutedForeground,
-              ),
+              style: theme.textTheme.small
+                  .copyWith(
+                    fontSize: 10,
+                    letterSpacing: 0.6,
+                    color: scheme.mutedForeground,
+                  )
+                  .semibold,
             ),
             const SizedBox(height: 4),
           ],
@@ -1037,9 +1026,9 @@ class _QuestionCardState extends State<_QuestionCard> {
               onPressed: busy || !_complete
                   ? null
                   : () => widget.onSubmit([
-                        for (var i = 0; i < part.questions.length; i++)
-                          _answerFor(i),
-                      ]),
+                      for (var i = 0; i < part.questions.length; i++)
+                        _answerFor(i),
+                    ]),
               child: const Text('Send'),
             ),
           ],
@@ -1126,10 +1115,9 @@ class _QuestionOptionTileState extends State<_QuestionOptionTile> {
                   children: [
                     Text(
                       widget.label,
-                      style: theme.textTheme.small.copyWith(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      ),
+                      style: theme.textTheme.small
+                          .copyWith(fontSize: 13)
+                          .medium,
                     ),
                     if (widget.description.isNotEmpty)
                       Text(
@@ -1191,10 +1179,9 @@ class _RequestCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     title,
-                    style: theme.textTheme.small.copyWith(
-                      fontWeight: FontWeight.w600,
-                      height: 1.35,
-                    ),
+                    style: theme.textTheme.small
+                        .copyWith(height: 1.35)
+                        .semibold,
                   ),
                 ),
               ],
@@ -1257,9 +1244,9 @@ class _ComposerState extends State<_Composer> {
   }
 
   IconData _modeIcon(AgentChatMode mode) => switch (mode) {
-        AgentChatMode.agent => LucideIcons.infinity,
-        AgentChatMode.plan => LucideIcons.listChecks,
-      };
+    AgentChatMode.agent => LucideIcons.infinity,
+    AgentChatMode.plan => LucideIcons.listChecks,
+  };
 
   String _shortModelLabel(AgentModelOption model) {
     final slash = model.label.lastIndexOf('/');
@@ -1440,10 +1427,7 @@ class _ModeChip extends StatelessWidget {
             const SizedBox(width: 5),
             Text(
               mode.label,
-              style: theme.textTheme.small.copyWith(
-                fontWeight: FontWeight.w500,
-                fontSize: 12,
-              ),
+              style: theme.textTheme.small.copyWith(fontSize: 12).medium,
             ),
             const SizedBox(width: 2),
             Icon(
@@ -1498,7 +1482,11 @@ class _ModelPicker extends StatelessWidget {
       controller: popover,
       padding: const EdgeInsets.all(4),
       popover: (context) => ConstrainedBox(
-        constraints: const BoxConstraints(minWidth: 220, maxWidth: 320, maxHeight: 280),
+        constraints: const BoxConstraints(
+          minWidth: 220,
+          maxWidth: 320,
+          maxHeight: 280,
+        ),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1506,9 +1494,7 @@ class _ModelPicker extends StatelessWidget {
             children: [
               for (final model in models)
                 MenuItemTile(
-                  icon: model.value == selectedValue
-                      ? LucideIcons.check
-                      : null,
+                  icon: model.value == selectedValue ? LucideIcons.check : null,
                   reserveIconSpace: true,
                   label: shortLabel(model),
                   subtitle: model.providerId,
@@ -1583,7 +1569,9 @@ class _ComposerChipButtonState extends State<_ComposerChipButton> {
     final scheme = theme.colorScheme;
     final bg = widget.filled
         ? (_hovered ? scheme.muted.withValues(alpha: 0.9) : scheme.muted)
-        : (_hovered ? scheme.muted.withValues(alpha: 0.45) : Colors.transparent);
+        : (_hovered
+              ? scheme.muted.withValues(alpha: 0.45)
+              : Colors.transparent);
 
     return MouseRegion(
       cursor: SystemMouseCursors.click,
@@ -1594,10 +1582,7 @@ class _ComposerChipButtonState extends State<_ComposerChipButton> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 100),
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: theme.radii.full,
-          ),
+          decoration: BoxDecoration(color: bg, borderRadius: theme.radii.full),
           child: widget.child,
         ),
       ),
@@ -1624,8 +1609,7 @@ class _CircleAction extends StatelessWidget {
   Widget build(BuildContext context) {
     final enabled = onPressed != null;
     return MouseRegion(
-      cursor:
-          enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+      cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
       child: GestureDetector(
         onTap: onPressed,
         child: AnimatedOpacity(

@@ -210,20 +210,12 @@ class ToolProbe {
     required this.paths,
     required this.manifest,
     required this.requirements,
-    this.devRepoRoot,
-    this.bundledRoot,
     ProcessRunner? runner,
   }) : _run = runner ?? _defaultRunner;
 
   final ToolchainPaths paths;
   final ToolManifest manifest;
   final ToolchainRequirements requirements;
-
-  /// `<repo>/toolchain` when running from a source checkout.
-  final String? devRepoRoot;
-
-  /// `App Studio.app/Contents/Resources/toolchain`, kept as an escape hatch.
-  final String? bundledRoot;
 
   final ProcessRunner _run;
   String? _developerDir;
@@ -649,15 +641,10 @@ class ToolProbe {
 
   // -- shared helpers -------------------------------------------------------
 
-  /// Managed roots in precedence order, skipping any that do not exist.
+  /// Where a managed install lives. A tool resolves from here or from the
+  /// host; there is no third source.
   List<(ToolSource, String)> _managedRoots(ToolSpec spec) {
-    return [
-      if (devRepoRoot != null)
-        (ToolSource.devRepo, p.join(devRepoRoot!, spec.installDir)),
-      if (bundledRoot != null)
-        (ToolSource.bundled, p.join(bundledRoot!, spec.installDir)),
-      (ToolSource.managed, paths.installDirFor(spec)),
-    ];
+    return [(ToolSource.managed, paths.installDirFor(spec))];
   }
 
   Future<String> _runForOutput(

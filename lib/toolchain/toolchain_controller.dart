@@ -25,10 +25,11 @@ import '../ui/toolchain/tools_view.dart';
 class ToolchainController extends ChangeNotifier implements ToolsView {
   ToolchainController({
     required Toolchain initial,
-    required this.manifest,
+    required ToolManifest manifest,
     required this.paths,
     required ToolchainRequirements requirements,
-  })  : _current = initial,
+  })  : _manifest = manifest,
+        _current = initial,
         // The field is mutable and private; an initializing formal would leak
         // the underscore into the named-argument list.
         // ignore: prefer_initializing_formals
@@ -53,6 +54,11 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
     if (manifest == null) {
       // Without a manifest nothing can be resolved or offered for install.
       throw StateError('Missing $kBakedManifestAsset');
+    }
+
+    final cached = await ToolManifest.loadCached(paths.cachedManifestFile);
+    if (cached != null && cached.isNewerThan(manifest)) {
+      manifest = cached;
     }
 
     Toolchain toolchain;
@@ -82,12 +88,14 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
     return controller;
   }
 
-  final ToolManifest manifest;
+  ToolManifest _manifest;
+  ToolManifest get manifest => _manifest;
   final ToolchainPaths paths;
 
   Toolchain _current;
   ToolchainRequirements _requirements;
   bool _refreshing = false;
+  bool _fetchingManifest = false;
   bool _disposed = false;
 
   ToolchainInstaller? _installer;
@@ -102,6 +110,10 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
   @override
   bool get isRefreshing => _refreshing;
 
+  /// True while the setup dialog is fetching a live manifest from the bucket.
+  @override
+  bool get isFetchingManifest => _fetchingManifest;
+
   /// Non-null while an install is running, and until the next one starts.
   @override
   InstallProgress? get progress => _progress;
@@ -115,7 +127,38 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
   bool get isBusy => isInstalling || _refreshing;
 
   ToolchainInstaller get _requireInstaller =>
-      _installer ??= ToolchainInstaller(paths: paths, manifest: manifest);
+      _installer ??= ToolchainInstaller(paths: paths, manifest: _manifest);
+
+  /// Pulls the live manifest from the bucket when it is newer than the current
+  /// pin, HEADs each artifact for its current size, then re-probes so the UI
+  /// shows what would actually be downloaded.
+  @override
+  Future<void> refreshPublishedManifest() async {
+    if (_fetchingManifest || isInstalling) return;
+    _fetchingManifest = true;
+    notifyListeners();
+    try {
+      var manifest = _manifest;
+      final fetched = await ToolManifest.fetchPublished(
+        _manifest.baseUrl,
+        cacheFile: paths.cachedManifestFile,
+      );
+      if (fetched != null && fetched.isNewerThan(manifest)) {
+        manifest = fetched;
+      }
+      final enriched = await manifest.withLiveDownloadBytes();
+      if (!identical(enriched, _manifest)) {
+        _manifest = enriched;
+        _installer = null;
+        await refresh(deep: false);
+      }
+    } catch (e) {
+      debugPrint('ToolchainController: manifest fetch failed: $e');
+    } finally {
+      _fetchingManifest = false;
+      _notify();
+    }
+  }
 
   /// Clears crashed installs left behind by a previous run. Cheap; fire and
   /// forget at startup.
@@ -131,7 +174,7 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
     if (isInstalling) return;
     final specs = [
       for (final id in ids)
-        if (manifest[id] case final spec?)
+        if (_manifest[id] case final spec?)
           if (spec.artifactForCurrentPlatform != null) spec,
     ];
     if (specs.isEmpty) return;
@@ -177,7 +220,7 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
 
   @override
   Future<void> uninstall(ToolId id) async {
-    final spec = manifest[id];
+    final spec = _manifest[id];
     if (spec == null || isBusy) return;
     await _requireInstaller.uninstall(spec);
     await refresh(deep: true);
@@ -290,7 +333,7 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
   String get toolchainRootLabel => prettyPath(paths.toolchainRoot);
 
   @override
-  String get manifestId => manifest.manifestId;
+  String get manifestId => _manifest.manifestId;
 
   @override
   String get shellName => shellPath.target.shell;
@@ -307,7 +350,7 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
   @override
   String? upgradeCommand(ToolId id) => switch (id) {
         ToolId.flutter => 'flutter upgrade',
-        ToolId.serverpodCli => 'dart install serverpod_cli@${manifest[id]?.version}',
+        ToolId.serverpodCli => 'dart install serverpod_cli@${_manifest[id]?.version}',
         ToolId.opencode => 'brew upgrade opencode',
         _ => null,
       };
@@ -337,7 +380,7 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
     notifyListeners();
     try {
       _current = await Toolchain.resolve(
-        manifest: manifest,
+        manifest: _manifest,
         requirements: _requirements,
         paths: paths,
         deep: deep,

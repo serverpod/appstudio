@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../platform/studio_notifications.dart';
@@ -131,6 +133,13 @@ class AgentController extends ChangeNotifier implements ProvidersView {
   static const _prefsModelKey = 'agent.default_model';
   static const _prefsModeKey = 'agent.chat_mode';
 
+  /// Working directory for a serve started by [startForSettings].
+  static const _kSettingsScratchDirName = 'agent-scratch';
+
+  /// True while the running serve exists only for Settings, with no project
+  /// behind it. Opening a project supersedes it and clears this.
+  bool _startedForSettings = false;
+
   AgentConnectionState _connection = AgentConnectionState.idle;
   String? _statusMessage;
   String? _error;
@@ -160,6 +169,13 @@ class AgentController extends ChangeNotifier implements ProvidersView {
       List.unmodifiable(_pendingPermissions);
   List<AgentQuestionPart> get pendingQuestions =>
       List.unmodifiable(_pendingQuestions);
+  /// True once `opencode serve` has answered, so the provider and model lists
+  /// mean something. Not the same as [canSend], which also waits for Serverpod.
+  @override
+  bool get agentReady =>
+      _connection == AgentConnectionState.ready ||
+      _connection == AgentConnectionState.busy;
+
   @override
   List<String> get connectedProviders =>
       List.unmodifiable(_connectedProviders);
@@ -261,13 +277,18 @@ class AgentController extends ChangeNotifier implements ProvidersView {
       return;
     }
 
-    if (!process.previewReady) {
-      if (_connection != AgentConnectionState.idle || _serve.isRunning) {
-        unawaited(_teardown(clearMessages: false));
-      }
-      return;
-    }
+    // A real project supersedes any scratch serve Settings started, and must
+    // not be torn down when Settings closes.
+    _startedForSettings = false;
 
+    // Deliberately *not* gated on `process.previewReady`. `opencode serve` is
+    // an independent process that only needs the project directory, and the
+    // Serverpod build it used to wait for takes minutes on a cold project —
+    // long enough that Settings could not show which providers hold a key.
+    //
+    // This does not make the agent usable early: [canSend] still requires
+    // `previewReady`, and `AgentPane` still shows its "Serverpod is starting"
+    // gate, so the main interface is unchanged.
     if (path == _boundProjectPath &&
         (_connection == AgentConnectionState.ready ||
             _connection == AgentConnectionState.busy ||
@@ -275,6 +296,46 @@ class AgentController extends ChangeNotifier implements ProvidersView {
       return;
     }
     unawaited(_startForProject(path));
+  }
+
+  /// Brings the agent up with no project open, so Settings can list providers
+  /// and models before anything has been opened.
+  ///
+  /// `opencode serve` is given a working directory, and with no project there
+  /// is nothing meaningful to hand it, so it gets a scratch directory under
+  /// Application Support — a real path it can write its own state into without
+  /// dropping `.opencode` clutter somewhere the user cares about. The keys it
+  /// reports come from the OpenCode config in the user's home either way, so
+  /// the directory's contents do not matter.
+  ///
+  /// Does nothing once a project is open: that agent is the real one.
+  Future<void> startForSettings() async {
+    if (session.hasProject ||
+        _serve.isRunning ||
+        _connection == AgentConnectionState.starting) {
+      return;
+    }
+    final dir = Directory(
+      p.join(toolchains.paths.appSupportRoot, _kSettingsScratchDirName),
+    );
+    try {
+      await dir.create(recursive: true);
+    } catch (e) {
+      _error = 'Could not prepare a workspace for the agent: $e';
+      _connection = AgentConnectionState.error;
+      notifyListeners();
+      return;
+    }
+    _startedForSettings = true;
+    await _startForProject(dir.path);
+  }
+
+  /// Stops a serve that [startForSettings] started. A project's own agent is
+  /// left running — closing Settings must not tear down a live session.
+  Future<void> stopIfStartedForSettings() async {
+    if (!_startedForSettings) return;
+    _startedForSettings = false;
+    await _teardown(clearMessages: true);
   }
 
   Future<void> _startForProject(String projectPath) async {

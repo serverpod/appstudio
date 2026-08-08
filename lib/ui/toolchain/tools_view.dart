@@ -29,6 +29,9 @@ abstract interface class ToolsView implements Listenable {
   bool get isInstalling;
   bool get isRefreshing;
 
+  /// True while a live manifest is being downloaded from the bucket.
+  bool get isFetchingManifest;
+
   ShellPathState get shellPathState;
 
   /// The shell we would edit, e.g. "zsh". Shown when we cannot edit it.
@@ -43,8 +46,7 @@ abstract interface class ToolsView implements Listenable {
   /// Already shortened for display (`~/Library/...`).
   String get toolchainRootLabel;
 
-  /// Identifies the current set of pinned tool versions. The setup dialog keys
-  /// its "Not now" on this, so a new pin re-asks.
+  /// Identifies the current set of pinned tool versions.
   String get manifestId;
 
   /// The version requirement to show beside a tool, e.g. ">= 4.0.0-beta.1".
@@ -57,6 +59,9 @@ abstract interface class ToolsView implements Listenable {
 
   Future<void> refreshDeep();
   Future<void> refreshShellPathState();
+
+  /// Fetches the live toolchain manifest when it is newer than the current pin.
+  Future<void> refreshPublishedManifest();
 
   Future<void> install(List<ToolId> ids);
   Future<void> installMissing();

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 
@@ -54,17 +56,26 @@ class _StudioShellState extends State<StudioShell> {
     super.dispose();
   }
 
-  void _openSettings() => _showSettings(SettingsTab.providers);
+  void _openSettings() => unawaited(_showSettings(SettingsTab.providers));
 
-  void _openManageTools() => _showSettings(SettingsTab.tools);
+  void _openManageTools() => unawaited(_showSettings(SettingsTab.tools));
 
-  void _showSettings(SettingsTab tab) {
-    showSettingsDialog(
-      context,
-      agent: widget.agent,
-      toolchains: widget.toolchains,
-      initialTab: tab,
-    );
+  /// Settings is the one place the agent is worth having up without a project:
+  /// it is where keys and the default model are configured, and both are read
+  /// from the running agent. With a project open this is a no-op — that agent
+  /// is already the real one, and closing Settings leaves it alone.
+  Future<void> _showSettings(SettingsTab tab) async {
+    unawaited(widget.agent.startForSettings());
+    try {
+      await showSettingsDialog(
+        context,
+        agent: widget.agent,
+        toolchains: widget.toolchains,
+        initialTab: tab,
+      );
+    } finally {
+      await widget.agent.stopIfStartedForSettings();
+    }
   }
 
   void _newProject() {
@@ -87,10 +98,7 @@ class _StudioShellState extends State<StudioShell> {
       builder: (context, _) {
         final hasProject = widget.session.hasProject;
         if (!hasProject) {
-          return StartPage(
-            session: widget.session,
-            onNewProject: _newProject,
-          );
+          return StartPage(session: widget.session, onNewProject: _newProject);
         }
 
         return Column(
@@ -181,9 +189,7 @@ class _Toolbar extends StatelessWidget {
                   Flexible(
                     child: Text(
                       session.projectName ?? '',
-                      style: textTheme.small.copyWith(
-                        fontWeight: FontWeight.w500,
-                      ),
+                      style: textTheme.small.medium,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -379,10 +385,9 @@ class _ToolchainBadge extends StatelessWidget {
                     const SizedBox(width: 6),
                     Text(
                       toolchains.current.badgeLabel,
-                      style: theme.textTheme.small.copyWith(
-                        fontWeight: FontWeight.w500,
-                        color: color,
-                      ),
+                      style: theme.textTheme.small
+                          .copyWith(color: color)
+                          .medium,
                     ),
                   ],
                 ),

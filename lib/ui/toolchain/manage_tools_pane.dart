@@ -57,7 +57,6 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final scheme = theme.colorScheme;
     final toolchains = widget.toolchains;
     final inventory = toolchains.inventory;
     final missing = inventory.missingRequired;
@@ -71,14 +70,13 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
             'App Studio uses these tools to create and run Serverpod projects.',
             style: theme.textTheme.muted,
           ),
-          const SizedBox(height: 14),
+          const ShadGap(3),
           if (toolchains.installError case final error?) ...[
             ErrorBanner(message: error),
-            const SizedBox(height: 12),
-          ] else if (missing.isNotEmpty &&
-              !toolchains.isInstalling) ...[
+            const ShadGap(3),
+          ] else if (missing.isNotEmpty && !toolchains.isInstalling) ...[
             ErrorBanner(message: _missingMessage(missing)),
-            const SizedBox(height: 12),
+            const ShadGap(3),
           ],
           if (toolchains.progress case final progress?
               when toolchains.isInstalling) ...[
@@ -86,7 +84,7 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
               progress: progress,
               onCancel: toolchains.cancelInstall,
             ),
-            const SizedBox(height: 12),
+            const ShadGap(3),
           ],
           for (final id in ToolId.values)
             if (inventory[id] case final status?) ...[
@@ -96,36 +94,34 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
                 progress: toolchains.progress?[id],
                 actions: _actionsFor(status, busy),
               ),
-              const SizedBox(height: 10),
+              const ShadGap(2),
             ],
-          Divider(color: scheme.border, height: 1),
-          const SizedBox(height: 12),
+          const ShadSeparator.horizontal(
+            margin: EdgeInsets.symmetric(vertical: 12),
+          ),
+          const ShadGap(3),
           _ShellPathToggle(toolchains: toolchains),
-          const SizedBox(height: 12),
-          Divider(color: scheme.border, height: 1),
-          const SizedBox(height: 10),
+          const ShadGap(3),
+          const ShadSeparator.horizontal(
+            margin: EdgeInsets.symmetric(vertical: 12),
+          ),
+          const ShadGap(2),
           Row(
             children: [
               Expanded(
                 child: Text(
                   toolchains.toolchainRootLabel,
-                  style: theme.textTheme.muted.copyWith(fontSize: 11),
+                  style: theme.textTheme.muted,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
               ShadButton.ghost(
-                size: ShadButtonSize.sm,
-                onPressed: () =>
-                    unawaited(toolchains.revealToolchainFolder()),
+                onPressed: () => unawaited(toolchains.revealToolchainFolder()),
                 child: const Text('Reveal'),
               ),
               ShadButton.ghost(
-                size: ShadButtonSize.sm,
-                onPressed:
-                    busy ? null : toolchains.refreshDeep,
-                child: Text(
-                  toolchains.isRefreshing ? 'Checking…' : 'Re-check',
-                ),
+                onPressed: busy ? null : toolchains.refreshDeep,
+                child: Text(toolchains.isRefreshing ? 'Checking…' : 'Re-check'),
               ),
             ],
           ),
@@ -141,15 +137,15 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
       // that cannot work.
       return missing.length == 1
           ? '${missing.single.spec.displayName} is missing and is not '
-              'available for download on this Mac.'
+                'available for download on this Mac.'
           : '${missing.length} tools are missing and are not available for '
-              'download on this Mac.';
+                'download on this Mac.';
     }
     return missing.length == 1
         ? '${missing.single.spec.displayName} is missing. Some features will '
-            'not work until it is installed.'
+              'not work until it is installed.'
         : '${missing.length} tools are missing. Some features will not work '
-            'until they are installed.';
+              'until they are installed.';
   }
 
   List<Widget> _actionsFor(ToolStatus status, bool busy) {
@@ -161,7 +157,6 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
     return [
       if (!status.isSatisfied && status.canInstall)
         ShadButton(
-          size: ShadButtonSize.sm,
           onPressed: busy ? null : () => toolchains.install([status.id]),
           child: const Text('Install'),
         ),
@@ -176,14 +171,12 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
       if (isManaged) ...[
         const SizedBox(width: 6),
         ShadButton.ghost(
-          size: ShadButtonSize.sm,
           onPressed: busy ? null : () => toolchains.uninstall(status.id),
           child: const Text('Remove'),
         ),
       ],
     ];
   }
-
 }
 
 class _InstallBanner extends StatelessWidget {
@@ -201,43 +194,19 @@ class _InstallBanner extends StatelessWidget {
       orElse: () => progress.tools.last,
     );
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.muted.withValues(alpha: 0.45),
-        borderRadius: theme.radii.md,
-        border: Border.all(color: scheme.border.withValues(alpha: 0.5)),
+    return ShadCard(
+      backgroundColor: scheme.muted,
+      title: Text('${active.phase.label} ${active.id.displayName}…'),
+      action: ShadButton.ghost(
+        onPressed: onCancel,
+        child: const Text('Cancel'),
       ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '${active.phase.label} ${active.id.displayName}…',
-                    style: theme.textTheme.small
-                        .copyWith(fontWeight: FontWeight.w600),
-                  ),
-                ),
-                ShadButton.ghost(
-                  size: ShadButtonSize.sm,
-                  onPressed: onCancel,
-                  child: const Text('Cancel'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            DeterminateProgress(
-              fraction: progress.fraction,
-              caption: formatTransferCaption(
-                received: progress.bytesReceived,
-                total: progress.bytesTotal,
-                eta: progress.eta,
-              ),
-            ),
-          ],
+      child: DeterminateProgress(
+        fraction: progress.fraction,
+        caption: formatTransferCaption(
+          received: progress.bytesReceived,
+          total: progress.bytesTotal,
+          eta: progress.eta,
         ),
       ),
     );
@@ -279,7 +248,6 @@ class _UpgradeHintState extends State<_UpgradeHint> {
     return ShadTooltip(
       builder: (context) => Text('Copy “${widget.command}”'),
       child: ShadButton.ghost(
-        size: ShadButtonSize.sm,
         onPressed: _copy,
         child: Text(_copied ? 'Copied' : 'Upgrade yours'),
       ),
@@ -329,21 +297,18 @@ class _ShellPathToggleState extends State<_ShellPathToggle> {
         children: [
           Text(
             'Add the tools to your PATH',
-            style: theme.textTheme.small.copyWith(fontWeight: FontWeight.w600),
+            style: theme.textTheme.small.semibold,
           ),
-          const SizedBox(height: 4),
+          const ShadGap(1),
           Text(
             'App Studio cannot edit ${widget.toolchains.shellName} configuration. '
             'Add this line yourself:',
-            style: theme.textTheme.muted.copyWith(fontSize: 11),
+            style: theme.textTheme.muted,
           ),
-          const SizedBox(height: 6),
+          const ShadGap(1.5),
           SelectableText(
             widget.toolchains.shellExportLine,
-            style: theme.textTheme.muted.copyWith(
-              fontFamily: kMacMonoFont,
-              fontSize: 10.5,
-            ),
+            style: theme.textTheme.muted.copyWith(fontFamily: kMacMonoFont),
           ),
         ],
       );
@@ -352,53 +317,33 @@ class _ShellPathToggleState extends State<_ShellPathToggle> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ShadSwitch(
-              value: state == ShellPathState.present,
-              onChanged: _working ? null : (v) => _set(v),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Add the tools to your PATH',
-                    style: theme.textTheme.small
-                        .copyWith(fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'App Studio does not need this — it already finds the '
-                    'tools. Turn it on so an external editor or AI agent can '
-                    'find them too. Edits a fenced block in '
-                    '${widget.toolchains.shellRcLabel}.',
-                    style: theme.textTheme.muted.copyWith(fontSize: 11),
-                  ),
-                ],
-              ),
-            ),
-          ],
+        ShadSwitch(
+          value: state == ShellPathState.present,
+          onChanged: _working ? null : (v) => _set(v),
+          label: const Text('Add the tools to your PATH'),
+          sublabel: Text(
+            'App Studio does not need this — it already finds the '
+            'tools. Turn it on so an external editor or AI agent can '
+            'find them too. Edits a fenced block in '
+            '${widget.toolchains.shellRcLabel}.',
+          ),
         ),
         if (state == ShellPathState.edited) ...[
           const SizedBox(height: 8),
           ErrorBanner(
-            message: 'Your shell config was edited inside the App Studio '
+            message:
+                'Your shell config was edited inside the App Studio '
                 'block, so it was left alone.',
           ),
           const SizedBox(height: 6),
           Row(
             children: [
               ShadButton.outline(
-                size: ShadButtonSize.sm,
                 onPressed: _working ? null : () => _set(false),
                 child: const Text('Remove it'),
               ),
               const SizedBox(width: 6),
               ShadButton.ghost(
-                size: ShadButtonSize.sm,
                 onPressed: _working ? null : () => _set(true, force: true),
                 child: const Text('Replace (backs up first)'),
               ),

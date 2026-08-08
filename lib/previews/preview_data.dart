@@ -1,5 +1,4 @@
-/// Stand-ins for the real controllers, used by widget previews and golden
-/// tests alike.
+/// Stand-ins for the real controllers, used by the widget previews.
 ///
 /// They implement [ToolsView] and [ProvidersView] — the same interfaces the UI
 /// talks to — so nothing here can drift from what the app renders without the
@@ -133,7 +132,7 @@ final mixedInventory = _inventory({
 /// A download in flight, so the progress banner can be seen without waiting
 /// for a real 662 MB transfer.
 /// Fixed [startedAt] and [now] so the banner's elapsed/remaining text is
-/// identical on every run — a golden test cannot tolerate a wall clock.
+/// identical on every run.
 final downloadingProgress = InstallProgress(
   startedAt: DateTime.utc(2026, 1, 1, 12),
   now: DateTime.utc(2026, 1, 1, 12, 0, 40),
@@ -164,6 +163,7 @@ class FakeToolsView extends ChangeNotifier implements ToolsView {
     this.isBusy = false,
     this.isInstalling = false,
     this.isRefreshing = false,
+    this.isFetchingManifest = false,
     this.shellPathState = ShellPathState.absent,
     this.toolchainRootLabel = '~/Library/Application Support/App Studio/toolchain',
     this.manifestId = 'preview-1',
@@ -185,6 +185,8 @@ class FakeToolsView extends ChangeNotifier implements ToolsView {
   bool isInstalling;
   @override
   bool isRefreshing;
+  @override
+  bool isFetchingManifest;
   @override
   ShellPathState shellPathState;
   @override
@@ -214,6 +216,8 @@ class FakeToolsView extends ChangeNotifier implements ToolsView {
   @override
   Future<void> refreshShellPathState() async {}
   @override
+  Future<void> refreshPublishedManifest() async => notifyListeners();
+  @override
   Future<void> install(List<ToolId> ids) async => notifyListeners();
   @override
   Future<void> installMissing() async => notifyListeners();
@@ -238,9 +242,15 @@ class FakeProvidersView extends ChangeNotifier implements ProvidersView {
     Set<String>? connected,
     this.defaultModel,
     this.models = const [],
+    this.agentReady = true,
   }) : _connected = connected ?? <String>{};
 
   final Set<String> _connected;
+
+  /// False reproduces the pane's waiting state — what Settings shows while
+  /// `opencode serve` is still coming up, or with no project open.
+  @override
+  final bool agentReady;
 
   @override
   Iterable<String> get connectedProviders => _connected;

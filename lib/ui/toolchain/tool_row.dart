@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 
-import '../../theme/app_theme.dart';
 import '../../toolchain/install_progress.dart';
 import '../../toolchain/tool_status.dart';
-import '../../util/pretty_path.dart';
 import '../../widgets/determinate_progress.dart';
 
 /// One tool in the Tools Manager: where it came from, whether it is usable,
@@ -33,136 +31,52 @@ class ToolRow extends StatelessWidget {
     final scheme = theme.colorScheme;
     final resolved = status.resolved;
     final rejected = status.bestRejected;
+    final body = _body();
 
-    final (statusText, statusColor) = switch (resolved) {
-      final r? => ('Ready', scheme.success),
-      null when rejected?.fitness == ToolFitness.wrongVersion => (
-          'Update needed',
-          scheme.warning,
-        ),
-      _ => ('Not installed', scheme.destructive),
-    };
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.muted.withValues(alpha: 0.45),
-        borderRadius: theme.radii.md,
-        border: Border.all(color: scheme.border.withValues(alpha: 0.5)),
+    return ShadCard(
+      backgroundColor: scheme.muted,
+      title: Text(status.spec.displayName, overflow: TextOverflow.ellipsis),
+      // `action`, not `trailing`: trailing sits beside the card's whole content
+      // column and would squeeze the body.
+      action: ShadRow(spacing: 1.5, children: _badges(resolved, rejected)),
+      description: Text(
+        // A `*` range means "any real one will do" — the qualification is that
+        // it is not a CLT stub, not a version.
+        requirement == '*' ? 'Any version' : 'Requires $requirement',
+        style: theme.textTheme.muted,
       ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          status.spec.displayName,
-                          style: theme.textTheme.small
-                              .copyWith(fontWeight: FontWeight.w600),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (resolved != null) ...[
-                        const SizedBox(width: 8),
-                        _SourceBadge(source: resolved.source),
-                      ],
-                    ],
-                  ),
-                ),
-                Text(
-                  statusText,
-                  style: theme.textTheme.muted.copyWith(
-                    fontSize: 11,
-                    color: statusColor,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              _detail(resolved, rejected),
-              style: theme.textTheme.muted.copyWith(
-                fontFamily: kMacMonoFont,
-                fontSize: 10.5,
-                height: 1.4,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 2),
-            Text(
-              // A `*` range means "any real one will do" — the qualification is
-              // that it is not a CLT stub, not a version.
-              requirement == '*' ? 'Any version' : 'Requires $requirement',
-              style: theme.textTheme.muted.copyWith(fontSize: 10.5),
-            ),
-            if (progress != null && !progress!.phase.isTerminal) ...[
-              const SizedBox(height: 8),
-              DeterminateProgress(
-                fraction: progress!.fraction,
-                caption: progress!.phase.label,
-              ),
-            ] else if (actions.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Row(children: actions),
-            ],
-          ],
-        ),
-      ),
+      child: body,
     );
   }
 
-  String _detail(ToolCandidate? resolved, ToolCandidate? rejected) {
-    if (resolved != null) {
-      final version = resolved.detectedVersion?.toString() ?? 'unknown version';
-      final path = resolved.executable;
-      return path == null ? version : '$version · ${prettyPath(path)}';
-    }
-    if (rejected?.reason != null) {
-      final path = rejected!.executable;
-      return path == null
-          ? rejected.reason!
-          : '${rejected.reason!} · ${prettyPath(path)}';
-    }
-    return 'Not found on this Mac.';
+  /// The version, then where it came from — or why it is unusable.
+  ///
+  /// This replaces the old status line and install path. The path was the
+  /// longest thing on the card and answered a question nobody was asking: what
+  /// matters is whether a usable version is present and who updates it.
+  List<Widget> _badges(ToolCandidate? resolved, ToolCandidate? rejected) {
+    final version = (resolved ?? rejected)?.detectedVersion;
+    return [
+      if (version != null) ShadBadge(child: Text('$version')),
+      if (resolved != null)
+        // Outline, not `secondary`: slate defines `secondary` and `muted` as
+        // the same colour, so a secondary badge is invisible on this card.
+        ShadBadge.outline(child: Text(resolved.source.label))
+      else if (rejected?.fitness == ToolFitness.wrongVersion)
+        // Outline, not destructive: a too-old host tool is an update, not a
+        // failure — the version badge beside it already says which one is
+        // there. Destructive is reserved for "there is nothing to run".
+        const ShadBadge.outline(child: Text('Update needed'))
+      else
+        const ShadBadge.destructive(child: Text('Missing')),
+    ];
   }
-}
 
-class _SourceBadge extends StatelessWidget {
-  const _SourceBadge({required this.source});
-
-  final ToolSource source;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    final scheme = theme.colorScheme;
-    // Managed is the normal case, so it gets the quietest treatment; host and
-    // dev repo are worth noticing because they are not ours to update.
-    final outlined = source != ToolSource.managed;
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: outlined ? Colors.transparent : scheme.muted,
-        borderRadius: theme.radii.full,
-        border: Border.all(color: scheme.border),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-        child: Text(
-          source.label,
-          style: theme.textTheme.muted.copyWith(
-            fontSize: 10,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ),
-    );
+  Widget? _body() {
+    if (progress case final p? when !p.phase.isTerminal) {
+      return DeterminateProgress(fraction: p.fraction, caption: p.phase.label);
+    }
+    if (actions.isEmpty) return null;
+    return ShadRow(spacing: 2, children: actions);
   }
 }

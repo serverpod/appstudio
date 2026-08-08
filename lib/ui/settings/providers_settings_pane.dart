@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 
+import '../../theme/app_theme.dart';
 import '../../agent/agent_transcript.dart';
 import 'providers_view.dart';
 
@@ -26,6 +27,9 @@ class _ProvidersSettingsPaneState extends State<ProvidersSettingsPane> {
   bool _loadingModels = false;
   String? _error;
 
+  /// Tracks the edge into [ProvidersView.agentReady], so the retry fires once.
+  bool _wasReady = false;
+
   @override
   void initState() {
     super.initState();
@@ -33,6 +37,7 @@ class _ProvidersSettingsPaneState extends State<ProvidersSettingsPane> {
       _keyControllers[p.id] = TextEditingController();
     }
     widget.agent.addListener(_onAgent);
+    _wasReady = widget.agent.agentReady;
     unawaited(_loadModels());
   }
 
@@ -46,7 +51,13 @@ class _ProvidersSettingsPaneState extends State<ProvidersSettingsPane> {
   }
 
   void _onAgent() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    // The pane can open before the agent answers, in which case the first
+    // model load came back empty. Retry on the edge into ready.
+    final ready = widget.agent.agentReady;
+    if (ready && !_wasReady) unawaited(_loadModels());
+    _wasReady = ready;
+    setState(() {});
   }
 
   Future<void> _loadModels() async {
@@ -100,32 +111,27 @@ class _ProvidersSettingsPaneState extends State<ProvidersSettingsPane> {
     // Also treat auth-store keys as connected for display when serve is down.
     final defaultModel = widget.agent.defaultModel;
 
+    // Before the agent answers, "which providers hold a key" and "which models
+    // exist" are unknown rather than empty. Rendering the list anyway would
+    // show every provider as disconnected and no models at all — an answer, and
+    // the wrong one.
+    if (!widget.agent.agentReady) {
+      return const _WaitingForAgent();
+    }
+
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'API keys are stored in OpenCode\u2019s credential file and shared '
-            'with the CLI.',
-            style: theme.textTheme.muted,
-          ),
-          const SizedBox(height: 14),
           if (_error != null) ...[
             Text(
               _error!,
-              style: theme.textTheme.muted.copyWith(
-                color: scheme.destructive,
-              ),
+              style: theme.textTheme.muted.copyWith(color: scheme.destructive),
             ),
-            const SizedBox(height: 12),
+            const ShadGap(3),
           ],
-          Text(
-            'Default model',
-            style: theme.textTheme.small.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 6),
+          Text('Default model', style: theme.textTheme.small.semibold),
+          const ShadGap(1.5),
           if (_loadingModels)
             Text('Loading models…', style: theme.textTheme.muted)
           else if (_models.isEmpty)
@@ -160,9 +166,7 @@ class _ProvidersSettingsPaneState extends State<ProvidersSettingsPane> {
                 }
               },
             ),
-          const SizedBox(height: 16),
-          Divider(color: scheme.border, height: 1),
-          const SizedBox(height: 12),
+          const ShadGap(4),
           for (final provider in curatedProviders) ...[
             _ProviderRow(
               provider: provider,
@@ -174,9 +178,29 @@ class _ProvidersSettingsPaneState extends State<ProvidersSettingsPane> {
                   ? () => _remove(provider.id)
                   : null,
             ),
-            const SizedBox(height: 10),
+            const ShadGap(2),
           ],
-    ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Stands in for the provider list until `opencode serve` answers.
+///
+/// Worded to be true in both cases that reach it: the agent still starting, and
+/// no project open at all — in which case there is nothing for it to start on.
+class _WaitingForAgent extends StatelessWidget {
+  const _WaitingForAgent();
+
+  @override
+  Widget build(BuildContext context) {
+    return const ShadEmpty(
+      icon: ShadSpinner(),
+      title: Text('Waiting for the agent'),
+      description: Text(
+        'Your provider keys and the list of models come from the agent, '
+        'which starts with the open project.',
       ),
     );
   }
@@ -204,67 +228,48 @@ class _ProviderRow extends StatelessWidget {
     final theme = ShadTheme.of(context);
     final scheme = theme.colorScheme;
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.muted.withValues(alpha: 0.45),
-        borderRadius: theme.radii.md,
-        border: Border.all(color: scheme.border.withValues(alpha: 0.5)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    provider.label,
-                    style: theme.textTheme.small.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                Text(
-                  connected ? 'Connected' : 'Not connected',
-                  style: theme.textTheme.muted.copyWith(
-                    fontSize: 11,
-                    color: connected ? scheme.primary : scheme.mutedForeground,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: ShadInput(
-                    controller: controller,
-                    obscureText: true,
-                    placeholder: Text(
-                      connected ? 'Replace API key…' : 'Paste API key…',
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                ShadButton(
-                  size: ShadButtonSize.sm,
-                  onPressed: saving ? null : onSave,
-                  child: Text(saving ? '…' : 'Save'),
-                ),
-                if (onRemove != null) ...[
-                  const SizedBox(width: 6),
-                  ShadButton.ghost(
-                    size: ShadButtonSize.sm,
-                    onPressed: saving ? null : onRemove,
-                    child: const Text('Remove'),
-                  ),
-                ],
-              ],
-            ),
-          ],
+    return ShadCard(
+      // `card` is the page background in slate, so a card only reads by its
+      // border. `muted` is the palette's alternate surface — the same token
+      // the pane headers use — which separates the rows from the dialog.
+      backgroundColor: scheme.muted,
+      title: Text(provider.label),
+      // `action`, not `trailing`: trailing sits beside the card's whole content
+      // column and would squeeze the input row: `action` occupies only the
+      // header, so the body keeps the card's full width.
+      action: Text(
+        connected ? 'Connected' : 'Not connected',
+        style: theme.textTheme.muted.copyWith(
+          color: connected ? scheme.success : scheme.mutedForeground,
         ),
+      ),
+      child: ShadRow(
+        spacing: 2,
+        children: [
+          Expanded(
+            child: ShadInput(
+              controller: controller,
+              obscureText: true,
+              // The card is a muted fill, which the input's own transparent
+              // one disappears into.
+              decoration: ShadDecoration(color: scheme.background),
+              placeholder: Text(
+                connected
+                    ? 'Replace ${provider.label} API key…'
+                    : 'Add ${provider.label} API key…',
+              ),
+            ),
+          ),
+          ShadButton(
+            onPressed: saving ? null : onSave,
+            child: Text(saving ? '…' : 'Save'),
+          ),
+          if (onRemove != null)
+            ShadButton.destructive(
+              onPressed: saving ? null : onRemove,
+              child: const Text('Remove'),
+            ),
+        ],
       ),
     );
   }

@@ -250,7 +250,9 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
             children: [
               const TextSpan(text: 'Creates '),
               TextSpan(
-                text: prettyPath(p.join(_directory, _name.isEmpty ? '…' : _name)),
+                text: prettyPath(
+                  p.join(_directory, _name.isEmpty ? '…' : _name),
+                ),
                 style: TextStyle(
                   fontFamily: kMacMonoFont,
                   color: scheme.foreground.withValues(alpha: 0.75),
@@ -274,10 +276,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const SizedBox(height: 8),
-        Text(
-          'Creating $_name',
-          style: textTheme.small.copyWith(fontWeight: FontWeight.w600),
-        ),
+        Text('Creating $_name', style: textTheme.small.semibold),
         const SizedBox(height: 6),
         Text(
           _status ?? 'Working…',

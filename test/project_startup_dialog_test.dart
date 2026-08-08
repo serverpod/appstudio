@@ -39,9 +39,9 @@ void main() {
     expect(find.textContaining('minute or two'), findsOneWidget);
   });
 
-  testWidgets('OK alone does not silence it', (tester) async {
+  testWidgets('dismissing alone does not silence it', (tester) async {
     await pumpAndOpen(tester);
-    await tester.tap(find.text('OK'));
+    await tester.tap(find.text("Let's Go"));
     await tester.pumpAndSettle();
 
     expect(find.byType(ProjectStartupDialog), findsNothing);
@@ -49,11 +49,11 @@ void main() {
     expect(prefs.getBool('project.startup_notice_dismissed'), isNull);
   });
 
-  testWidgets('ticking the box then OK silences it', (tester) async {
+  testWidgets('ticking the box then dismissing silences it', (tester) async {
     await pumpAndOpen(tester);
     await tester.tap(find.byType(ShadCheckbox));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('OK'));
+    await tester.tap(find.text("Let's Go"));
     await tester.pumpAndSettle();
 
     final prefs = await SharedPreferences.getInstance();

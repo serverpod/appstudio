@@ -30,6 +30,7 @@ UI reference for design patterns: `../cloudui/cloudui_flutter/`.
 
 - Agent tab hosts a Cursor-style chat driven by bundled `opencode serve` (HTTP + SSE).
 - Scoped to the open project directory; restart serve on project switch.
+- **`opencode serve` starts as soon as a project opens — it does *not* wait for `previewReady`.** It only needs the project directory, and the Serverpod build it used to wait for takes minutes on a cold project, which left Settings unable to say which providers held a key. Starting early does not make the agent usable early: `canSend` still requires `previewReady` and `AgentPane` still shows its "Serverpod is starting" gate, so the main interface is unchanged. The trade is that the agent now outlives a server stop, which also makes a restart cheaper.
 - API keys via Settings → Providers tab → OpenCode `auth.json` / `PUT /auth/{id}`.
 - Bundle: `toolchain/opencode/<ver>/` (darwin-arm64 only); pin in `active.json`.
 - **Permissions:** `permission.asked` → reply with `POST /permission/{id}/reply`
@@ -68,7 +69,8 @@ make dist              # Developer ID + notarized zip
 ### Tool resolution (in the app)
 
 - `ToolchainController` (`lib/toolchain/toolchain_controller.dart`) owns the resolved `Toolchain`. **Consumers read `toolchains.current` at call time — never capture it**, or they strand on a snapshot taken before the user installed anything.
-- Resolution is **per tool** across four sources, in precedence order: dev repo (`<repo>/toolchain`) → bundled (`Contents/Resources/toolchain`) → managed (`~/Library/Application Support/App Studio/toolchain`) → host. A missing OpenCode no longer invalidates Flutter.
+- Resolution is **per tool** across exactly two sources, in precedence order: managed (`~/Library/Application Support/App Studio/toolchain`) → host (already on this Mac). A missing OpenCode no longer invalidates Flutter.
+- **There is deliberately no dev-repo or bundled source.** `<repo>/toolchain` and `Contents/Resources/toolchain` used to sit in front of both and are gone: the release embeds no toolchain, and a repo tree silently overriding what the user installed made "which binary am I actually running?" unanswerable. `ToolSource` has two values and they are what the Tools tab badges say.
 - Executable getters are **nullable**. Spawn sites check `toolchain.unavailableReason(id)` first; a bare command name would only defer the failure to `Process.start`.
 - `Toolchain.resolve()` short-circuits at the first satisfied candidate (~350 ms). `deep: true` enumerates every candidate (~900 ms) and is only for the Tools Manager — the full sweep is too slow to run before `runApp`.
 - **Never probe `/usr/bin/{git,otool,install_name_tool,clang,ar,ld}`** — all confirmed CLT shims (identical 118,928-byte stub) that pop a modal installer. `codesign` at /usr/bin *is* real. Candidates come from Homebrew, `/Library/Developer/CommandLineTools`, and `$(xcode-select -p)`.
@@ -117,11 +119,9 @@ Serverpod's per-start native-assets step runs exactly three commands on prebuilt
   and `xcrun --show-sdk-path`, and **the macOS SDK cannot be redistributed**. That path
   requires Xcode CLT; detect it and offer `xcode-select --install`.
 
-### Dev toolchain (optional, `<repo>/toolchain`)
+### Building the toolchain trees (release engineer)
 
-`make dev_toolchain` builds a local tree that the app prefers over anything it would download —
-useful offline. It is **not** required to build, run or ship the app: the toolchain is no
-longer embedded in the `.app`, and the release archive carries none of it.
+`./tool/bundle_toolchain.sh` builds the trees that `publish_toolchain.sh` uploads. **The app no longer reads `<repo>/toolchain`** — see the resolution note above — so this is a packaging step, not a way to run against local tools. `make dev_toolchain` still builds the tree for that purpose.
 
 ```
 toolchain/
@@ -135,8 +135,8 @@ toolchain/
 ```
 
 - **`./tool/bundle_toolchain.sh`** — downloads Flutter, runs `flutter precache --web`, strips iOS/Android/other engine artifacts; downloads OpenCode + portable Git; downloads an official LLVM release and installs `llvm-objdump`/`llvm-objcopy` as `otool`/`install_name_tool`. Does **not** download Serverpod; copy the full CLI bundle into `toolchain/serverpod_cli/<version>/` first. Flags: `--force`, `--flutter=VERSION`, `--serverpod=VERSION`, `--opencode=VERSION`, `--git=VERSION`.
-- **`Toolchain.resolve()`** (`lib/toolchain/toolchain.dart`) — uses bundled toolchain if `active.json` exists (repo `toolchain/` in dev, `App Studio.app/Contents/Resources/toolchain` in release), otherwise falls back to host `PATH`. Prepends portable `git` + `cctools` to `PATH` and sets `FLUTTER_PREBUILT_ENGINE_VERSION` so target Macs don't need Xcode / CLT for web preview.
-- **Debug builds** skip embedding (`tool/embed_toolchain.sh`) and use host `flutter`/`dart`/`serverpod`. **Release** embeds the full `toolchain/` tree into the `.app`.
+- `Toolchain.resolve()` prepends portable `git` + `cctools` to `PATH` and sets `FLUTTER_PREBUILT_ENGINE_VERSION` so target Macs don't need Xcode / CLT for web preview.
+- Nothing is embedded in the `.app` at build time — `tool/embed_toolchain.sh` is dead and referenced by neither the Makefile nor the Xcode project. `distribute_macos.sh` still asserts no `Contents/Resources/toolchain` survives, which now catches a stale build tree rather than a live feature.
 
 Opened Serverpod projects must launch Flutter in **`web-server`** mode on port **9998** (Serverpod `flutter_apps` config).
 
@@ -343,6 +343,8 @@ install. Sparkle would also catch it, but later and less clearly.
 - `shad` deliberately does **not** re-export the extensions on `double`/`Duration`/`List`/`TextStyle` that `shadcn_ui` did, nor `boxy`/`flutter_svg`/`universal_image`. Depend on those directly if you ever need them.
 - **Theme** (`app_theme.dart`): Slate base, **Nova** style, **Medium** radius (`--radius` 10, so the component step is 8). Serverpod brand blue is the *accent*: `ShadSlateColorScheme.…().applyAccent(kBrandBlue)` derives `primary`, `primaryForeground`, `ring` and `selection` from the one constant, so there is nothing to keep in sync by hand.
 - **Fonts:** `.AppleSystemUIFont` (UI), `Menlo` (terminal via `kMacMonoFont`). The text theme is otherwise stock — `ShadTextTheme(family:)` swaps only the family, so every weight, size and line height matches upstream shad.
+- **Our font's weight axis moves about twice as fast as shad's**, and the whole type scale is corrected for it. Measured over the same string at 14px: Inter (shad's default) widens ~1.65px per 100 weight units, `.AppleSystemUIFont` ~3.17px — so an uncorrected `w500` lands where Inter's `w600` would. Both axes resolve correctly and neither synthesises bold; it is a typeface difference. `app_theme.dart` rebuilds every `ShadTextTheme` role with a `wght` variation at the corrected value, including the `w400` ones — a variation beats an inherited `fontWeight`, so a component that copies a role and bumps the weight (`ShadCheckbox` does this to its label) lands on the corrected weight instead of a too-heavy one.
+- **Never write `copyWith(fontWeight: …)` on UI-font text — it is silently ignored.** Every role already carries a variation and the variation wins, so a raw weight leaves the text at its role's weight. Use the `.medium` / `.semibold` getters from the `UiTextWeight` extension instead. Monospace is the exception: `Menlo` is not variable, so `fontWeight` is the right lever there and the variation is a no-op.
 - **`textTheme.small` is the *label* role, not body copy.** It is `w500` at `height: 1.0` (`font-medium leading-none`), so prose set in it reads bold and cramped the moment it wraps. Use it for single-line labels, list rows and badges. For anything that wraps use `textTheme.muted` (`w400`, `height: 1.43`), and for a dialog's lead paragraph use `ShadDialog`'s `description` slot, which resolves to `style.body` over `textTheme.muted`. The agent transcript is the one place that keeps `small` for prose, and only because it sets an explicit `height: 1.4`.
 - **Custom widgets read the theme; they do not carry colors.** Use `scheme.*` for color, `theme.radii.{sm,md,lg,full}` for corners and `theme.style.*` for geometry — a literal `Color(0x…)` or `BorderRadius.circular(n)` in a widget is the thing to fix, not to match. Failure states are `scheme.destructive`, never a private red.
 - **Success and warning have no shadcn token**, so they ride in the scheme's `custom` map and are read through the `AppColorScheme` extension as `scheme.success` / `scheme.warning`. One value per status, picked to be legible on that brightness's background, covers both the dot and its label.
@@ -350,7 +352,9 @@ install. Sparkle would also catch it, but later and less clearly.
 - **Pane chrome:** headers use `scheme.muted`; content uses `scheme.background`. Use `paneBorderSide()` for all 1px dividers.
 - **Segmented controls:** `IconSegmentedControl` / `TextSegmentedControl` share `widgets/segmented_control_theme.dart`, which resolves color and geometry from the theme's **tab** tokens — the strip/segment treatment `ShadTabs` uses — so both follow the style preset like a built-in. Hover moves the *foreground*, not the fill, so no blend has to be invented. `onMutedSurface: true` on muted pane headers swaps track and selection.
 - **Header breathing room is set by `kPaneHeaderHeight`, not by the controls.** All three (icon group, text group, standalone button) come out 30px from the preset's tab tokens, and the bar is 40 so they clear it by 5 top and bottom. Tightening the strip inset instead buys that gap out of the space between the strip edge and the segment pills, which is what makes the labels look cramped — that was tried and reverted. Retune the bar.
-- **The two deliberate deviations from shad defaults**, both in `app_theme.dart`: the `destructive` button variant is a soft tint upstream and is overridden back to a solid fill, so a destructive confirm does not read as disabled (see the Uninstall dialog); and the tooltip wait is 700 ms, because the default flashes tooltips while the pointer crosses a toolbar. Everything else is stock. In particular there is **no** dark `border`/`input` override any more — slate dark had `border == muted` in `shadcn_ui`, but `shad` sets a translucent white and dividers show fine.
+- **Component themes are near-stock.** `app_theme.dart` keeps two: the 700 ms tooltip wait, and a `cardTheme` that drops the radius from nova's `xl` (14) to `lg` (10) — the step buttons and select triggers use, so a card no longer looks rounder than the dropdown beside it — and halves the 16px padding, because our cards stack as list rows rather than standing alone. The tooltip delay is there because the default flashes tooltips while the pointer crosses a toolbar. Two overrides that used to live here are gone on purpose: the dark `border`/`input` pair (slate dark had `border == muted` in `shadcn_ui`, but `shad` sets a translucent white and dividers show fine) and the solid `destructive` button fill — `destructive` is upstream's soft `bg-destructive/10` tint everywhere now, including the Uninstall confirm.
+- **Prefer a shad component over a hand-built one.** Panels drawn as a `DecoratedBox` with tinted `scheme.muted`/`scheme.border` are the pattern to replace: `ShadCard` already carries the right fill, hairline border, radius and padding. Likewise `ShadSeparator` over a `Divider`, and `ShadRow`/`ShadColumn`/`ShadGap` — whose `spacing` is in 4px theme steps, not pixels — over `SizedBox` spacers. Both Settings panes are converted; there is no tinted `DecoratedBox` left in the dialog. `ToolRow` and the install banner are `ShadCard`s on `scheme.muted`, the source tag is a `ShadBadge`, and the PATH toggle uses `ShadSwitch`'s own `label`/`sublabel` instead of a hand-built row.
+- **`ShadBadge.secondary` is invisible on a `muted` card** — slate defines `secondary` and `muted` as the same colour, in both brightnesses. Use `.outline` on a muted surface, and check any `secondary`-on-`muted` pairing before assuming it reads.
 - **Terminal tabs:** VS Code–style; selected tab overlaps bottom border via `Transform.translate`, not negative margin.
 - **Split resize:** panes meet with no gap. Draw a full-height 1px `ColoredBox` in a `Stack` on the split line; overlay a transparent drag handle (`kSplitHandleWidth`). Do not use a separate wide column or `DecoratedBox` border behind opaque pane content — it won't show.
 
@@ -374,6 +378,8 @@ install. Sparkle would also catch it, but later and less clearly.
   chrome — no title, no Done button; the dialog supplies both, including the
   Tools install button, which needs `toolchains` state the pane no longer has to
   expose.
+- **Settings starts the agent on a scratch directory when no project is open** (`AgentController.startForSettings`, called from `StudioShell._showSettings`). Keys and the default model are configured here and both are read from the running agent, so the pane would otherwise be unusable until a project existed. `opencode serve` needs a working directory, so it gets `<appSupportRoot>/agent-scratch` — a real path it can drop its own state into. Closing Settings calls `stopIfStartedForSettings`, which **only** stops a serve it started: with a project open the whole thing is a no-op, and a live session is never torn down. Opening a project clears the flag, so a project that appears while Settings is open supersedes the scratch serve rather than being killed with it.
+- **The Providers pane waits for the agent rather than rendering an empty list.** Until `ProvidersView.agentReady`, "which providers hold a key" and "which models exist" are *unknown*, not empty — showing the list anyway marks every provider disconnected and invites the user to re-enter keys they already saved. `_WaitingForAgent` stands in, and the pane reloads models on the edge into ready. Its spinner animates forever, so any test touching this pane must use fixed pumps, never `pumpAndSettle`.
 - **`ManageToolsPane` defers its deep probe to a post-frame callback.**
   `ToolchainController.refresh()` calls `notifyListeners()` *synchronously*
   before its first await, so starting it in `initState` marks any ancestor
@@ -396,11 +402,10 @@ install. Sparkle would also catch it, but later and less clearly.
   toolchain is gone and preferences are cleared, so any control would either
   fail or silently recreate what was just removed.
 
-## Previews & golden tests
+## Previews
 
 ```bash
 make previews    # browser previews of every dialog, hot-reloading
-make goldens     # re-record the screenshots, then review the diff
 ```
 
 - **The UI talks to interfaces, not controllers.** `ToolsView`
@@ -421,18 +426,10 @@ make goldens     # re-record the screenshots, then review the diff
   `UninstallResult` live in their own files for the same reason. Before adding
   an import to a widget file, check it does not drag `dart:io` in — the whole
   preview surface is one careless import away from breaking.
-- `lib/previews/preview_data.dart` holds the fakes and fixtures, and **the
-  golden tests use the same ones**. One set of states, two consumers: if a
-  state is worth looking at by hand it is worth locking down.
-- Goldens load the real macOS system font (`/System/Library/Fonts/SFNS.ttf`)
-  via `test/golden/font_loader.dart`. Without it `flutter_test` renders every
-  glyph as an Ahem box — fine for catching layout drift, useless for reviewing
-  copy, which is most of what these are for.
-- They pump twice with fixed durations rather than `pumpAndSettle`: the tools
-  pane starts async work in a post-frame callback and the tab indicator
-  animates, so settling never completes.
-- `InstallProgress` fixtures pin `startedAt` *and* `now`, or the banner's
-  elapsed-time text would differ on every run.
+- `lib/previews/preview_data.dart` holds the fakes and fixtures for the
+  previews.
+- `InstallProgress` fixtures pin `startedAt` *and* `now`, so the banner's
+  elapsed-time text is stable across runs.
 
 `ui/new_project_dialog.dart` is the one dialog still using `dart:io` directly,
 so it has no preview yet.
@@ -457,11 +454,11 @@ so it has no preview yet.
 - Opening one auto-starts the server (`ServerpodProcessController._onSessionChanged`), which compiles the whole stack before anything reaches the preview. `ui/project_startup_dialog.dart` says so up front, because the first minute or two is otherwise indistinguishable from a hang.
 - It is triggered in `main.dart` from a `ProjectSession` listener that tracks the **project path**, not `hasProject` — switching straight from one project to another recompiles just as much, and the boolean never changes across that. The dialog is pushed from a post-frame callback: the session can notify mid-build, and pushing a route from inside a build is illegal.
 - "Don't show this again" is written to `project.startup_notice_dismissed` **only when the box is ticked**, and by the caller — the widget just pops the bool, which keeps it `dart:io`-free and previewable. This is a one-way door, so `test/project_startup_dialog_test.dart` covers both directions: OK alone must leave the pref unset.
-- The dialog is `barrierDismissible: false`. With OK as the only action, a stray click on the barrier would otherwise silently discard a ticked checkbox.
+- The dialog is `barrierDismissible: false`. With the confirm button as the only action, a stray click on the barrier would otherwise silently discard a ticked checkbox.
 - It styles nothing itself. Two shad details make that possible, and both generalise:
   - **`ShadDialog.alert` has no close X**; `ShadDialog` (primary) does. The only difference is that `primaryDialogTheme` sets `closeIconData` and `alertDialogTheme` does not, and there is no flag to turn it off — so pick the variant, don't fight it. Alert is also the right semantics for a notice you acknowledge rather than dismiss.
   - **Body copy belongs in `description`, not a `child` with `textTheme.small`.** `small` is shadcn's *label* role — `w500` at `height: 1.0` (`font-medium leading-none`) — so paragraphs set in it read bold and cramped. `description` resolves to `style.body` over `textTheme.muted`: `w400` at `height: 1.43`.
-- The checkbox sits in `actions` beside OK. The actions row defaults to `MainAxisSize.min` / `MainAxisAlignment.end`, so `spaceBetween` does nothing on its own — it needs `actionsMainAxisSize: MainAxisSize.max` too.
+- The checkbox sits in `actions` beside the confirm button. The actions row defaults to `MainAxisSize.min` / `MainAxisAlignment.end`, so `spaceBetween` does nothing on its own — it needs `actionsMainAxisSize: MainAxisSize.max` too.
 
 ## Conventions for agents
 

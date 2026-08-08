@@ -38,6 +38,16 @@ Widget settingsProvidersEmpty() => previewShell(
       ),
     );
 
+/// What Settings shows while `opencode serve` is still coming up — the state
+/// you hit by opening Settings during a cold project's first build.
+@Preview(name: 'Providers — waiting for agent', group: 'Settings')
+Widget settingsProvidersWaiting() => previewShell(
+      SettingsDialog(
+        agent: FakeProvidersView(agentReady: false),
+        toolchains: FakeToolsView(),
+      ),
+    );
+
 @Preview(name: 'Tools — all installed', group: 'Settings')
 Widget settingsToolsComplete() => previewShell(
       SettingsDialog(

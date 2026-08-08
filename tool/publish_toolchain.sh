@@ -224,6 +224,13 @@ print(f'  {len(by_id)} tool(s) published for {platform}')
 PYTHON
 
 echo
+echo "==> Uploading live manifest"
+gcloud_storage cp "$MANIFEST_FILE" "gs://$BUCKET/manifest.json" \
+  --cache-control="public, max-age=300" \
+  --content-type="application/json"
+echo "  uploaded manifest.json"
+
+echo
 echo "==> Smoke test: vendor signatures survived the tar round trip"
 if [[ -n "$FLUTTER_VERSION" ]] && wants flutter; then
   dart_bin="$TOOLCHAIN_DIR/flutter/$FLUTTER_VERSION/bin/cache/dart-sdk/bin/dart"

@@ -12,6 +12,81 @@ const _kMacUiFont = '.AppleSystemUIFont';
 /// macOS monospace font for terminal output.
 const kMacMonoFont = 'Menlo';
 
+/// How far our font's weight axis travels compared with the one shad's
+/// metrics were drawn for.
+///
+/// Measured, not guessed: laying out the same string at 14px across the axis,
+/// Inter (shad's default) widens ~1.65px per 100 weight units while
+/// `.AppleSystemUIFont` widens ~3.17px. Both axes resolve correctly and
+/// neither synthesises bold — SF's is simply about twice as hot, so an
+/// uncorrected `w500` lands where Inter's `w600` would and the whole UI reads
+/// a step heavy.
+const _kWeightAxisRatio = 1.65 / 3.17;
+
+/// A `wght` variation carrying the appearance [weight] has in shad's font.
+///
+/// Expressed as a variation rather than a [FontWeight] for two reasons: the
+/// corrected values are not multiples of 100, which [FontWeight] cannot
+/// represent, and a variation overrides an inherited `fontWeight` at render
+/// time — the only way to reach a weight a component hardcodes.
+///
+/// Where the axis is unavailable the inherited `fontWeight` simply stands, so
+/// the failure mode is shad's uncorrected look rather than a broken one.
+TextStyle correctedWeight(FontWeight weight) => TextStyle(
+  fontVariations: [
+    FontVariation('wght', 400 + (weight.value - 400) * _kWeightAxisRatio),
+  ],
+);
+
+/// shad's `w500` and `w600`, corrected.
+final kWeightMedium = correctedWeight(FontWeight.w500);
+final kWeightSemibold = correctedWeight(FontWeight.w600);
+
+/// Emphasis for text rendered in the UI font.
+///
+/// Use these instead of `copyWith(fontWeight: …)`. Every role in
+/// [_kMacTextTheme] carries a `wght` variation and a variation beats a
+/// `fontWeight`, so a raw weight is silently ignored — it would leave the text
+/// at its role's weight rather than the emphasis it asked for.
+extension UiTextWeight on TextStyle {
+  /// shad's `w500`.
+  TextStyle get medium => merge(kWeightMedium);
+
+  /// shad's `w600`.
+  TextStyle get semibold => merge(kWeightSemibold);
+}
+
+/// shad's type scale with every role's weight moved onto our font's axis.
+///
+/// Every role carries an explicit variation, including the `w400` ones, so no
+/// text in the app can render on the uncorrected scale — a component that
+/// copies a role and bumps `fontWeight` (`ShadCheckbox` does exactly this to
+/// its label) lands on the corrected weight instead of a too-heavy one. The
+/// cost is that such a component loses its *emphasis*, so where that emphasis
+/// matters the call site restores it with [kWeightMedium].
+ShadTextTheme _buildTextTheme() {
+  final base = ShadTextTheme(family: _kMacUiFont);
+  TextStyle fix(TextStyle s) =>
+      s.merge(correctedWeight(s.fontWeight ?? FontWeight.w400));
+  return base.copyWith(
+    h1Large: fix(base.h1Large),
+    h1: fix(base.h1),
+    h2: fix(base.h2),
+    h3: fix(base.h3),
+    h4: fix(base.h4),
+    p: fix(base.p),
+    blockquote: fix(base.blockquote),
+    table: fix(base.table),
+    list: fix(base.list),
+    lead: fix(base.lead),
+    large: fix(base.large),
+    small: fix(base.small),
+    muted: fix(base.muted),
+  );
+}
+
+final _kMacTextTheme = _buildTextTheme();
+
 /// shadcn's "Medium" radius preset. Its `--radius` is 10; components use
 /// `--radius-md`, which is `--radius * 0.8`. Everything else on the scale
 /// derives from this one value.
@@ -66,6 +141,21 @@ extension AppColorScheme on ShadColorScheme {
   Color get warning => custom['warning']!;
 }
 
+/// A soft green badge for installed or host-reused tools — same tint pattern
+/// as shad's destructive badge (`bg-destructive/10 text-destructive`).
+ShadBadge appSuccessBadge(ShadThemeData theme, {required Widget child}) {
+  final success = theme.colorScheme.success;
+  final wash = success.withValues(
+    alpha: theme.brightness == Brightness.dark ? 0.2 : 0.1,
+  );
+  return ShadBadge(
+    foregroundColor: success,
+    backgroundColor: wash,
+    hoverBackgroundColor: wash,
+    child: child,
+  );
+}
+
 ShadColorScheme _scheme(Brightness brightness) {
   final base = brightness == Brightness.light
       ? ShadSlateColorScheme.light(custom: _kLightStatus)
@@ -76,32 +166,32 @@ ShadColorScheme _scheme(Brightness brightness) {
 final lightColorScheme = _scheme(Brightness.light);
 final darkColorScheme = _scheme(Brightness.dark);
 
-/// Shad's destructive variant is a soft tint (`bg-destructive/10`), which
-/// reads as disabled when it is the affirmative button of a confirm dialog —
-/// see the Uninstall dialog. Restore a solid fill so the destructive action
-/// carries the weight of the choice it commits.
-ShadButtonTheme _destructiveButtonTheme(ShadColorScheme scheme) =>
-    ShadButtonTheme(
-      backgroundColor: scheme.destructive,
-      hoverBackgroundColor: scheme.destructive.withValues(alpha: 0.9),
-      foregroundColor: scheme.destructiveForeground,
-      hoverForegroundColor: scheme.destructiveForeground,
-    );
-
 ShadThemeData _buildTheme(Brightness brightness, ShadColorScheme scheme) =>
     ShadThemeData(
       brightness: brightness,
       colorScheme: scheme,
       style: ShadStyleTokens.nova,
       radius: kThemeRadius,
-      textTheme: ShadTextTheme(family: _kMacUiFont),
+      textTheme: _kMacTextTheme,
       // Styling is shad's; only the hover delay is ours — the default fires
       // fast enough to flash tooltips while the pointer crosses a toolbar.
       tooltipTheme: const ShadTooltipTheme(
         waitDuration: Duration(milliseconds: 700),
       ),
-      destructiveButtonTheme: _destructiveButtonTheme(scheme),
+      cardTheme: _kCardTheme,
     );
+
+/// Cards, tightened for use as rows rather than as standalone panels.
+///
+/// Nova gives a card `xl` corners (14) and 16 of padding, which suits a page
+/// with a card or two on it. Ours stack as list rows next to controls, so the
+/// radius drops to `lg` (10) — the step the button and select triggers use, so
+/// a card no longer looks rounder than the dropdown beside it — and the padding
+/// halves.
+final _kCardTheme = ShadCardTheme(
+  radius: ShadRadii(kThemeRadius).lg,
+  padding: const EdgeInsets.all(8),
+);
 
 ShadThemeData buildLightTheme() =>
     _buildTheme(Brightness.light, lightColorScheme);

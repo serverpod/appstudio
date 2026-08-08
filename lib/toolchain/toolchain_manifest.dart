@@ -1,4 +1,7 @@
 import 'dart:convert';
+import 'dart:io';
+
+import 'package:http/http.dart' as http;
 
 import 'platform_key.dart';
 import 'tool_status.dart';
@@ -9,6 +12,9 @@ import 'tool_version.dart';
 const kManifestSchemaVersion = 1;
 
 const kBakedManifestAsset = 'assets/toolchain_manifest.json';
+
+/// Mutable object at the bucket root — the live pin App Studio fetches on setup.
+const kPublishedManifestObject = 'manifest.json';
 
 /// Key into a tool's `platforms` map.
 
@@ -30,6 +36,15 @@ class ToolArtifact {
   final int installedBytes;
   final String format;
   final int stripComponents;
+
+  ToolArtifact copyWith({int? downloadBytes}) => ToolArtifact(
+        path: path,
+        sha256: sha256,
+        downloadBytes: downloadBytes ?? this.downloadBytes,
+        installedBytes: installedBytes,
+        format: format,
+        stripComponents: stripComponents,
+      );
 
   static ToolArtifact? tryParse(Map<String, dynamic> json) {
     final path = json['path'] as String?;
@@ -85,6 +100,20 @@ class ToolSpec {
   final Map<String, dynamic> metadata;
 
   ToolArtifact? get artifactForCurrentPlatform => platforms[currentPlatformKey()];
+
+  ToolSpec copyWith({Map<String, ToolArtifact>? platforms}) => ToolSpec(
+        id: id,
+        displayName: displayName,
+        description: description,
+        version: version,
+        build: build,
+        hostAccepts: hostAccepts,
+        required: required,
+        installDir: installDir,
+        platforms: platforms ?? this.platforms,
+        entrypoints: entrypoints,
+        metadata: metadata,
+      );
 
   static ToolSpec? tryParse(Map<String, dynamic> json) {
     final rawId = json['id'] as String?;
@@ -145,7 +174,105 @@ class ToolManifest {
 
   ToolSpec? operator [](ToolId id) => tools[id];
 
+  Uri get publishedManifestUrl => baseUrl.resolve(kPublishedManifestObject);
+
+  /// Whether [other] is an older publish than this one.
+  ///
+  /// [manifestId] is a UTC timestamp (`YYYY.MM.DD.HHMM`) assigned at publish
+  /// time, so lexicographic order matches chronological order.
+  bool isNewerThan(ToolManifest other) =>
+      manifestId.compareTo(other.manifestId) > 0;
+
+  /// Reads a cached copy written by [fetchPublished].
+  static Future<ToolManifest?> loadCached(String path) async {
+    try {
+      final file = File(path);
+      if (!await file.exists()) return null;
+      return tryParse(await file.readAsString());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Downloads the live manifest from [baseUrl].
+  ///
+  /// Returns null on any network, HTTP or parse failure. When [cacheFile] is
+  /// set and the fetch succeeds, the raw JSON is written there for offline
+  /// reuse on the next launch.
+  static Future<ToolManifest?> fetchPublished(
+    Uri baseUrl, {
+    http.Client? client,
+    String? cacheFile,
+  }) async {
+    final ownClient = client == null;
+    final c = client ?? http.Client();
+    try {
+      final uri = baseUrl.resolve(kPublishedManifestObject).replace(
+        queryParameters: {
+          '_': DateTime.now().millisecondsSinceEpoch.toString(),
+        },
+      );
+      final response = await c.get(uri).timeout(const Duration(seconds: 20));
+      if (response.statusCode != 200) return null;
+      final manifest = tryParse(response.body);
+      if (manifest == null) return null;
+      if (cacheFile != null) {
+        final file = File(cacheFile);
+        await file.parent.create(recursive: true);
+        await file.writeAsString(response.body);
+      }
+      return manifest;
+    } catch (_) {
+      return null;
+    } finally {
+      if (ownClient) c.close();
+    }
+  }
+
   Uri urlFor(ToolArtifact artifact) => baseUrl.resolve(artifact.path);
+
+  /// Replaces [ToolArtifact.downloadBytes] with the object size reported by
+  /// the bucket (`Content-Length` on a HEAD request).
+  ///
+  /// [installedBytes] stays manifest-only — that is the on-disk footprint
+  /// after extraction, which GCS does not know. Failures are silent: the
+  /// manifest value is kept when a HEAD misses or errors.
+  Future<ToolManifest> withLiveDownloadBytes({http.Client? client}) async {
+    final ownClient = client == null;
+    final c = client ?? http.Client();
+    try {
+      var changed = false;
+      final platform = currentPlatformKey();
+      final tools = <ToolId, ToolSpec>{};
+
+      for (final entry in this.tools.entries) {
+        final spec = entry.value;
+        final artifact = spec.platforms[platform];
+        if (artifact == null) {
+          tools[entry.key] = spec;
+          continue;
+        }
+        final live = await _headDownloadBytes(c, urlFor(artifact));
+        if (live != null && live != artifact.downloadBytes) {
+          changed = true;
+          final platforms = Map<String, ToolArtifact>.from(spec.platforms);
+          platforms[platform] = artifact.copyWith(downloadBytes: live);
+          tools[entry.key] = spec.copyWith(platforms: Map.unmodifiable(platforms));
+        } else {
+          tools[entry.key] = spec;
+        }
+      }
+
+      if (!changed) return this;
+      return ToolManifest(
+        manifestId: manifestId,
+        baseUrl: baseUrl,
+        tools: Map.unmodifiable(tools),
+      );
+    } finally {
+      if (ownClient) c.close();
+    }
+  }
 
   static ToolManifest? tryParse(String source) {
     final Object? decoded;
@@ -214,3 +341,17 @@ Map<String, dynamic> _asMap(Object? value) => value is Map
 Map<String, String> _asStringMap(Object? value) => value is Map
     ? {for (final e in value.entries) e.key.toString(): e.value.toString()}
     : const <String, String>{};
+
+Future<int?> _headDownloadBytes(http.Client client, Uri url) async {
+  try {
+    final response = await client.head(url).timeout(const Duration(seconds: 10));
+    if (response.statusCode != 200) return null;
+    final length = response.contentLength;
+    if (length != null && length > 0) return length;
+    final header = response.headers['content-length'];
+    if (header == null) return null;
+    return int.tryParse(header);
+  } catch (_) {
+    return null;
+  }
+}

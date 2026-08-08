@@ -25,10 +25,12 @@ enum ToolId {
 /// Where a candidate came from. Declaration order is resolution precedence:
 /// a developer's repo tree wins, a host install is the last resort.
 enum ToolSource {
-  devRepo('Dev repo'),
-  bundled('Bundled'),
+  /// App Studio downloaded it into Application Support and updates it.
   managed('Managed'),
-  host('Host');
+
+  /// Already on this Mac — Homebrew, an SDK manager, a manual install. Ours to
+  /// use, never ours to update.
+  host('On your Mac');
 
   const ToolSource(this.label);
 

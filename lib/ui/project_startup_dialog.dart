@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../theme/app_theme.dart';
+
 /// Set once the user ticks "Don't show this again".
 const _kDismissedKey = 'project.startup_notice_dismissed';
 
@@ -20,8 +22,8 @@ Future<void> maybeShowProjectStartupNotice(BuildContext context) async {
 
   final dismissForever = await showShadDialog<bool>(
     context: context,
-    // OK is the only way out, so a stray click on the barrier cannot throw
-    // away a ticked "don't show this again".
+    // The button is the only way out, so a stray click on the barrier cannot
+    // throw away a ticked "don't show this again".
     barrierDismissible: false,
     builder: (context) => const ProjectStartupDialog(),
   );
@@ -67,11 +69,11 @@ class _ProjectStartupDialogState extends State<ProjectStartupDialog> {
         ShadCheckbox(
           value: _dontShowAgain,
           onChanged: (v) => setState(() => _dontShowAgain = v),
-          label: const Text("Don't show this again"),
+          label: Text("Don't show this again", style: kWeightMedium),
         ),
         ShadButton(
           onPressed: () => Navigator.of(context).pop(_dontShowAgain),
-          child: const Text('OK'),
+          child: const Text("Let's Go"),
         ),
       ],
     );

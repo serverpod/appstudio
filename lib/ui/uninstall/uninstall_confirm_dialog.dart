@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 
+import '../../theme/app_theme.dart';
 import '../../util/byte_format.dart';
 
 /// Matches the sibling dialogs. Shad caps a dialog at 512 anyway, so this only
@@ -51,7 +52,7 @@ class UninstallConfirmDialog extends StatefulWidget {
 
   /// Total size on disk, or null if it could not be measured. Injected rather
   /// than shelled out to here: `du` is `dart:io`, and this dialog has to stay
-  /// renderable in previews and golden tests.
+  /// renderable in previews.
   final Future<int?> Function() measureBytes;
 
   @override
@@ -96,9 +97,9 @@ class _UninstallConfirmDialogState extends State<UninstallConfirmDialog> {
           child: const Text('Cancel'),
         ),
         ShadButton.destructive(
-          onPressed: () => Navigator.of(context).pop(
-            UninstallChoice(clearPubCache: _clearPubCache),
-          ),
+          onPressed: () => Navigator.of(
+            context,
+          ).pop(UninstallChoice(clearPubCache: _clearPubCache)),
           child: const Text('Uninstall'),
         ),
       ],
@@ -130,7 +131,10 @@ class _UninstallConfirmDialogState extends State<UninstallConfirmDialog> {
             ShadCheckbox(
               value: _clearPubCache,
               onChanged: (v) => setState(() => _clearPubCache = v),
-              label: const Text('Also clear the Dart package cache'),
+              label: Text(
+                'Also clear the Dart package cache',
+                style: kWeightMedium,
+              ),
               sublabel: const Text(
                 'Runs "dart pub cache clean". This cache is shared with every '
                 'Dart project on your Mac, not just App Studio.',

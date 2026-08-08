@@ -81,7 +81,11 @@ void main() {
     expect(find.byType(ManageToolsPane), findsNothing);
 
     await tester.tap(find.text('Tools').last);
-    await tester.pumpAndSettle();
+    // Fixed pumps, not pumpAndSettle: with no agent running the Providers pane
+    // shows its waiting spinner, which animates forever, and the tab indicator
+    // animates too — settling can never complete.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.byType(ManageToolsPane), findsOneWidget);
   });

@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 ///
 /// Kept apart from [Uninstaller] so the screen that renders it does not import
 /// `dart:io`. `UninstalledScreen` is pure presentation and belongs in widget
-/// previews and golden tests; sitting next to `Directory.delete` would have
+/// previews; sitting next to `Directory.delete` would have
 /// made that impossible.
 @immutable
 class UninstallResult {

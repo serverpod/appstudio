@@ -6,17 +6,20 @@ import 'package:appstudio/toolchain/tool_version.dart';
 import 'package:appstudio/toolchain/platform_key.dart';
 import 'package:appstudio/toolchain/toolchain_manifest.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 /// A manifest with one fully-published tool, matching what
 /// tool/publish_toolchain.sh emits.
 String published({
   String schemaVersion = '1',
   String platformKey = 'macos-arm64',
+  String manifestId = '2026.08.0',
 }) =>
     '''
 {
   "schemaVersion": $schemaVersion,
-  "manifestId": "2026.08.0",
+  "manifestId": "$manifestId",
   "baseUrl": "https://storage.googleapis.com/serverpod-appstudio-toolchain/",
   "tools": [
     {
@@ -46,6 +49,70 @@ String published({
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  group('published manifest', () {
+    test('isNewerThan compares manifestId timestamps', () {
+      final older = ToolManifest.tryParse(published(manifestId: '2026.08.01.1200'))!;
+      final newer = ToolManifest.tryParse(published(manifestId: '2026.08.02.0900'))!;
+      expect(newer.isNewerThan(older), isTrue);
+      expect(older.isNewerThan(newer), isFalse);
+    });
+
+    test('fetchPublished returns null on HTTP errors', () async {
+      final client = MockClient((_) async => http.Response('', 404));
+      final manifest = await ToolManifest.fetchPublished(
+        Uri.parse('https://example.invalid/'),
+        client: client,
+      );
+      expect(manifest, isNull);
+    });
+
+    test('fetchPublished parses a live manifest and caches it', () async {
+      final body = published(manifestId: '2026.09.01.1000');
+      final client = MockClient((_) async => http.Response(body, 200));
+      final dir = await Directory.systemTemp.createTemp('manifest-cache-');
+      addTearDown(() => dir.delete(recursive: true));
+      final cacheFile = '${dir.path}/manifest.json';
+
+      final manifest = await ToolManifest.fetchPublished(
+        Uri.parse('https://example.invalid/'),
+        client: client,
+        cacheFile: cacheFile,
+      );
+
+      expect(manifest?.manifestId, '2026.09.01.1000');
+      expect(await File(cacheFile).readAsString(), body);
+      expect(
+        (await ToolManifest.loadCached(cacheFile))?.manifestId,
+        '2026.09.01.1000',
+      );
+    });
+
+    test('withLiveDownloadBytes reads Content-Length from HEAD', () async {
+      final manifest = ToolManifest.tryParse(published())!;
+      final artifact = manifest[ToolId.flutter]!.artifactForCurrentPlatform!;
+      final url = manifest.urlFor(artifact);
+
+      final client = MockClient((request) async {
+        expect(request.method, 'HEAD');
+        expect(request.url, url);
+        return http.Response('', 200, headers: {'content-length': '999'});
+      });
+
+      final enriched = await manifest.withLiveDownloadBytes(client: client);
+      expect(
+        enriched[ToolId.flutter]!.artifactForCurrentPlatform!.downloadBytes,
+        999,
+      );
+    });
+
+    test('withLiveDownloadBytes keeps the manifest when HEAD fails', () async {
+      final manifest = ToolManifest.tryParse(published())!;
+      final client = MockClient((_) async => http.Response('', 404));
+      final enriched = await manifest.withLiveDownloadBytes(client: client);
+      expect(identical(enriched, manifest), isTrue);
+    });
+  });
 
   group('parse', () {
     test('reads a published tool', () {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:shad/shad.dart';
 
+import '../theme/app_theme.dart';
 import '../session/project_session.dart';
 import '../widgets/menu_item_tile.dart';
 
@@ -34,10 +35,7 @@ class StartPage extends StatelessWidget {
             fit: StackFit.expand,
             children: [
               const _StartPageBackground(),
-              _StartPageContent(
-                session: session,
-                onNewProject: onNewProject,
-              ),
+              _StartPageContent(session: session, onNewProject: onNewProject),
             ],
           ),
         ),
@@ -164,8 +162,10 @@ class _StartPageContent extends StatelessWidget {
                           Expanded(
                             child: _StartPageActionButton(
                               onPressed: session.openProjectPicker,
-                              leading:
-                                  const Icon(LucideIcons.arrowUpRight, size: 16),
+                              leading: const Icon(
+                                LucideIcons.arrowUpRight,
+                                size: 16,
+                              ),
                               label: 'Open Project',
                             ),
                           ),
@@ -180,10 +180,9 @@ class _StartPageContent extends StatelessWidget {
                           children: [
                             Text(
                               'Recent',
-                              style: textTheme.small.copyWith(
-                                fontWeight: FontWeight.w500,
-                                color: scheme.mutedForeground,
-                              ),
+                              style: textTheme.small
+                                  .copyWith(color: scheme.mutedForeground)
+                                  .medium,
                             ),
                             const Spacer(),
                             ShadButton.ghost(
@@ -194,11 +193,12 @@ class _StartPageContent extends StatelessWidget {
                               height: 20,
                               foregroundColor: scheme.mutedForeground,
                               hoverForegroundColor: scheme.mutedForeground,
-                              textStyle: textTheme.small.copyWith(
-                                fontWeight: FontWeight.w500,
-                                color: scheme.mutedForeground,
-                                fontSize: 11,
-                              ),
+                              textStyle: textTheme.small
+                                  .copyWith(
+                                    color: scheme.mutedForeground,
+                                    fontSize: 11,
+                                  )
+                                  .medium,
                               onPressed: session.clearRecents,
                               child: const Text('Clear recents'),
                             ),
@@ -209,8 +209,7 @@ class _StartPageContent extends StatelessWidget {
                       Column(
                         children: [
                           for (var i = 0; i < session.recents.length; i++) ...[
-                            if (i > 0)
-                              Divider(height: 1, color: scheme.border),
+                            if (i > 0) Divider(height: 1, color: scheme.border),
                             MenuItemTile(
                               icon: LucideIcons.folder,
                               label: p.basename(session.recents[i]),

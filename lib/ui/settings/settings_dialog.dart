@@ -67,11 +67,11 @@ class _SettingsDialogState extends State<SettingsDialog> {
   Widget _build(BuildContext context) {
     final installing = widget.toolchains.isInstalling;
 
-    return ShadDialog(
+    // The alert variant, whose theme carries no `closeIconData` — Done is the
+    // way out, and during an install it is the only one, since closing would
+    // leave a download running with nowhere to report.
+    return ShadDialog.alert(
       title: const Text('Settings'),
-      // Cancelling mid-install is offered inline in the tools pane; closing the
-      // dialog would leave a download running with nowhere to report.
-      closeIcon: installing ? const SizedBox.shrink() : null,
       actions: [
         if (_tab == SettingsTab.tools) ?_installAction(),
         ShadButton.outline(

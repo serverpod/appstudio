@@ -104,8 +104,10 @@ void main() {
     expect(find.byType(ToolRow), findsNWidgets(2));
     expect(find.text('Flutter SDK'), findsOneWidget);
     expect(find.text('Managed'), findsOneWidget);
-    expect(find.text('Host'), findsOneWidget);
-    expect(find.text('Ready'), findsNWidgets(2));
+    expect(find.text('On your Mac'), findsOneWidget);
+    // The version badge stands in for the old "Ready" label.
+    expect(find.text('3.44.2'), findsOneWidget);
+    expect(find.text('2.53.0'), findsOneWidget);
   });
 
   testWidgets('a too-old host tool reads as an update, not a failure',
@@ -123,11 +125,10 @@ void main() {
       }),
     );
 
+    // Named as an update rather than a failure, with the version that is
+    // actually installed shown beside it.
     expect(find.text('Update needed'), findsOneWidget);
-    expect(
-      find.textContaining('3.5.0-beta.7 (needs >=4.0.0-beta.1 <4.1.0)'),
-      findsOneWidget,
-    );
+    expect(find.text('3.5.0-beta.7'), findsOneWidget);
     // The requirement is stated even when nothing qualifies.
     expect(
       find.textContaining('Requires >=4.0.0-beta.1 <4.1.0'),
@@ -145,7 +146,7 @@ void main() {
       }),
     );
 
-    expect(find.text('Not installed'), findsOneWidget);
+    expect(find.text('Missing'), findsOneWidget);
     expect(
       find.textContaining('OpenCode is missing'),
       findsOneWidget,

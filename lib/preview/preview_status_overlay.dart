@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 
+import '../theme/app_theme.dart';
 import 'preview_phase.dart';
 
 /// Full-bleed status layer drawn over the phone (or desktop) preview surface.
@@ -69,8 +70,10 @@ class PreviewStatusOverlay extends StatelessWidget {
         color: const Color(0xFF12122A),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final artSize = (constraints.biggest.shortestSide * 0.5)
-                .clamp(96.0, 280.0);
+            final artSize = (constraints.biggest.shortestSide * 0.5).clamp(
+              96.0,
+              280.0,
+            );
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: 28),
               child: Column(
@@ -93,11 +96,12 @@ class PreviewStatusOverlay extends StatelessWidget {
                   Text(
                     _title,
                     textAlign: TextAlign.center,
-                    style: textTheme.small.copyWith(
-                      color: Colors.white.withValues(alpha: 0.94),
-                      fontWeight: FontWeight.w600,
-                      height: 1.35,
-                    ),
+                    style: textTheme.small
+                        .copyWith(
+                          color: Colors.white.withValues(alpha: 0.94),
+                          height: 1.35,
+                        )
+                        .semibold,
                   ),
                   if (_detail != null) ...[
                     const SizedBox(height: 8),
@@ -143,8 +147,6 @@ class PreviewStatusOverlay extends StatelessWidget {
         ),
       );
     }
-    return const Center(
-      child: ShadProgress(value: null, minHeight: 3),
-    );
+    return const Center(child: ShadProgress(value: null, minHeight: 3));
   }
 }

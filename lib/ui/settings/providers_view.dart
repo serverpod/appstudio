@@ -24,8 +24,16 @@ class ProviderModel {
 /// `AgentController` implements this directly. The pane imports only this file,
 /// so it never pulls in the OpenCode auth store — which reads and writes
 /// `~/.local/share/opencode/auth.json` and would make the pane impossible to
-/// preview or golden-test.
+/// preview.
 abstract interface class ProvidersView implements Listenable {
+  /// Whether the agent is up.
+  ///
+  /// Until it is, [connectedProviders] and [listModels] have nothing to report
+  /// — not "none", but "not known yet". The pane waits rather than rendering an
+  /// empty list, which would read as an answer and invite the user to re-enter
+  /// keys they have already saved.
+  bool get agentReady;
+
   /// Provider ids with a key already stored.
   Iterable<String> get connectedProviders;
 
