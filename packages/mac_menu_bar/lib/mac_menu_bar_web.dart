@@ -46,6 +46,9 @@ class MacMenuBarWebPlugin extends MacMenuBarPlatform {
   Future<bool> setMenuItemChecked(String itemId, bool checked) async => false;
 
   @override
+  Future<bool> reset() async => false;
+
+  @override
   Future<bool> removeMenuItem(String itemId) async => false;
 
   @override

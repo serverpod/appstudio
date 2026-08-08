@@ -304,6 +304,19 @@ class MethodChannelMacMenuBar extends MacMenuBarPlatform {
   }
 
   @override
+  Future<bool> reset() async {
+    if (!_isMacOS && kReleaseMode) return false;
+
+    try {
+      final result = await methodChannel.invokeMethod<bool>('reset');
+      return result ?? false;
+    } on PlatformException catch (e) {
+      debugPrint('Error resetting menus: ${e.message}');
+      return false;
+    }
+  }
+
+  @override
   Future<bool> removeMenuItem(String itemId) async {
     if (!_isMacOS && kReleaseMode) return false;
 

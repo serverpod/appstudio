@@ -17,7 +17,7 @@ lib/
   toolchain/             # Bundled vs host flutter/dart/serverpod/opencode
   widgets/               # Shared UI (IconSegmentedControl, MenuItemTile)
 packages/
-  mac_menu_bar/            # Local fork — SF Symbol icons + menu separators
+  mac_menu_bar/            # Local fork — SF Symbol icons, separators, reset()
   webview_cef/             # Local fork — CEF resize + skip Helper (Alerts)
 tool/
   bundle_toolchain.sh, distribute_macos.sh
@@ -442,6 +442,8 @@ so it has no preview yet.
 - Long-lived controllers created in `main.dart`: `ThemeController`, `ProjectSession`, `StudioTerminal`, `ServerpodProcessController`.
 - `ServerpodProcessController` owns process lifecycle and signals when preview is ready to load.
 - The menu bar lives above `ShadApp`, so menu-triggered dialogs use the `navigatorKey` context from `main.dart`.
+- **`MacAppMenu.install()` calls `MacMenuBar.reset()` first, and must keep doing so.** A hot restart replaces the Dart isolate but not the engine, its plugins or the native `NSMenu`, so without it every menu is added again on each restart — and `_recentItemIds` comes back empty, so Open Recent duplicates too. `reset()` removes exactly the items this plugin added: those are the ones carrying a String `representedObject`, which is also how the plugin finds items by id, so stock MainMenu.xib entries cannot be stripped.
+- **Never return `menuItem.isEnabled` from `validateMenuItem`** for an item the plugin overrode. Under automatic enabling AppKit *writes* `isEnabled` from the previous validation pass, so reading it back is a latch, not a query. MainMenu.xib ships `Preferences…` with no action at all, so AppKit disabled it before the override was installed and it could never re-enable — the Settings item was permanently greyed out. Overridden standard items are tracked in `overriddenItems` and validate to `true`; the Dart handler decides what happens when they fire.
 
 ## New projects
 

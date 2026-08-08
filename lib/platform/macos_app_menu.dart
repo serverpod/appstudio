@@ -90,6 +90,12 @@ class MacAppMenu {
   Future<void> install() async {
     if (!Platform.isMacOS || _installed) return;
 
+    // A hot restart replaces the Dart isolate but not the engine, its plugins
+    // or the native menu bar, so everything below would be added a second time
+    // — and `_recentItemIds` comes back empty, so Open Recent duplicates too.
+    // Clearing first makes install idempotent.
+    await MacMenuBar.reset();
+
     MacMenuBar.setMenuItemSelectedHandler(_onItemSelected);
 
     MacMenuBar.onCut(() async => false);

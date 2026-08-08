@@ -42,6 +42,10 @@ public class MacMenuBarPlugin: NSObject, FlutterPlugin {
 
     /// A dictionary that maps custom menu item IDs to their selectors.
     private var customMenuItems: [String: Selector] = [:]
+
+    /// Standard MainMenu.xib items whose target/action this plugin replaced.
+    /// Weak, because the menu owns them. See `validateMenuItem`.
+    private let overriddenItems = NSHashTable<NSMenuItem>.weakObjects()
     
     /// A dictionary that maps custom menu item IDs to their enabled state.
     private var menuItemEnabledStates: [String: Bool] = [:]
@@ -89,6 +93,11 @@ public class MacMenuBarPlugin: NSObject, FlutterPlugin {
             handleAddMenuSeparator(call: call, result: result)
         case "setMenuItemChecked":
             handleSetMenuItemChecked(call: call, result: result)
+        case "reset":
+            DispatchQueue.main.async { [weak self] in
+                self?.resetManagedItems()
+                result(true)
+            }
         default:
             result(FlutterMethodNotImplemented)
         }
@@ -421,6 +430,39 @@ public class MacMenuBarPlugin: NSObject, FlutterPlugin {
     }
     
     /// Removes a menu item by its ID.
+    /// Removes every item this plugin added, returning the menu bar to the
+    /// state MainMenu.xib describes.
+    ///
+    /// The engine and its plugins outlive a hot restart, but the Dart isolate
+    /// does not: the new run has no record of what the old one added and simply
+    /// adds it all again, so menus and items pile up on every restart. Calling
+    /// this first makes installation idempotent.
+    ///
+    /// Plugin-added items are exactly those carrying a String `representedObject`
+    /// — that is how `findMenuItem(byId:in:)` locates them — so this needs no
+    /// bookkeeping and cannot strip a stock item.
+    private func resetManagedItems() {
+        guard let mainMenu = NSApplication.shared.mainMenu else { return }
+        removeManagedItems(in: mainMenu)
+        customMenuItems.removeAll()
+        menuItemEnabledStates.removeAll()
+    }
+
+    private func removeManagedItems(in menu: NSMenu) {
+        // Reverse, so removing does not shift the indices still to be visited.
+        for item in menu.items.reversed() {
+            if item.representedObject is String {
+                menu.removeItem(item)
+                continue
+            }
+            // A stock menu can host plugin-added items — the application menu
+            // holds our update and uninstall entries.
+            if let submenu = item.submenu {
+                removeManagedItems(in: submenu)
+            }
+        }
+    }
+
     private func removeMenuItem(itemId: String) -> Bool {
         guard let mainMenu = NSApplication.shared.mainMenu else { return false }
         
@@ -483,6 +525,18 @@ public class MacMenuBarPlugin: NSObject, FlutterPlugin {
     }
 
     @objc func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        // Standard items we took over are ours to answer for, and the answer is
+        // always yes — the Dart handler decides what to do when it fires.
+        //
+        // Returning `menuItem.isEnabled` for these is a latch, not a read: under
+        // automatic enabling AppKit *writes* isEnabled from the previous
+        // validation pass, so an item that was disabled once stays disabled
+        // forever. MainMenu.xib ships "Preferences…" with no action at all, so
+        // AppKit disabled it before this plugin ever installed its override —
+        // which is why Settings could never be selected.
+        if overriddenItems.contains(menuItem) {
+            return true
+        }
         guard let itemId = menuItem.representedObject as? String else {
             return menuItem.isEnabled
         }
@@ -625,6 +679,8 @@ public class MacMenuBarPlugin: NSObject, FlutterPlugin {
         // Replace the target and action with our own
         item.target = self
         item.action = handler
+        item.isEnabled = true
+        overriddenItems.add(item)
     }
     
     /// Installs overrides for standard menu items.

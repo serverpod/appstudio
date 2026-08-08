@@ -144,6 +144,14 @@ abstract class MacMenuBarPlatform extends PlatformInterface {
   /// [itemId] is the identifier of the menu item to remove.
   ///
   /// Returns `true` if the menu item was successfully removed.
+  /// Removes every menu item and submenu this plugin added, restoring the
+  /// menu bar to the state MainMenu.xib describes.
+  ///
+  /// Call before installing menus so a hot restart — which replaces the Dart
+  /// isolate but not the engine, its plugins, or the native menu bar — does not
+  /// add a second copy of everything.
+  Future<bool> reset();
+
   Future<bool> removeMenuItem(String itemId);
 
   /// Updates a menu item's properties.

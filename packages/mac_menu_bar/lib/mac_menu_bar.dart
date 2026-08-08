@@ -245,6 +245,19 @@ class MacMenuBar {
     );
   }
 
+  /// Removes every menu item and submenu this plugin added, restoring the menu
+  /// bar to the state MainMenu.xib describes.
+  ///
+  /// Call this before installing menus. A hot restart replaces the Dart isolate
+  /// but not the engine, its plugins or the native menu bar, so without it the
+  /// new run adds a second copy of every menu it creates.
+  ///
+  /// ```dart
+  /// await MacMenuBar.reset();
+  /// await installMenus();
+  /// ```
+  static Future<bool> reset() => instance.reset();
+
   /// Removes a menu item by its ID.
   ///
   /// [itemId] is the identifier of the menu item to remove. This works for both
