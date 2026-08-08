@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shad/shad.dart';
 
-import '../theme/app_theme.dart';
+import 'segmented_control_theme.dart';
 
-/// Text segmented control styled like [IconSegmentedControl].
+/// Text segmented control styled like [IconSegmentedControl] — same tab tokens,
+/// same track/selection pair.
 class TextSegmentedControl<T> extends StatelessWidget {
   const TextSegmentedControl({
     super.key,
@@ -22,15 +23,8 @@ class TextSegmentedControl<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = ShadTheme.of(context).colorScheme;
-    final trackColor = onMutedSurface ? scheme.background : scheme.muted;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: trackColor,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      padding: const EdgeInsets.all(2),
+    return SegmentTrack(
+      onMutedSurface: onMutedSurface,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -79,44 +73,29 @@ class _TextSegmentButtonState extends State<_TextSegmentButton> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = ShadTheme.of(context).colorScheme;
-    final textTheme = ShadTheme.of(context).textTheme;
+    final theme = ShadTheme.of(context);
     final isActive = widget.selected;
-    final activeColor = segmentedControlSelectedColor(
-      scheme,
-      ShadTheme.of(context).brightness,
-      onMutedSurface: widget.onMutedSurface,
-    );
     final interactive = widget.onPressed != null;
 
     final child = Container(
-      decoration: BoxDecoration(
-        color: isActive
-            ? activeColor
-            : interactive && _hovered
-            ? segmentedControlHoverColor(
-                scheme,
-                onMutedSurface: widget.onMutedSurface,
-              )
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(4),
-        boxShadow: isActive
-            ? [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.08),
-                  blurRadius: 4,
-                  offset: const Offset(0, 1),
-                ),
-              ]
-            : null,
+      decoration: segmentDecoration(
+        theme,
+        selected: isActive,
+        onMutedSurface: widget.onMutedSurface,
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: EdgeInsets.symmetric(
+        horizontal: theme.style.tabPaddingX,
+        vertical: theme.style.tabPaddingY,
+      ),
       child: Text(
         widget.label,
-        style: textTheme.small.copyWith(
-          color: isActive ? scheme.foreground : scheme.mutedForeground,
-          fontWeight: isActive ? FontWeight.w500 : FontWeight.w400,
-        ),
+        style: theme.style.label.apply(theme.textTheme.small).copyWith(
+              color: segmentForegroundColor(
+                theme.colorScheme,
+                selected: isActive,
+                hovered: interactive && _hovered,
+              ),
+            ),
       ),
     );
 

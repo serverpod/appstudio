@@ -1,15 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shad/shad.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../theme/app_colors.dart';
+import '../../theme/app_theme.dart';
 import '../../toolchain/install_progress.dart';
 import '../../toolchain/tool_status.dart';
-import '../../toolchain/toolchain_controller.dart';
+import 'tools_view.dart';
 import '../../util/byte_format.dart';
-import '../../util/pretty_path.dart';
 import '../../widgets/determinate_progress.dart';
 import '../../widgets/error_banner.dart';
 
@@ -22,12 +21,12 @@ const _kDismissedKey = 'toolchain.dismissed_manifest';
 /// the user has not already declined *this* manifest.
 Future<void> maybeShowToolchainSetup(
   BuildContext context, {
-  required ToolchainController toolchains,
+  required ToolsView toolchains,
 }) async {
   if (toolchains.inventory.installable.isEmpty) return;
 
   final prefs = await SharedPreferences.getInstance();
-  if (prefs.getString(_kDismissedKey) == toolchains.manifest.manifestId) {
+  if (prefs.getString(_kDismissedKey) == toolchains.manifestId) {
     return;
   }
   if (!context.mounted) return;
@@ -43,7 +42,7 @@ Future<void> maybeShowToolchainSetup(
 class ToolchainSetupDialog extends StatefulWidget {
   const ToolchainSetupDialog({super.key, required this.toolchains});
 
-  final ToolchainController toolchains;
+  final ToolsView toolchains;
 
   @override
   State<ToolchainSetupDialog> createState() => _ToolchainSetupDialogState();
@@ -79,7 +78,7 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
       _kDismissedKey,
-      widget.toolchains.manifest.manifestId,
+      widget.toolchains.manifestId,
     );
     if (mounted) Navigator.of(context).pop();
   }
@@ -136,7 +135,6 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
     final toolchains = widget.toolchains;
     final inventory = toolchains.inventory;
     final scheme = theme.colorScheme;
-    final isDark = theme.brightness == Brightness.dark;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -176,9 +174,7 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
               'will be reused',
               style: theme.textTheme.muted.copyWith(
                 fontSize: 11,
-                color: isDark
-                    ? AppColors.successTextDark
-                    : AppColors.successText,
+                color: scheme.success,
               ),
             ),
           ),
@@ -204,7 +200,7 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
         ),
         const SizedBox(height: 10),
         Text(
-          prettyPath(toolchains.paths.toolchainRoot),
+          toolchains.toolchainRootLabel,
           style: theme.textTheme.muted.copyWith(fontSize: 11),
         ),
       ],

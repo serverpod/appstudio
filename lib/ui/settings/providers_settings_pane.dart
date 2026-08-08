@@ -1,11 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shad/shad.dart';
 
-import '../../agent/agent_controller.dart';
 import '../../agent/agent_transcript.dart';
-import '../../theme/app_theme.dart';
+import 'providers_view.dart';
 
 /// Provider keys and the default model, as a pane inside the Settings dialog.
 ///
@@ -14,7 +13,7 @@ import '../../theme/app_theme.dart';
 class ProvidersSettingsPane extends StatefulWidget {
   const ProvidersSettingsPane({super.key, required this.agent});
 
-  final AgentController agent;
+  final ProvidersView agent;
 
   @override
   State<ProvidersSettingsPane> createState() => _ProvidersSettingsPaneState();
@@ -23,7 +22,7 @@ class ProvidersSettingsPane extends StatefulWidget {
 class _ProvidersSettingsPaneState extends State<ProvidersSettingsPane> {
   final Map<String, TextEditingController> _keyControllers = {};
   final Map<String, bool> _saving = {};
-  List<({String providerId, String modelId, String label})> _models = [];
+  List<ProviderModel> _models = [];
   bool _loadingModels = false;
   String? _error;
 
@@ -56,11 +55,7 @@ class _ProvidersSettingsPaneState extends State<ProvidersSettingsPane> {
       _error = null;
     });
     try {
-      if (widget.agent.client.baseUrl != null) {
-        _models = await widget.agent.client.listModels();
-      } else {
-        _models = [];
-      }
+      _models = await widget.agent.listModels();
     } catch (e) {
       _error = e.toString();
       _models = [];
@@ -118,7 +113,7 @@ class _ProvidersSettingsPaneState extends State<ProvidersSettingsPane> {
           if (_error != null) ...[
             Text(
               _error!,
-              style: theme.textTheme.small.copyWith(
+              style: theme.textTheme.muted.copyWith(
                 color: scheme.destructive,
               ),
             ),
@@ -212,7 +207,7 @@ class _ProviderRow extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: scheme.muted.withValues(alpha: 0.45),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: theme.radii.md,
         border: Border.all(color: scheme.border.withValues(alpha: 0.5)),
       ),
       child: Padding(
@@ -234,7 +229,7 @@ class _ProviderRow extends StatelessWidget {
                   connected ? 'Connected' : 'Not connected',
                   style: theme.textTheme.muted.copyWith(
                     fontSize: 11,
-                    color: connected ? kBrandBlue : scheme.mutedForeground,
+                    color: connected ? scheme.primary : scheme.mutedForeground,
                     fontWeight: FontWeight.w500,
                   ),
                 ),

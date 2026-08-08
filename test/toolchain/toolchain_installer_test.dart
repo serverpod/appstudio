@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:appstudio/toolchain/install_progress.dart';
 import 'package:appstudio/toolchain/tool_status.dart';
 import 'package:appstudio/toolchain/toolchain_installer.dart';
+import 'package:appstudio/toolchain/platform_key.dart';
 import 'package:appstudio/toolchain/toolchain_manifest.dart';
 import 'package:appstudio/toolchain/toolchain_paths.dart';
 import 'package:crypto/crypto.dart';

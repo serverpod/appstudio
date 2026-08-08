@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shad/shad.dart';
 
-import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
 import '../../toolchain/install_progress.dart';
 import '../../toolchain/tool_status.dart';
@@ -32,29 +31,22 @@ class ToolRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final scheme = theme.colorScheme;
-    final isDark = theme.brightness == Brightness.dark;
     final resolved = status.resolved;
     final rejected = status.bestRejected;
 
     final (statusText, statusColor) = switch (resolved) {
-      final r? => (
-          'Ready',
-          isDark ? AppColors.successTextDark : AppColors.successText,
-        ),
+      final r? => ('Ready', scheme.success),
       null when rejected?.fitness == ToolFitness.wrongVersion => (
           'Update needed',
-          isDark ? AppColors.warningTextDark : AppColors.warningText,
+          scheme.warning,
         ),
-      _ => (
-          'Not installed',
-          isDark ? AppColors.errorTextDark : AppColors.errorText,
-        ),
+      _ => ('Not installed', scheme.destructive),
     };
 
     return DecoratedBox(
       decoration: BoxDecoration(
         color: scheme.muted.withValues(alpha: 0.45),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: theme.radii.md,
         border: Border.all(color: scheme.border.withValues(alpha: 0.5)),
       ),
       child: Padding(
@@ -158,7 +150,7 @@ class _SourceBadge extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: outlined ? Colors.transparent : scheme.muted,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: theme.radii.full,
         border: Border.all(color: scheme.border),
       ),
       child: Padding(

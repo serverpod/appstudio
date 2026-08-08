@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
-import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shad/shad.dart';
 import 'package:shimmer/shimmer.dart';
 
 import '../../agent/agent_controller.dart';
 import '../../agent/agent_transcript.dart';
 import '../../process/serverpod_process.dart';
-import '../../theme/app_colors.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/menu_item_tile.dart';
 
@@ -421,7 +420,7 @@ class _MessageBubble extends StatelessWidget {
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: isUser ? scheme.muted : scheme.background,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: theme.radii.lg,
               border: isUser
                   ? null
                   : Border.all(color: scheme.border.withValues(alpha: 0.6)),
@@ -449,9 +448,9 @@ class _MessageBubble extends StatelessWidget {
                                 ),
                                 codeblockDecoration: BoxDecoration(
                                   color: scheme.muted,
-                                  borderRadius: BorderRadius.circular(6),
+                                  borderRadius: theme.radii.sm,
                                 ),
-                                a: bodyStyle.copyWith(color: kBrandBlue),
+                                a: bodyStyle.copyWith(color: scheme.primary),
                                 listBullet: bodyStyle,
                                 h1: bodyStyle.copyWith(
                                   fontSize: 15,
@@ -502,7 +501,7 @@ class _MessageBubble extends StatelessWidget {
                           part.message,
                           style: theme.textTheme.small.copyWith(
                             fontSize: 13,
-                            color: AppColors.errorRed,
+                            color: scheme.destructive,
                           ),
                         ),
                       ),
@@ -541,9 +540,9 @@ class _ToolRowState extends State<_ToolRow> {
       AgentToolStatus.error => LucideIcons.circleX,
     };
     final statusColor = switch (part.status) {
-      AgentToolStatus.pending || AgentToolStatus.running => kBrandBlue,
-      AgentToolStatus.completed => AppColors.successDot,
-      AgentToolStatus.error => AppColors.errorRed,
+      AgentToolStatus.pending || AgentToolStatus.running => scheme.primary,
+      AgentToolStatus.completed => scheme.success,
+      AgentToolStatus.error => scheme.destructive,
     };
     final spinning = part.status == AgentToolStatus.pending ||
         part.status == AgentToolStatus.running;
@@ -551,7 +550,7 @@ class _ToolRowState extends State<_ToolRow> {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: scheme.muted,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: theme.radii.md,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -760,7 +759,7 @@ class _PermissionCard extends StatelessWidget {
     final busy = part.submitting;
 
     return _RequestCard(
-      accent: AppColors.warningAmber,
+      accent: scheme.warning,
       icon: LucideIcons.shieldAlert,
       title: part.title,
       children: [
@@ -824,7 +823,7 @@ class _PermissionCard extends StatelessWidget {
             part.error!,
             style: theme.textTheme.small.copyWith(
               fontSize: 12,
-              color: AppColors.errorRed,
+              color: scheme.destructive,
             ),
           ),
         ],
@@ -943,7 +942,7 @@ class _QuestionCardState extends State<_QuestionCard> {
     }
 
     return _RequestCard(
-      accent: kBrandBlue,
+      accent: scheme.primary,
       icon: LucideIcons.messageCircleQuestion,
       title: part.questions.length == 1 && part.questions.first.header.isNotEmpty
           ? part.questions.first.header
@@ -1007,16 +1006,16 @@ class _QuestionCardState extends State<_QuestionCard> {
                         vertical: 6,
                       ),
                       border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: theme.radii.sm,
                         borderSide: BorderSide(color: scheme.border),
                       ),
                       enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: theme.radii.sm,
                         borderSide: BorderSide(color: scheme.border),
                       ),
                       focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(6),
-                        borderSide: BorderSide(color: kBrandBlue),
+                        borderRadius: theme.radii.sm,
+                        borderSide: BorderSide(color: scheme.ring),
                       ),
                     ),
                   ),
@@ -1051,7 +1050,7 @@ class _QuestionCardState extends State<_QuestionCard> {
             part.error!,
             style: theme.textTheme.small.copyWith(
               fontSize: 12,
-              color: AppColors.errorRed,
+              color: scheme.destructive,
             ),
           ),
         ],
@@ -1105,9 +1104,9 @@ class _QuestionOptionTileState extends State<_QuestionOptionTile> {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           decoration: BoxDecoration(
             color: selected
-                ? kBrandBlue.withValues(alpha: 0.10)
+                ? scheme.selection
                 : (_hovered ? scheme.muted : Colors.transparent),
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: theme.radii.sm,
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1117,7 +1116,7 @@ class _QuestionOptionTileState extends State<_QuestionOptionTile> {
                 child: Icon(
                   icon,
                   size: 14,
-                  color: selected ? kBrandBlue : scheme.mutedForeground,
+                  color: selected ? scheme.primary : scheme.mutedForeground,
                 ),
               ),
               const SizedBox(width: 8),
@@ -1173,7 +1172,7 @@ class _RequestCard extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: scheme.muted,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: theme.radii.md,
         border: Border.all(color: accent.withValues(alpha: 0.5)),
       ),
       child: Padding(
@@ -1288,7 +1287,7 @@ class _ComposerState extends State<_Composer> {
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: scheme.card,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: theme.radii.md,
           border: Border.all(color: scheme.border),
         ),
         child: Padding(
@@ -1369,8 +1368,8 @@ class _ComposerState extends State<_Composer> {
                   ),
                   if (isBusy)
                     _CircleAction(
-                      background: AppColors.errorRed,
-                      foreground: Colors.white,
+                      background: scheme.destructive,
+                      foreground: scheme.destructiveForeground,
                       icon: LucideIcons.square,
                       iconSize: 11,
                       onPressed: widget.onStop,
@@ -1580,7 +1579,8 @@ class _ComposerChipButtonState extends State<_ComposerChipButton> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = ShadTheme.of(context).colorScheme;
+    final theme = ShadTheme.of(context);
+    final scheme = theme.colorScheme;
     final bg = widget.filled
         ? (_hovered ? scheme.muted.withValues(alpha: 0.9) : scheme.muted)
         : (_hovered ? scheme.muted.withValues(alpha: 0.45) : Colors.transparent);
@@ -1596,7 +1596,7 @@ class _ComposerChipButtonState extends State<_ComposerChipButton> {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
           decoration: BoxDecoration(
             color: bg,
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: theme.radii.full,
           ),
           child: widget.child,
         ),

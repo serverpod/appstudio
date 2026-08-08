@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shad/shad.dart';
 
-import '../../agent/agent_controller.dart';
-import '../../toolchain/toolchain_controller.dart';
 import '../../util/byte_format.dart';
+import '../toolchain/tools_view.dart';
+import 'providers_view.dart';
 import '../toolchain/manage_tools_pane.dart';
 import 'providers_settings_pane.dart';
 
@@ -15,8 +15,8 @@ const _kDialogMaxHeight = 520.0;
 
 Future<void> showSettingsDialog(
   BuildContext context, {
-  required AgentController agent,
-  required ToolchainController toolchains,
+  required ProvidersView agent,
+  required ToolsView toolchains,
   SettingsTab initialTab = SettingsTab.providers,
 }) {
   return showShadDialog<void>(
@@ -42,8 +42,8 @@ class SettingsDialog extends StatefulWidget {
     this.initialTab = SettingsTab.providers,
   });
 
-  final AgentController agent;
-  final ToolchainController toolchains;
+  final ProvidersView agent;
+  final ToolsView toolchains;
   final SettingsTab initialTab;
 
   @override
@@ -83,6 +83,9 @@ class _SettingsDialogState extends State<SettingsDialog> {
         width: _kDialogWidth,
         child: ShadTabs<SettingsTab>(
           value: _tab,
+          // Shad defaults to intrinsic-width tabs; ours are a two-up
+          // segmented control that has to fill the dialog width.
+          expandTabs: true,
           onChanged: (value) => setState(() => _tab = value),
           tabs: [
             ShadTab(

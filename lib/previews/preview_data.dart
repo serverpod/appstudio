@@ -1,0 +1,296 @@
+/// Stand-ins for the real controllers, used by widget previews and golden
+/// tests alike.
+///
+/// They implement [ToolsView] and [ProvidersView] — the same interfaces the UI
+/// talks to — so nothing here can drift from what the app renders without the
+/// analyzer noticing. Free of `dart:io`, which is what makes the previews (a
+/// web build) possible at all.
+///
+/// This lives under `lib/` rather than `test/` because the widget preview
+/// scaffold only compiles the package's own sources. It is unreferenced by
+/// `main.dart`, so it is tree-shaken out of release builds.
+library;
+
+
+import '../toolchain/install_progress.dart';
+import '../toolchain/shell_path_state.dart';
+import '../toolchain/tool_status.dart';
+import '../toolchain/tool_version.dart';
+import '../toolchain/toolchain_manifest.dart';
+import '../ui/settings/providers_view.dart';
+import '../ui/toolchain/tools_view.dart';
+
+
+import 'package:flutter/foundation.dart';
+
+// -----------------------------------------------------------------------------
+// Fixtures
+// -----------------------------------------------------------------------------
+
+ToolSpec _spec(
+  ToolId id,
+  String displayName,
+  String version, {
+  bool required = true,
+  int sizeMb = 120,
+}) =>
+    ToolSpec(
+      id: id,
+      displayName: displayName,
+      description: 'Used to build and run Serverpod projects.',
+      version: ToolVersion.tryParse(version)!,
+      build: 1,
+      hostAccepts: VersionRange.tryParse('*')!,
+      required: required,
+      installDir: '${id.manifestId}/$version',
+      platforms: {
+        'macos-arm64': ToolArtifact(
+          path: 'tools/${id.manifestId}/$version/b1/${id.manifestId}.tar.gz',
+          sha256: 'a' * 64,
+          downloadBytes: sizeMb * 1024 * 1024,
+          installedBytes: sizeMb * 3 * 1024 * 1024,
+          format: 'tar.gz',
+          stripComponents: 1,
+        ),
+      },
+      entrypoints: const {},
+      metadata: const {},
+    );
+
+/// A manifest with every tool the UI knows about.
+final previewManifest = ToolManifest(
+  manifestId: 'preview-1',
+  baseUrl: Uri.parse('https://example.invalid/'),
+  tools: {
+    ToolId.flutter: _spec(ToolId.flutter, 'Flutter SDK', '3.44.2', sizeMb: 662),
+    ToolId.serverpodCli:
+        _spec(ToolId.serverpodCli, 'Serverpod CLI', '4.0.0-beta.1', sizeMb: 11),
+    ToolId.opencode:
+        _spec(ToolId.opencode, 'OpenCode', '1.18.4', required: false, sizeMb: 43),
+    ToolId.git: _spec(ToolId.git, 'Git', '2.53.0-3', sizeMb: 57),
+    ToolId.llvmTools:
+        _spec(ToolId.llvmTools, 'Native tools', '20.1.8', sizeMb: 9),
+  },
+);
+
+ToolCandidate _found(ToolId id, ToolSource source, String version) =>
+    ToolCandidate(
+      id: id,
+      source: source,
+      fitness: ToolFitness.satisfied,
+      root: '/preview/$id',
+      executable: '/preview/$id/bin/${id.manifestId}',
+      detectedVersion: ToolVersion.tryParse(version),
+    );
+
+ToolCandidate _tooOld(ToolId id, String version) => ToolCandidate(
+      id: id,
+      source: ToolSource.host,
+      fitness: ToolFitness.wrongVersion,
+      root: '/usr/local',
+      executable: '/usr/local/bin/${id.manifestId}',
+      detectedVersion: ToolVersion.tryParse(version),
+      reason: 'Found $version, which is older than required',
+    );
+
+ToolchainInventory _inventory(Map<ToolId, List<ToolCandidate>> byTool) =>
+    ToolchainInventory(
+      manifest: previewManifest,
+      tools: {
+        for (final entry in byTool.entries)
+          entry.key: ToolStatus(
+            spec: previewManifest[entry.key]!,
+            candidates: entry.value,
+          ),
+      },
+    );
+
+/// Everything installed and healthy.
+final completeInventory = _inventory({
+  ToolId.flutter: [_found(ToolId.flutter, ToolSource.managed, '3.44.2')],
+  ToolId.serverpodCli: [
+    _found(ToolId.serverpodCli, ToolSource.managed, '4.0.0-beta.1'),
+  ],
+  ToolId.opencode: [_found(ToolId.opencode, ToolSource.host, '1.18.4')],
+  ToolId.git: [_found(ToolId.git, ToolSource.managed, '2.53.0-3')],
+  ToolId.llvmTools: [_found(ToolId.llvmTools, ToolSource.managed, '20.1.8')],
+});
+
+/// First run: nothing found anywhere.
+final emptyInventory = _inventory({
+  for (final id in ToolId.values) id: const <ToolCandidate>[],
+});
+
+/// The awkward middle — one missing, one host copy too old to use.
+final mixedInventory = _inventory({
+  ToolId.flutter: [_found(ToolId.flutter, ToolSource.managed, '3.44.2')],
+  ToolId.serverpodCli: [_tooOld(ToolId.serverpodCli, '4.0.0-beta.0')],
+  ToolId.opencode: const <ToolCandidate>[],
+  ToolId.git: [_found(ToolId.git, ToolSource.host, '2.53.0')],
+  ToolId.llvmTools: [_found(ToolId.llvmTools, ToolSource.managed, '20.1.8')],
+});
+
+/// A download in flight, so the progress banner can be seen without waiting
+/// for a real 662 MB transfer.
+/// Fixed [startedAt] and [now] so the banner's elapsed/remaining text is
+/// identical on every run — a golden test cannot tolerate a wall clock.
+final downloadingProgress = InstallProgress(
+  startedAt: DateTime.utc(2026, 1, 1, 12),
+  now: DateTime.utc(2026, 1, 1, 12, 0, 40),
+  tools: const [
+    ToolProgress(
+      id: ToolId.flutter,
+      phase: ToolPhase.downloading,
+      receivedBytes: 271 * 1024 * 1024,
+      totalBytes: 662 * 1024 * 1024,
+    ),
+    ToolProgress(id: ToolId.serverpodCli, phase: ToolPhase.queued),
+  ],
+);
+
+// -----------------------------------------------------------------------------
+// Fakes
+// -----------------------------------------------------------------------------
+
+/// A [ToolsView] whose state is whatever you pass in.
+///
+/// Actions are no-ops that still notify, so buttons visibly do *something* in
+/// a preview without touching the machine.
+class FakeToolsView extends ChangeNotifier implements ToolsView {
+  FakeToolsView({
+    ToolchainInventory? inventory,
+    this.progress,
+    this.installError,
+    this.isBusy = false,
+    this.isInstalling = false,
+    this.isRefreshing = false,
+    this.shellPathState = ShellPathState.absent,
+    this.toolchainRootLabel = '~/Library/Application Support/App Studio/toolchain',
+    this.manifestId = 'preview-1',
+    this.shellName = 'zsh',
+    this.shellRcLabel = '~/.zshrc',
+    this.shellExportLine =
+        'export PATH="\$HOME/Library/Application Support/App Studio/bin:\$PATH"',
+  }) : inventory = inventory ?? completeInventory;
+
+  @override
+  ToolchainInventory inventory;
+  @override
+  InstallProgress? progress;
+  @override
+  String? installError;
+  @override
+  bool isBusy;
+  @override
+  bool isInstalling;
+  @override
+  bool isRefreshing;
+  @override
+  ShellPathState shellPathState;
+  @override
+  String toolchainRootLabel;
+  @override
+  String manifestId;
+  @override
+  String shellName;
+  @override
+  String shellRcLabel;
+  @override
+  String shellExportLine;
+
+  @override
+  String requirementLabel(ToolSpec spec) => '${spec.version} or newer';
+
+  @override
+  String? upgradeCommand(ToolId id) => switch (id) {
+        ToolId.flutter => 'flutter upgrade',
+        ToolId.serverpodCli => 'dart install serverpod_cli@4.0.0-beta.1',
+        ToolId.opencode => 'brew upgrade opencode',
+        _ => null,
+      };
+
+  @override
+  Future<void> refreshDeep() async => notifyListeners();
+  @override
+  Future<void> refreshShellPathState() async {}
+  @override
+  Future<void> install(List<ToolId> ids) async => notifyListeners();
+  @override
+  Future<void> installMissing() async => notifyListeners();
+  @override
+  Future<void> uninstall(ToolId id) async => notifyListeners();
+  @override
+  void cancelInstall() => notifyListeners();
+  @override
+  Future<String?> setShellPathEnabled(bool enabled, {bool force = false}) async {
+    shellPathState = enabled ? ShellPathState.present : ShellPathState.absent;
+    notifyListeners();
+    return null;
+  }
+
+  @override
+  Future<void> revealToolchainFolder() async {}
+}
+
+/// A [ProvidersView] with a fixed set of keys and models.
+class FakeProvidersView extends ChangeNotifier implements ProvidersView {
+  FakeProvidersView({
+    Set<String>? connected,
+    this.defaultModel,
+    this.models = const [],
+  }) : _connected = connected ?? <String>{};
+
+  final Set<String> _connected;
+
+  @override
+  Iterable<String> get connectedProviders => _connected;
+
+  @override
+  String? defaultModel;
+
+  List<ProviderModel> models;
+
+  @override
+  Future<List<ProviderModel>> listModels() async => models;
+
+  @override
+  Future<void> saveApiKey(String providerId, String key) async {
+    _connected.add(providerId);
+    notifyListeners();
+  }
+
+  @override
+  Future<void> removeApiKey(String providerId) async {
+    _connected.remove(providerId);
+    notifyListeners();
+  }
+
+  @override
+  void setDefaultModel(String value) {
+    defaultModel = value;
+    notifyListeners();
+  }
+}
+
+/// A couple of providers connected, with models to choose between.
+FakeProvidersView connectedProvidersFake() => FakeProvidersView(
+      connected: {'anthropic', 'openai'},
+      defaultModel: 'anthropic/claude-opus-5',
+      models: const [
+        ProviderModel(
+          providerId: 'anthropic',
+          modelId: 'claude-opus-5',
+          label: 'Claude Opus 5',
+        ),
+        ProviderModel(
+          providerId: 'anthropic',
+          modelId: 'claude-sonnet-5',
+          label: 'Claude Sonnet 5',
+        ),
+        ProviderModel(
+          providerId: 'openai',
+          modelId: 'gpt-5',
+          label: 'GPT-5',
+        ),
+      ],
+    );

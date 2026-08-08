@@ -10,6 +10,10 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
+export 'shell_path_state.dart';
+
+import 'shell_path_state.dart';
+
 const kShellBlockStart = '# >>> App Studio >>>';
 const kShellBlockEnd = '# <<< App Studio <<<';
 
@@ -163,7 +167,6 @@ class ShellTarget {
   }
 }
 
-enum ShellPathState { absent, present, edited, unsupported }
 
 /// Reads and writes the managed block on disk.
 class ShellPathIntegration {

@@ -14,13 +14,15 @@ import 'toolchain_installer.dart';
 import 'toolchain_manifest.dart';
 import 'toolchain_paths.dart';
 import 'toolchain_requirements.dart';
+import '../util/pretty_path.dart';
+import '../ui/toolchain/tools_view.dart';
 
 /// Owns the resolved [Toolchain] and re-resolves it on demand.
 ///
 /// Consumers hold the controller, not a `Toolchain`, and read [current] at call
 /// time. Capturing the value would strand them on a snapshot taken before the
 /// user installed anything.
-class ToolchainController extends ChangeNotifier {
+class ToolchainController extends ChangeNotifier implements ToolsView {
   ToolchainController({
     required Toolchain initial,
     required this.manifest,
@@ -94,16 +96,22 @@ class ToolchainController extends ChangeNotifier {
   String? _installError;
 
   Toolchain get current => _current;
+  @override
   ToolchainInventory get inventory => _current.inventory;
   ToolchainRequirements get requirements => _requirements;
+  @override
   bool get isRefreshing => _refreshing;
 
   /// Non-null while an install is running, and until the next one starts.
+  @override
   InstallProgress? get progress => _progress;
+  @override
   bool get isInstalling => _progress != null && !_progress!.isDone;
+  @override
   String? get installError => _installError;
 
   /// Blocks a second install and the "remove" buttons while work is in flight.
+  @override
   bool get isBusy => isInstalling || _refreshing;
 
   ToolchainInstaller get _requireInstaller =>
@@ -114,9 +122,11 @@ class ToolchainController extends ChangeNotifier {
   Future<void> collectGarbage() => _requireInstaller.collectGarbage();
 
   /// Downloads and installs everything required that we can supply.
+  @override
   Future<void> installMissing() =>
       install([for (final t in inventory.installable) t.id]);
 
+  @override
   Future<void> install(List<ToolId> ids) async {
     if (isInstalling) return;
     final specs = [
@@ -159,11 +169,13 @@ class ToolchainController extends ChangeNotifier {
     await refresh(deep: true);
   }
 
+  @override
   void cancelInstall() {
     _cancel?.cancel();
     notifyListeners();
   }
 
+  @override
   Future<void> uninstall(ToolId id) async {
     final spec = manifest[id];
     if (spec == null || isBusy) return;
@@ -178,9 +190,11 @@ class ToolchainController extends ChangeNotifier {
         target: ShellTarget.resolve(),
       );
 
+  @override
   ShellPathState get shellPathState => _shellPathState;
   ShellPathState _shellPathState = ShellPathState.absent;
 
+  @override
   Future<void> refreshShellPathState() async {
     _shellPathState = await shellPath.state();
     notifyListeners();
@@ -191,6 +205,7 @@ class ToolchainController extends ChangeNotifier {
   /// App Studio does not need this — it sets PATH for everything it spawns.
   /// It exists so an external editor or AI agent can find the tools, which is
   /// why it is opt-in and never implied by installing.
+  @override
   Future<String?> setShellPathEnabled(bool enabled, {bool force = false}) async {
     try {
       if (enabled) {
@@ -259,6 +274,50 @@ class ToolchainController extends ChangeNotifier {
     } catch (e) {
       return '$e';
     }
+  }
+
+  // --- ToolsView -----------------------------------------------------------
+  //
+  // The tools pane talks to this interface rather than to the controller, so
+  // it never imports dart:io and stays previewable. These three exist only so
+  // the widget layer does not have to reach through `manifest`, `paths` and
+  // `requirements` to build strings.
+
+  @override
+  Future<void> refreshDeep() => refresh(deep: true);
+
+  @override
+  String get toolchainRootLabel => prettyPath(paths.toolchainRoot);
+
+  @override
+  String get manifestId => manifest.manifestId;
+
+  @override
+  String get shellName => shellPath.target.shell;
+
+  @override
+  String get shellRcLabel => prettyPath(shellPath.target.rcPath ?? '');
+
+  @override
+  String get shellExportLine => shellPath.exportLine;
+
+  @override
+  String requirementLabel(ToolSpec spec) => requirements.describe(spec);
+
+  @override
+  String? upgradeCommand(ToolId id) => switch (id) {
+        ToolId.flutter => 'flutter upgrade',
+        ToolId.serverpodCli => 'dart install serverpod_cli@${manifest[id]?.version}',
+        ToolId.opencode => 'brew upgrade opencode',
+        _ => null,
+      };
+
+  @override
+  Future<void> revealToolchainFolder() async {
+    final dir = paths.toolchainRoot;
+    // Finder cannot reveal a path that does not exist yet.
+    await Directory(dir).create(recursive: true);
+    unawaited(Process.run('/usr/bin/open', [dir]));
   }
 
   /// Removes every managed tool. Host copies and `~/.pub-cache` are untouched.

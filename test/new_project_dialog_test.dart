@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:appstudio/toolchain/toolchain_controller.dart';
 import 'support/toolchain_support.dart';
-import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shad/shad.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:appstudio/session/project_session.dart';

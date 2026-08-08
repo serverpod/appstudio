@@ -339,13 +339,18 @@ install. Sparkle would also catch it, but later and less clearly.
 
 ## UI & design
 
-- **Component library:** `shadcn_ui` (`ShadApp`, `ShadTheme`, `LucideIcons`). No Material-heavy custom widgets unless necessary.
-- **Palette:** Serverpod brand blue (`kBrandBlue` in `app_theme.dart`), `ShadSlateColorScheme`. Semantic status colors in `app_colors.dart`.
-- **Fonts:** `.AppleSystemUIFont` (UI), `Menlo` (terminal via `kMacMonoFont`).
-- **Dark mode fix:** override `border` and `input` in `darkColorScheme` — default slate dark sets `border == muted`, which hides dividers.
+- **Component library:** `shad` (`ShadApp`, `ShadTheme`, `LucideIcons`). No Material-heavy custom widgets unless necessary. Replaced `shadcn_ui` — same `Shad*` API, higher fidelity to upstream shadcn/ui. Two defaults differ: `ShadTabs.expandTabs` now defaults to `false` (the Settings tabs pass `expandTabs: true`), and `ghost`/`outline` buttons take their foreground from `foreground` rather than `primary`, so they are no longer brand-blue — that change was kept.
+- `shad` deliberately does **not** re-export the extensions on `double`/`Duration`/`List`/`TextStyle` that `shadcn_ui` did, nor `boxy`/`flutter_svg`/`universal_image`. Depend on those directly if you ever need them.
+- **Theme** (`app_theme.dart`): Slate base, **Nova** style, **Medium** radius (`--radius` 10, so the component step is 8). Serverpod brand blue is the *accent*: `ShadSlateColorScheme.…().applyAccent(kBrandBlue)` derives `primary`, `primaryForeground`, `ring` and `selection` from the one constant, so there is nothing to keep in sync by hand.
+- **Fonts:** `.AppleSystemUIFont` (UI), `Menlo` (terminal via `kMacMonoFont`). The text theme is otherwise stock — `ShadTextTheme(family:)` swaps only the family, so every weight, size and line height matches upstream shad.
+- **`textTheme.small` is the *label* role, not body copy.** It is `w500` at `height: 1.0` (`font-medium leading-none`), so prose set in it reads bold and cramped the moment it wraps. Use it for single-line labels, list rows and badges. For anything that wraps use `textTheme.muted` (`w400`, `height: 1.43`), and for a dialog's lead paragraph use `ShadDialog`'s `description` slot, which resolves to `style.body` over `textTheme.muted`. The agent transcript is the one place that keeps `small` for prose, and only because it sets an explicit `height: 1.4`.
+- **Custom widgets read the theme; they do not carry colors.** Use `scheme.*` for color, `theme.radii.{sm,md,lg,full}` for corners and `theme.style.*` for geometry — a literal `Color(0x…)` or `BorderRadius.circular(n)` in a widget is the thing to fix, not to match. Failure states are `scheme.destructive`, never a private red.
+- **Success and warning have no shadcn token**, so they ride in the scheme's `custom` map and are read through the `AppColorScheme` extension as `scheme.success` / `scheme.warning`. One value per status, picked to be legible on that brightness's background, covers both the dot and its label.
 - **Layout constants** (`app_theme.dart`): `kPaneHeaderHeight` (36), `kDividerWidth` (1), `paneBorderSide()`, `kSplitHandleWidth` (6).
 - **Pane chrome:** headers use `scheme.muted`; content uses `scheme.background`. Use `paneBorderSide()` for all 1px dividers.
-- **Segmented controls:** `IconSegmentedControl` — copied from cloudui account theme toggle. Use `onMutedSurface: true` on muted pane headers (inverts track/selection for contrast).
+- **Segmented controls:** `IconSegmentedControl` / `TextSegmentedControl` share `widgets/segmented_control_theme.dart`, which resolves color and geometry from the theme's **tab** tokens — the strip/segment treatment `ShadTabs` uses — so both follow the style preset like a built-in. Hover moves the *foreground*, not the fill, so no blend has to be invented. `onMutedSurface: true` on muted pane headers swaps track and selection.
+- **Header breathing room is set by `kPaneHeaderHeight`, not by the controls.** All three (icon group, text group, standalone button) come out 30px from the preset's tab tokens, and the bar is 40 so they clear it by 5 top and bottom. Tightening the strip inset instead buys that gap out of the space between the strip edge and the segment pills, which is what makes the labels look cramped — that was tried and reverted. Retune the bar.
+- **The two deliberate deviations from shad defaults**, both in `app_theme.dart`: the `destructive` button variant is a soft tint upstream and is overridden back to a solid fill, so a destructive confirm does not read as disabled (see the Uninstall dialog); and the tooltip wait is 700 ms, because the default flashes tooltips while the pointer crosses a toolbar. Everything else is stock. In particular there is **no** dark `border`/`input` override any more — slate dark had `border == muted` in `shadcn_ui`, but `shad` sets a translucent white and dividers show fine.
 - **Terminal tabs:** VS Code–style; selected tab overlaps bottom border via `Transform.translate`, not negative margin.
 - **Split resize:** panes meet with no gap. Draw a full-height 1px `ColoredBox` in a `Stack` on the split line; overlay a transparent drag handle (`kSplitHandleWidth`). Do not use a separate wide column or `DecoratedBox` border behind opaque pane content — it won't show.
 
@@ -391,6 +396,47 @@ install. Sparkle would also catch it, but later and less clearly.
   toolchain is gone and preferences are cleared, so any control would either
   fail or silently recreate what was just removed.
 
+## Previews & golden tests
+
+```bash
+make previews    # browser previews of every dialog, hot-reloading
+make goldens     # re-record the screenshots, then review the diff
+```
+
+- **The UI talks to interfaces, not controllers.** `ToolsView`
+  (`ui/toolchain/tools_view.dart`) and `ProvidersView`
+  (`ui/settings/providers_view.dart`) are implemented directly by
+  `ToolchainController` and `AgentController` — no adapters, no copying — but
+  the panes import only the interface. That is what keeps them free of
+  `dart:io`, which is non-negotiable: **the widget preview scaffold only
+  supports the web device**, so anything reaching `Platform` or `File` cannot
+  be previewed at all.
+- Keep those interfaces narrow. The panes used to reach through the controller
+  for `manifest`, `paths`, `requirements` and `shellPath` purely to build
+  strings; those are now `upgradeCommand`, `requirementLabel`,
+  `toolchainRootLabel` and the `shell*` getters, so command construction and
+  path prettifying stay out of the widget layer.
+- `dart:io` is kept out of shared value types by conditional imports:
+  `platform_key.dart` and `util/home_dir.dart`. `ShellPathState` and
+  `UninstallResult` live in their own files for the same reason. Before adding
+  an import to a widget file, check it does not drag `dart:io` in — the whole
+  preview surface is one careless import away from breaking.
+- `lib/previews/preview_data.dart` holds the fakes and fixtures, and **the
+  golden tests use the same ones**. One set of states, two consumers: if a
+  state is worth looking at by hand it is worth locking down.
+- Goldens load the real macOS system font (`/System/Library/Fonts/SFNS.ttf`)
+  via `test/golden/font_loader.dart`. Without it `flutter_test` renders every
+  glyph as an Ahem box — fine for catching layout drift, useless for reviewing
+  copy, which is most of what these are for.
+- They pump twice with fixed durations rather than `pumpAndSettle`: the tools
+  pane starts async work in a post-frame callback and the tab indicator
+  animates, so settling never completes.
+- `InstallProgress` fixtures pin `startedAt` *and* `now`, or the banner's
+  elapsed-time text would differ on every run.
+
+`ui/new_project_dialog.dart` is the one dialog still using `dart:io` directly,
+so it has no preview yet.
+
 ## Architecture notes
 
 - Long-lived controllers created in `main.dart`: `ThemeController`, `ProjectSession`, `StudioTerminal`, `ServerpodProcessController`.
@@ -404,8 +450,19 @@ install. Sparkle would also catch it, but later and less clearly.
 - After the CLI succeeds, `patchFlutterAppForPreview` adds `device: web-server` and `web-port: 9998` to the `flutter_apps` entry in `<name>_server/pubspec.yaml` — without it `serverpod start` opens a browser instead of feeding the preview pane. The project is then opened, which auto-starts it.
 - Last used location is remembered in `ProjectSession` (`new_project_directory` pref).
 
+## Opening a project
+
+- Opening one auto-starts the server (`ServerpodProcessController._onSessionChanged`), which compiles the whole stack before anything reaches the preview. `ui/project_startup_dialog.dart` says so up front, because the first minute or two is otherwise indistinguishable from a hang.
+- It is triggered in `main.dart` from a `ProjectSession` listener that tracks the **project path**, not `hasProject` — switching straight from one project to another recompiles just as much, and the boolean never changes across that. The dialog is pushed from a post-frame callback: the session can notify mid-build, and pushing a route from inside a build is illegal.
+- "Don't show this again" is written to `project.startup_notice_dismissed` **only when the box is ticked**, and by the caller — the widget just pops the bool, which keeps it `dart:io`-free and previewable. This is a one-way door, so `test/project_startup_dialog_test.dart` covers both directions: OK alone must leave the pref unset.
+- The dialog is `barrierDismissible: false`. With OK as the only action, a stray click on the barrier would otherwise silently discard a ticked checkbox.
+- It styles nothing itself. Two shad details make that possible, and both generalise:
+  - **`ShadDialog.alert` has no close X**; `ShadDialog` (primary) does. The only difference is that `primaryDialogTheme` sets `closeIconData` and `alertDialogTheme` does not, and there is no flag to turn it off — so pick the variant, don't fight it. Alert is also the right semantics for a notice you acknowledge rather than dismiss.
+  - **Body copy belongs in `description`, not a `child` with `textTheme.small`.** `small` is shadcn's *label* role — `w500` at `height: 1.0` (`font-medium leading-none`) — so paragraphs set in it read bold and cramped. `description` resolves to `style.body` over `textTheme.muted`: `w400` at `height: 1.43`.
+- The checkbox sits in `actions` beside OK. The actions row defaults to `MainAxisSize.min` / `MainAxisAlignment.end`, so `spaceBetween` does nothing on its own — it needs `actionsMainAxisSize: MainAxisSize.max` too.
+
 ## Conventions for agents
 
 - Keep diffs small; match existing naming and file placement.
-- Reuse `shadcn_ui` components and cloudui patterns before inventing new ones.
+- Reuse `shad` components and cloudui patterns before inventing new ones.
 - Only commit or open PRs when explicitly asked.

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shad/shad.dart';
 
 /// A reusable hoverable menu item for use inside [ShadPopover] panels.
 class MenuItemTile extends StatefulWidget {
@@ -44,7 +44,7 @@ class _MenuItemTileState extends State<MenuItemTile> {
           width: double.infinity,
           decoration: BoxDecoration(
             color: _hovered ? theme.colorScheme.accent : Colors.transparent,
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: theme.radii.sm,
           ),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
           child: Row(

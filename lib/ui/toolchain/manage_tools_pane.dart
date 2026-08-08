@@ -1,19 +1,17 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shad/shad.dart';
 
 import '../../theme/app_theme.dart';
 import '../../toolchain/install_progress.dart';
-import '../../toolchain/shell_path_integration.dart';
+import '../../toolchain/shell_path_state.dart';
 import '../../toolchain/tool_status.dart';
-import '../../toolchain/toolchain_controller.dart';
-import '../../util/pretty_path.dart';
 import '../../widgets/determinate_progress.dart';
 import '../../widgets/error_banner.dart';
 import 'tool_row.dart';
+import 'tools_view.dart';
 
 /// Where every tool came from, whether it is usable, and what to do about it.
 ///
@@ -22,7 +20,7 @@ import 'tool_row.dart';
 class ManageToolsPane extends StatefulWidget {
   const ManageToolsPane({super.key, required this.toolchains});
 
-  final ToolchainController toolchains;
+  final ToolsView toolchains;
 
   @override
   State<ManageToolsPane> createState() => _ManageToolsPaneState();
@@ -41,7 +39,7 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
       if (!mounted) return;
       // The startup probe stops at the first satisfied candidate; this view
       // wants the alternatives too ("you also have a host Flutter").
-      unawaited(widget.toolchains.refresh(deep: true));
+      unawaited(widget.toolchains.refreshDeep());
       unawaited(widget.toolchains.refreshShellPathState());
     });
   }
@@ -94,8 +92,7 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
             if (inventory[id] case final status?) ...[
               ToolRow(
                 status: status,
-                requirement:
-                    toolchains.requirements.describe(status.spec),
+                requirement: toolchains.requirementLabel(status.spec),
                 progress: toolchains.progress?[id],
                 actions: _actionsFor(status, busy),
               ),
@@ -111,20 +108,21 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
             children: [
               Expanded(
                 child: Text(
-                  prettyPath(toolchains.paths.toolchainRoot),
+                  toolchains.toolchainRootLabel,
                   style: theme.textTheme.muted.copyWith(fontSize: 11),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
               ShadButton.ghost(
                 size: ShadButtonSize.sm,
-                onPressed: _revealToolchainFolder,
+                onPressed: () =>
+                    unawaited(toolchains.revealToolchainFolder()),
                 child: const Text('Reveal'),
               ),
               ShadButton.ghost(
                 size: ShadButtonSize.sm,
                 onPressed:
-                    busy ? null : () => toolchains.refresh(deep: true),
+                    busy ? null : toolchains.refreshDeep,
                 child: Text(
                   toolchains.isRefreshing ? 'Checking…' : 'Re-check',
                 ),
@@ -171,9 +169,9 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
       if (rejected != null &&
           rejected.source == ToolSource.host &&
           rejected.fitness == ToolFitness.wrongVersion &&
-          _upgradeCommand(status.id) != null) ...[
+          toolchains.upgradeCommand(status.id) != null) ...[
         const SizedBox(width: 6),
-        _UpgradeHint(command: _upgradeCommand(status.id)!),
+        _UpgradeHint(command: toolchains.upgradeCommand(status.id)!),
       ],
       if (isManaged) ...[
         const SizedBox(width: 6),
@@ -186,22 +184,6 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
     ];
   }
 
-  /// What the user would run to upgrade their *own* copy. We never run these:
-  /// they mutate an SDK we do not own.
-  String? _upgradeCommand(ToolId id) => switch (id) {
-        ToolId.flutter => 'flutter upgrade',
-        ToolId.serverpodCli =>
-          'dart install serverpod_cli@${widget.toolchains.manifest[id]?.version}',
-        ToolId.opencode => 'brew upgrade opencode',
-        _ => null,
-      };
-
-  Future<void> _revealToolchainFolder() async {
-    final dir = widget.toolchains.paths.toolchainRoot;
-    // Finder cannot reveal a path that does not exist yet.
-    await Directory(dir).create(recursive: true);
-    unawaited(Process.run('/usr/bin/open', [dir]));
-  }
 }
 
 class _InstallBanner extends StatelessWidget {
@@ -222,7 +204,7 @@ class _InstallBanner extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: scheme.muted.withValues(alpha: 0.45),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: theme.radii.md,
         border: Border.all(color: scheme.border.withValues(alpha: 0.5)),
       ),
       child: Padding(
@@ -309,7 +291,7 @@ class _UpgradeHintState extends State<_UpgradeHint> {
 class _ShellPathToggle extends StatefulWidget {
   const _ShellPathToggle({required this.toolchains});
 
-  final ToolchainController toolchains;
+  final ToolsView toolchains;
 
   @override
   State<_ShellPathToggle> createState() => _ShellPathToggleState();
@@ -340,7 +322,6 @@ class _ShellPathToggleState extends State<_ShellPathToggle> {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final state = widget.toolchains.shellPathState;
-    final integration = widget.toolchains.shellPath;
 
     if (state == ShellPathState.unsupported) {
       return Column(
@@ -352,13 +333,13 @@ class _ShellPathToggleState extends State<_ShellPathToggle> {
           ),
           const SizedBox(height: 4),
           Text(
-            'App Studio cannot edit ${integration.target.shell} configuration. '
+            'App Studio cannot edit ${widget.toolchains.shellName} configuration. '
             'Add this line yourself:',
             style: theme.textTheme.muted.copyWith(fontSize: 11),
           ),
           const SizedBox(height: 6),
           SelectableText(
-            integration.exportLine,
+            widget.toolchains.shellExportLine,
             style: theme.textTheme.muted.copyWith(
               fontFamily: kMacMonoFont,
               fontSize: 10.5,
@@ -393,7 +374,7 @@ class _ShellPathToggleState extends State<_ShellPathToggle> {
                     'App Studio does not need this — it already finds the '
                     'tools. Turn it on so an external editor or AI agent can '
                     'find them too. Edits a fenced block in '
-                    '${prettyPath(integration.target.rcPath ?? "")}.',
+                    '${widget.toolchains.shellRcLabel}.',
                     style: theme.textTheme.muted.copyWith(fontSize: 11),
                   ),
                 ],

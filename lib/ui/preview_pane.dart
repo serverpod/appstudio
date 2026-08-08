@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shad/shad.dart';
 import 'package:webview_cef/webview_cef.dart';
 
 import '../preview/preview_bootstrap.dart';

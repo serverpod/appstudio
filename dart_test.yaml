@@ -3,3 +3,6 @@ tags:
   # Tests that shell out to scripts in tool/. They are fast and hermetic (temp
   # pubspecs, file:// feeds), but they do need bash, curl and python3.
   tool:
+  # Pixel snapshots. Fonts differ between machines and CI images, so these are
+  # expected to be generated and compared on macOS with the bundled test font.
+  golden:

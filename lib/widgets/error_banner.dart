@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shad/shad.dart';
 
 import '../theme/app_theme.dart';
 
@@ -21,7 +21,7 @@ class ErrorBanner extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
         color: scheme.destructive.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: theme.radii.md,
         border: Border.all(color: scheme.destructive.withValues(alpha: 0.35)),
       ),
       child: Column(
@@ -39,7 +39,9 @@ class ErrorBanner extends StatelessWidget {
               Expanded(
                 child: Text(
                   message,
-                  style: theme.textTheme.small.copyWith(
+                  // `muted`, not `small`: failure messages wrap, and `small` is
+                  // the label role (`leading-none`), which sets them solid.
+                  style: theme.textTheme.muted.copyWith(
                     color: scheme.destructive,
                   ),
                 ),

@@ -6,6 +6,8 @@
 #   make clean_all         Also drop CEF, Pods and the dev toolchain
 #   make dev_toolchain     Build a local toolchain/ tree (optional)
 #   make publish_toolchain Upload tools to GCS and refresh the manifest
+#   make previews          Browser previews of every dialog (hot reload)
+#   make goldens           Re-record the golden screenshots
 #   make set_version V=…   Set the version and bump the build counter
 #   make release V=…       set_version + dist, in one step
 #   make dist              Signed + notarized zip, published to the bucket
@@ -20,7 +22,7 @@ CEF_STAMP := $(ROOT)/packages/webview_cef/macos/third/cef/version.txt
 
 .PHONY: help start deps ensure_deps clean clean_all dev_toolchain \
         publish_toolchain publish_dist publish_appcast dist dist_debug \
-        set_version release
+        set_version release previews goldens
 
 help:
 	@echo "App Studio targets:"
@@ -30,6 +32,8 @@ help:
 	@echo "  make clean_all         Also remove CEF, Pods and <repo>/toolchain"
 	@echo "  make dev_toolchain     Build <repo>/toolchain for offline dev (optional)"
 	@echo "  make publish_toolchain Dry-run the toolchain publish"
+	@echo "  make previews          Browser previews of every dialog (hot reload)"
+	@echo "  make goldens           Re-record golden screenshots, then review the diff"
 	@echo "  make set_version V=1.2.3   Set the version (or V=patch|minor|major|build)"
 	@echo "  make release V=1.2.3       set_version, then dist — one step"
 	@echo "  make dist              Build, notarize AND publish the zip to the bucket"
@@ -95,6 +99,20 @@ publish_toolchain:
 	@echo ""
 	@echo "Dry run above. To publish for real:"
 	@echo "  ./tool/publish_toolchain.sh"
+
+# Widget previews for iterating on copy and layout. Runs in a browser — the
+# only target the preview scaffold supports — which is why everything under
+# lib/previews/ and the UI it renders must stay free of dart:io.
+previews:
+	cd "$(ROOT)" && flutter widget-preview start
+
+# Pixel snapshots of every dialog. Re-record after an intentional UI change and
+# LOOK at the diff before committing: an unreviewed golden update defeats the
+# purpose of having them.
+goldens:
+	cd "$(ROOT)" && flutter test --update-goldens test/golden
+	@echo ""
+	@echo "Updated test/golden/goldens/. Review with: git diff --stat test/golden"
 
 start: ensure_deps
 	@echo "==> flutter run -d macos"

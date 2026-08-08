@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:appstudio/toolchain/tool_status.dart';
 import 'package:appstudio/toolchain/tool_version.dart';
+import 'package:appstudio/toolchain/platform_key.dart';
 import 'package:appstudio/toolchain/toolchain_manifest.dart';
 import 'package:flutter_test/flutter_test.dart';
 

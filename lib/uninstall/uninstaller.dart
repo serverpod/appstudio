@@ -8,19 +8,9 @@ import '../process/serverpod_process.dart';
 import '../toolchain/shim_writer.dart';
 import '../toolchain/toolchain_controller.dart';
 import '../update/session_teardown.dart';
+import 'uninstall_result.dart';
 
-/// What a full uninstall removed, for the confirmation screen.
-@immutable
-class UninstallResult {
-  const UninstallResult({required this.failures});
-
-  /// Steps that did not complete. The uninstall never aborts on one of these:
-  /// stopping halfway would leave the user with neither a working install nor
-  /// a clean machine, and no way to tell which.
-  final List<String> failures;
-
-  bool get isClean => failures.isEmpty;
-}
+export 'uninstall_result.dart';
 
 /// Removes everything App Studio put on this Mac, apart from the app bundle.
 ///
@@ -49,6 +39,25 @@ class Uninstaller {
   final ToolchainController toolchains;
   final ServerpodProcessController process;
   final AgentController agent;
+
+  /// Total size of the Application Support directory, or null if it cannot be
+  /// measured. Used by the confirmation dialog, which takes it as a callback so
+  /// it stays free of `dart:io`.
+  Future<int?> measureSupportBytes() async {
+    try {
+      final result = await Process.run(
+        '/usr/bin/du',
+        ['-sk', toolchains.paths.appSupportRoot],
+      );
+      if (result.exitCode != 0) return null;
+      final kb = int.tryParse(
+        (result.stdout as String).trim().split(RegExp(r'\s+')).first,
+      );
+      return kb == null ? null : kb * 1024;
+    } catch (_) {
+      return null;
+    }
+  }
 
   Future<UninstallResult> run({bool clearPubCache = false}) async {
     final failures = <String>[];

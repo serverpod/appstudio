@@ -4,7 +4,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
-import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shad/shad.dart';
 
 import '../process/project_creator.dart';
 import '../session/project_session.dart';
@@ -313,7 +313,7 @@ class _PathField extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
         color: scheme.muted.withValues(alpha: 0.45),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: theme.radii.sm,
         border: Border.all(color: scheme.border),
       ),
       child: Row(

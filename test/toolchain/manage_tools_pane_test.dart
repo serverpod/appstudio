@@ -10,7 +10,7 @@ import 'package:appstudio/ui/toolchain/manage_tools_pane.dart';
 import 'package:appstudio/ui/toolchain/tool_row.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shad/shad.dart';
 
 import '../support/toolchain_support.dart';
 

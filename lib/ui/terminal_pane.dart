@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shad/shad.dart';
 import 'package:xterm/xterm.dart';
 
 import '../agent/agent_controller.dart';
 import '../process/serverpod_process.dart';
 import '../terminal/studio_terminal.dart';
-import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/text_segmented_control.dart';
 import 'agent/agent_pane.dart';
@@ -24,6 +23,12 @@ class TerminalPane extends StatefulWidget {
   final AgentController agent;
   final ServerpodProcessController process;
 
+  /// The terminal's palette.
+  ///
+  /// Chrome — cursor, selection, foreground, background — comes from the shad
+  /// theme. The sixteen ANSI slots do not: they are the palette a program's
+  /// escape codes address by index, so they are fixed values here rather than
+  /// theme tokens that would shift under the program's feet.
   static TerminalTheme terminalTheme(ShadThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
     if (isDark) {
@@ -33,17 +38,17 @@ class TerminalPane extends StatefulWidget {
         foreground: theme.colorScheme.foreground,
         background: theme.colorScheme.background,
         black: const Color(0xFF1E293B),
-        red: AppColors.errorRed,
-        green: AppColors.successDot,
-        yellow: AppColors.warningAmber,
+        red: const Color(0xFFEF4444),
+        green: const Color(0xFF22C55E),
+        yellow: const Color(0xFFF59E0B),
         blue: kBrandBlue,
         magenta: const Color(0xFFA855F7),
         cyan: const Color(0xFF14B8A6),
         white: theme.colorScheme.foreground,
         brightBlack: theme.colorScheme.mutedForeground,
         brightRed: const Color(0xFFFCA5A5),
-        brightGreen: AppColors.successTextDark,
-        brightYellow: AppColors.warningTextDark,
+        brightGreen: const Color(0xFF86EFAC),
+        brightYellow: const Color(0xFFFBBF24),
         brightBlue: const Color(0xFF93C5FD),
         brightMagenta: const Color(0xFFC4B5FD),
         brightCyan: const Color(0xFF5EEAD4),
@@ -60,9 +65,9 @@ class TerminalPane extends StatefulWidget {
       foreground: theme.colorScheme.foreground,
       background: theme.colorScheme.background,
       black: const Color(0xFF0F172A),
-      red: AppColors.errorRed,
-      green: AppColors.successDot,
-      yellow: AppColors.warningAmber,
+      red: const Color(0xFFEF4444),
+      green: const Color(0xFF22C55E),
+      yellow: const Color(0xFFF59E0B),
       blue: kBrandBlue,
       magenta: const Color(0xFF9333EA),
       cyan: const Color(0xFF0F766E),

@@ -1,22 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
-import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shad/shad.dart';
 
 import '../session/project_session.dart';
-import '../theme/app_colors.dart';
 import '../widgets/menu_item_tile.dart';
 
 const _kBannerHeight = 56.0;
 const _kLogoAsset = 'assets/logo-horizontal.webp';
 const _kBackgroundAsset = 'assets/background.webp';
-
-/// Material pink 700 — primary actions on the start page.
-const _kStartPageActionColor = Color(0xFFC2185B);
-
-/// Darker rose for button hover / pressed states.
-const _kStartPageActionHoverColor = Color(0xFFAD1457);
-
-const _kStartPageCardRadius = 10.0;
 
 /// Natural pixel size of [assets/background.webp].
 const _kBackgroundAspectRatio = 2394 / 1247;
@@ -131,7 +122,6 @@ class _StartPageContent extends StatelessWidget {
     final theme = ShadTheme.of(context);
     final scheme = theme.colorScheme;
     final textTheme = theme.textTheme;
-    final isDark = theme.brightness == Brightness.dark;
 
     return Center(
       child: ConstrainedBox(
@@ -145,18 +135,14 @@ class _StartPageContent extends StatelessWidget {
                 Text(
                   session.error!,
                   textAlign: TextAlign.center,
-                  style: textTheme.small.copyWith(
-                    color: isDark
-                        ? AppColors.errorTextDark
-                        : AppColors.errorText,
-                  ),
+                  style: textTheme.muted.copyWith(color: scheme.destructive),
                 ),
                 const SizedBox(height: 24),
               ],
               Container(
                 width: double.infinity,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(_kStartPageCardRadius),
+                  borderRadius: theme.radii.lg,
                   border: Border.all(color: scheme.border),
                   color: scheme.card,
                 ),
@@ -263,11 +249,6 @@ class _StartPageActionButton extends StatelessWidget {
       onPressed: onPressed,
       size: ShadButtonSize.sm,
       width: double.infinity,
-      backgroundColor: _kStartPageActionColor,
-      hoverBackgroundColor: _kStartPageActionHoverColor,
-      pressedBackgroundColor: _kStartPageActionHoverColor,
-      foregroundColor: Colors.white,
-      hoverForegroundColor: Colors.white,
       leading: leading,
       child: Text(label),
     );

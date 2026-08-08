@@ -1,11 +1,11 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shad/shad.dart';
 
-import '../../toolchain/toolchain_controller.dart';
 import '../../util/byte_format.dart';
-import '../../util/pretty_path.dart';
+
+/// Matches the sibling dialogs. Shad caps a dialog at 512 anyway, so this only
+/// has to be wide enough not to shrink the content below that.
+const _kDialogWidth = 520.0;
 
 /// What the user agreed to remove.
 class UninstallChoice {
@@ -18,11 +18,15 @@ class UninstallChoice {
 
 Future<UninstallChoice?> showUninstallConfirmDialog(
   BuildContext context, {
-  required ToolchainController toolchains,
+  required String supportRootLabel,
+  required Future<int?> Function() measureBytes,
 }) {
   return showShadDialog<UninstallChoice>(
     context: context,
-    builder: (context) => UninstallConfirmDialog(toolchains: toolchains),
+    builder: (context) => UninstallConfirmDialog(
+      supportRootLabel: supportRootLabel,
+      measureBytes: measureBytes,
+    ),
   );
 }
 
@@ -36,9 +40,19 @@ Future<UninstallChoice?> showUninstallConfirmDialog(
 /// shared with every other Dart project on the machine and holds
 /// `dart install`-ed global packages, so it is re-downloadable but not ours.
 class UninstallConfirmDialog extends StatefulWidget {
-  const UninstallConfirmDialog({super.key, required this.toolchains});
+  const UninstallConfirmDialog({
+    super.key,
+    required this.supportRootLabel,
+    required this.measureBytes,
+  });
 
-  final ToolchainController toolchains;
+  /// Already shortened for display.
+  final String supportRootLabel;
+
+  /// Total size on disk, or null if it could not be measured. Injected rather
+  /// than shelled out to here: `du` is `dart:io`, and this dialog has to stay
+  /// renderable in previews and golden tests.
+  final Future<int?> Function() measureBytes;
 
   @override
   State<UninstallConfirmDialog> createState() => _UninstallConfirmDialogState();
@@ -55,26 +69,27 @@ class _UninstallConfirmDialogState extends State<UninstallConfirmDialog> {
   }
 
   Future<void> _measure() async {
-    final root = widget.toolchains.paths.appSupportRoot;
-    try {
-      final result = await Process.run('/usr/bin/du', ['-sk', root]);
-      if (result.exitCode != 0) return;
-      final kb = int.tryParse(
-        (result.stdout as String).trim().split(RegExp(r'\s+')).first,
-      );
-      if (kb != null && mounted) setState(() => _supportBytes = kb * 1024);
-    } catch (_) {
-      // Size is a nicety; the dialog works without it.
-    }
+    // Size is a nicety; the dialog works without it.
+    final bytes = await widget.measureBytes();
+    if (bytes != null && mounted) setState(() => _supportBytes = bytes);
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    final toolchains = widget.toolchains;
 
     return ShadDialog(
       title: const Text('Uninstall App Studio'),
+      // The lead paragraph belongs in `description`, which resolves to shad's
+      // body role. Set in `textTheme.small` it picked up the *label* style —
+      // `font-medium leading-none` — and read bold and cramped.
+      description: Text(
+        'This removes the downloaded tools, the shell PATH entry and all '
+        'App Studio settings'
+        '${_supportBytes == null ? '' : ' (${formatBytes(_supportBytes!)})'}'
+        '. The app itself is not deleted — you can drag it to the Trash '
+        'afterwards.',
+      ),
       actions: [
         ShadButton.outline(
           onPressed: () => Navigator.of(context).pop(),
@@ -88,22 +103,17 @@ class _UninstallConfirmDialogState extends State<UninstallConfirmDialog> {
         ),
       ],
       child: SizedBox(
-        width: 460,
+        // The narrow-screen fallback — full-width stacked buttons, *reversed*,
+        // which puts the destructive "Uninstall" above "Cancel" as if it were
+        // the safe default — keys off the 640 **screen** breakpoint, not this
+        // width. Nothing here can prevent it; this only sets content width.
+        width: _kDialogWidth,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'This removes the downloaded tools, the shell PATH entry and all '
-              'App Studio settings'
-              '${_supportBytes == null ? '' : ' (${formatBytes(_supportBytes!)})'}'
-              '. The app itself is not deleted — you can drag it to the Trash '
-              'afterwards.',
-              style: theme.textTheme.small,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              prettyPath(toolchains.paths.appSupportRoot),
+              widget.supportRootLabel,
               style: theme.textTheme.muted.copyWith(fontSize: 11),
             ),
             const SizedBox(height: 10),
@@ -117,56 +127,18 @@ class _UninstallConfirmDialogState extends State<UninstallConfirmDialog> {
               style: theme.textTheme.muted.copyWith(fontSize: 11),
             ),
             const SizedBox(height: 14),
-            _CheckRow(
+            ShadCheckbox(
               value: _clearPubCache,
               onChanged: (v) => setState(() => _clearPubCache = v),
-              title: 'Also clear the Dart package cache',
-              subtitle:
-                  'Runs "dart pub cache clean". This cache is shared with every '
-                  'Dart project on your Mac, not just App Studio.',
+              label: const Text('Also clear the Dart package cache'),
+              sublabel: const Text(
+                'Runs "dart pub cache clean". This cache is shared with every '
+                'Dart project on your Mac, not just App Studio.',
+              ),
             ),
           ],
         ),
       ),
-    );
-  }
-}
-
-class _CheckRow extends StatelessWidget {
-  const _CheckRow({
-    required this.value,
-    required this.onChanged,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final bool value;
-  final ValueChanged<bool> onChanged;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        ShadCheckbox(value: value, onChanged: onChanged),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: theme.textTheme.small),
-              const SizedBox(height: 2),
-              Text(
-                subtitle,
-                style: theme.textTheme.muted.copyWith(fontSize: 11),
-              ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 }

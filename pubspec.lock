@@ -572,14 +572,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.5.2"
-  shadcn_ui:
+  shad:
     dependency: "direct main"
     description:
-      name: shadcn_ui
-      sha256: "132d69a43145a9ead0687935b48224a6565d164ab718796fa344a179a69bed70"
+      name: shad
+      sha256: "9e5861785c7e81a81dfc21fed7fe11fb435f39e16d4080e4b5457ca2abd785df"
       url: "https://pub.dev"
     source: hosted
-    version: "0.54.0"
+    version: "0.99.1"
   shared_preferences:
     dependency: "direct main"
     description:

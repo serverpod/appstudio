@@ -13,6 +13,7 @@ import 'opencode_auth_store.dart';
 import 'opencode_client.dart';
 import 'opencode_serve.dart';
 import 'opencode_sse.dart';
+import '../ui/settings/providers_view.dart';
 
 enum AgentConnectionState {
   idle,
@@ -103,7 +104,7 @@ String permissionTitle(String action) {
 }
 
 /// Owns OpenCode serve lifecycle, SSE transcript, and chat actions.
-class AgentController extends ChangeNotifier {
+class AgentController extends ChangeNotifier implements ProvidersView {
   AgentController({
     required this.toolchains,
     required this.session,
@@ -159,10 +160,12 @@ class AgentController extends ChangeNotifier {
       List.unmodifiable(_pendingPermissions);
   List<AgentQuestionPart> get pendingQuestions =>
       List.unmodifiable(_pendingQuestions);
+  @override
   List<String> get connectedProviders =>
       List.unmodifiable(_connectedProviders);
   List<AgentModelOption> get availableModels =>
       List.unmodifiable(_availableModels);
+  @override
   String? get defaultModel => _defaultModel;
   AgentChatMode get mode => _mode;
   bool get isBusy => _connection == AgentConnectionState.busy;
@@ -194,6 +197,25 @@ class AgentController extends ChangeNotifier {
     _onOpenSettings = handler;
   }
 
+  // --- ProvidersView -------------------------------------------------------
+  //
+  // The Providers pane talks to this interface instead of to the controller,
+  // so it never imports the OpenCode auth store and stays previewable.
+
+  @override
+  Future<List<ProviderModel>> listModels() async {
+    if (_client.baseUrl == null) return const [];
+    final models = await _client.listModels();
+    return [
+      for (final m in models)
+        ProviderModel(
+          providerId: m.providerId,
+          modelId: m.modelId,
+          label: m.label,
+        ),
+    ];
+  }
+
   void openSettings() => _onOpenSettings?.call();
 
   Future<void> _loadPrefs() async {
@@ -212,6 +234,7 @@ class AgentController extends ChangeNotifier {
     await prefs.setString(_prefsModeKey, mode.name);
   }
 
+  @override
   Future<void> setDefaultModel(String? providerModel) async {
     _defaultModel = providerModel;
     final prefs = await SharedPreferences.getInstance();
@@ -378,6 +401,7 @@ class AgentController extends ChangeNotifier {
     await setDefaultModel(next);
   }
 
+  @override
   Future<void> saveApiKey(String providerId, String key) async {
     await _authStore.setApiKey(providerId, key);
     if (_client.baseUrl != null) {
@@ -396,6 +420,7 @@ class AgentController extends ChangeNotifier {
     }
   }
 
+  @override
   Future<void> removeApiKey(String providerId) async {
     await _authStore.remove(providerId);
     await _restartServePreservingChat();

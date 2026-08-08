@@ -1,6 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
 
+import 'platform_key.dart';
 import 'tool_status.dart';
 import 'tool_version.dart';
 
@@ -11,11 +11,7 @@ const kManifestSchemaVersion = 1;
 const kBakedManifestAsset = 'assets/toolchain_manifest.json';
 
 /// Key into a tool's `platforms` map.
-String currentPlatformKey() {
-  if (!Platform.isMacOS) return 'unsupported';
-  // Platform.version reads e.g. "3.12.2 ... (macos_arm64)".
-  return Platform.version.contains('arm64') ? 'macos-arm64' : 'macos-x64';
-}
+
 
 class ToolArtifact {
   const ToolArtifact({

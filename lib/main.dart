@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shad/shad.dart';
 
 import 'agent/agent_controller.dart';
 import 'process/dev_session_cleanup.dart';
@@ -15,7 +15,9 @@ import 'update/session_teardown.dart';
 import 'update/update_controller.dart';
 import 'platform/macos_app_menu.dart';
 import 'ui/new_project_dialog.dart';
+import 'ui/project_startup_dialog.dart';
 import 'ui/uninstall/uninstall_confirm_dialog.dart';
+import 'util/pretty_path.dart';
 import 'ui/uninstall/uninstalled_screen.dart';
 import 'uninstall/uninstaller.dart';
 import 'ui/toolchain/toolchain_setup_dialog.dart';
@@ -95,6 +97,13 @@ class _AppStudioAppState extends State<AppStudioApp> {
   UninstallResult? _uninstalled;
   bool _uninstalling = false;
 
+  /// The project the startup notice last fired for.
+  ///
+  /// Tracked as a path rather than a bool: switching straight from one project
+  /// to another restarts the server and recompiles just as much as opening the
+  /// first one, but `hasProject` never changes across that.
+  String? _noticedProjectPath;
+
   @override
   void initState() {
     super.initState();
@@ -116,6 +125,8 @@ class _AppStudioAppState extends State<AppStudioApp> {
     // The menu item starts disabled if the updater is not ready yet; re-sync
     // when it settles.
     widget.updates.addListener(_syncMenu);
+    _noticedProjectPath = widget.session.projectPath;
+    widget.session.addListener(_onSessionChanged);
     unawaited(_macMenu!.install());
     // Clear anything a crashed install left behind, then offer to fetch what
     // is missing. Both after the first frame, so neither delays launch.
@@ -124,6 +135,22 @@ class _AppStudioAppState extends State<AppStudioApp> {
   }
 
   void _syncMenu() => _macMenu?.refresh();
+
+  /// Opening a project auto-starts the server, so this is the moment the long
+  /// first compile begins — say so before it looks like a hang.
+  void _onSessionChanged() {
+    final path = widget.session.projectPath;
+    if (path == _noticedProjectPath) return;
+    _noticedProjectPath = path;
+    if (path == null) return;
+    // The session can notify mid-build (closing a project rebuilds the shell),
+    // and pushing a route from inside a build is illegal.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final navigatorContext = _navigatorKey.currentContext;
+      if (!mounted || navigatorContext == null) return;
+      unawaited(maybeShowProjectStartupNotice(navigatorContext));
+    });
+  }
 
   /// Runs the full uninstall, then replaces the UI with a dead-end screen.
   ///
@@ -135,18 +162,20 @@ class _AppStudioAppState extends State<AppStudioApp> {
     final navigatorContext = _navigatorKey.currentContext;
     if (!mounted || navigatorContext == null || _uninstalled != null) return;
 
+    final uninstaller = Uninstaller(
+      toolchains: widget.toolchains,
+      process: widget.process,
+      agent: widget.agent,
+    );
     final choice = await showUninstallConfirmDialog(
       navigatorContext,
-      toolchains: widget.toolchains,
+      supportRootLabel: prettyPath(widget.toolchains.paths.appSupportRoot),
+      measureBytes: uninstaller.measureSupportBytes,
     );
     if (choice == null || !mounted) return;
 
     setState(() => _uninstalling = true);
-    final result = await Uninstaller(
-      toolchains: widget.toolchains,
-      process: widget.process,
-      agent: widget.agent,
-    ).run(clearPubCache: choice.clearPubCache);
+    final result = await uninstaller.run(clearPubCache: choice.clearPubCache);
 
     if (!mounted) return;
     setState(() {
@@ -179,6 +208,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
   @override
   void dispose() {
     widget.updates.removeListener(_syncMenu);
+    widget.session.removeListener(_onSessionChanged);
     _macMenu?.dispose();
     // Same teardown Sparkle runs before it relaunches, so the two paths cannot
     // drift apart.

@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shad/shad.dart';
 
 import '../theme/app_theme.dart';
 
@@ -70,7 +70,7 @@ class _RegistrationCodeToastState extends State<RegistrationCodeToast> {
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: scheme.card,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: theme.radii.lg,
           border: Border.all(color: borderColor),
           boxShadow: [
             BoxShadow(
