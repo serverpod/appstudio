@@ -54,7 +54,7 @@ class StudioTerminal extends ChangeNotifier {
     );
     _pty = pty;
     _running = true;
-    await registerDevSessionPid(pty.pid);
+    await registerDevSessionPid(DevProcessKind.server, pty.pid);
     notifyListeners();
 
     _outputSub = pty.output.listen((data) {
@@ -104,7 +104,7 @@ class StudioTerminal extends ChangeNotifier {
     _outputSub = null;
     _pty = null;
     _running = false;
-    await clearDevSessionPid();
+    await clearDevSessionPid(DevProcessKind.server);
     notifyListeners();
   }
 

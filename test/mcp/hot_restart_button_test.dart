@@ -61,6 +61,13 @@ void main() {
     await pumpButton(tester, mcp);
 
     expect(find.byIcon(LucideIcons.zap), findsOneWidget);
+    // Icon-only, so the name has to survive as the accessibility label.
+    expect(
+      tester
+          .widget<ShadIconButton>(find.byType(ShadIconButton))
+          .semanticLabel,
+      'Hot Restart',
+    );
     expect(isEnabled(tester), isTrue);
 
     await tester.tap(find.byType(ShadIconButton));
@@ -83,7 +90,7 @@ void main() {
     expect(mcp.calls, 0);
 
     await hover(tester);
-    expect(find.text('Hot restart — connecting to the server'), findsOneWidget);
+    expect(find.text('Hot Restart — connecting to the server'), findsOneWidget);
   });
 
   testWidgets('with no server running it points at starting one', (
@@ -93,7 +100,7 @@ void main() {
 
     expect(isEnabled(tester), isFalse);
     await hover(tester);
-    expect(find.text('Hot restart — start the server first'), findsOneWidget);
+    expect(find.text('Hot Restart — start the server first'), findsOneWidget);
   });
 
   testWidgets('shows a spinner and refuses a second click while in flight', (
@@ -136,7 +143,7 @@ void main() {
     expect(isEnabled(tester), isFalse);
     await hover(tester);
     expect(
-      find.text('Hot restart unavailable: Serverpod CLI is not installed.'),
+      find.text('Hot Restart unavailable: Serverpod CLI is not installed.'),
       findsOneWidget,
     );
   });

@@ -6,6 +6,8 @@ import 'package:dart_mcp/client.dart';
 import 'package:dart_mcp/stdio.dart';
 import 'package:meta/meta.dart';
 
+import '../process/dev_session_cleanup.dart';
+
 /// The tool that recompiles the server, reboots its process and hot-restarts
 /// the Flutter app the runner launched. Takes no arguments.
 const kHotRestartTool = 'hot_restart';
@@ -115,6 +117,10 @@ class ServerpodMcpBridge {
       throw StateError('Could not start serverpod mcp-server: $e');
     }
     _process = process;
+    // Same registry the PTY and the agent use: a hard quit or a Flutter hot
+    // restart never runs our teardown, and an unregistered child is orphaned to
+    // launchd for the life of the machine.
+    await registerDevSessionPid(DevProcessKind.mcpBridge, process.pid);
 
     process.stderr.transform(utf8.decoder).listen(_noteDiagnostic);
     unawaited(
@@ -125,6 +131,7 @@ class ServerpodMcpBridge {
         _process = null;
         _connection = null;
         _client = null;
+        unawaited(clearDevSessionPid(DevProcessKind.mcpBridge));
       }),
     );
 
@@ -238,16 +245,34 @@ class ServerpodMcpBridge {
         await client.shutdown().timeout(const Duration(seconds: 3));
       } catch (_) {}
     }
-    if (process == null) return;
+    if (process == null) {
+      await clearDevSessionPid(DevProcessKind.mcpBridge);
+      return;
+    }
+    // Closing the channel should be enough — the bridge exits on EOF — but
+    // "should" is not a teardown. Escalate, and *wait* at each step: the old
+    // code sent SIGTERM on timeout and returned immediately, which is a signal
+    // sent rather than a process reaped.
     try {
-      await process.exitCode.timeout(
-        const Duration(seconds: 3),
-        onTimeout: () {
-          process.kill(ProcessSignal.sigterm);
-          return -1;
-        },
-      );
+      await process.exitCode.timeout(const Duration(seconds: 3));
+      await clearDevSessionPid(DevProcessKind.mcpBridge);
+      return;
+    } on TimeoutException {
+      // Ignored the closed channel. Escalate below.
+    } catch (_) {
+      await clearDevSessionPid(DevProcessKind.mcpBridge);
+      return;
+    }
+    try {
+      process.kill(ProcessSignal.sigterm);
+      await process.exitCode.timeout(const Duration(seconds: 2));
+    } on TimeoutException {
+      try {
+        process.kill(ProcessSignal.sigkill);
+        await process.exitCode.timeout(const Duration(seconds: 2));
+      } catch (_) {}
     } catch (_) {}
+    await clearDevSessionPid(DevProcessKind.mcpBridge);
   }
 
   /// Drops anything that is not a JSON object before it reaches the protocol.

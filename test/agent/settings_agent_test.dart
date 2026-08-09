@@ -83,4 +83,33 @@ void main() {
 
     expect(agent.isServeRunning, isFalse);
   });
+
+  test('closing Settings mid-start does not leave an unowned serve', () async {
+    // Deliberately not awaited: this closes Settings while the scratch
+    // directory is still being created. Two bugs used to live in that window —
+    // the ownership flag was set *after* the await, so the stop declined to act,
+    // and the start then went ahead regardless of having been disowned. Either
+    // one leaves an `opencode serve` running that nothing will stop until quit.
+    final starting = agent.startForSettings();
+    await agent.stopIfStartedForSettings();
+    await starting;
+
+    expect(agent.isServeRunning, isFalse);
+    // Idle, not `error`: the start bailed rather than running and failing.
+    expect(agent.connection, AgentConnectionState.idle);
+  });
+
+  test('stop() is awaitable, so a quit can wait for the child process',
+      () async {
+    // `dispose()` is synchronous and could only fire the teardown and return,
+    // which is what orphaned every `opencode serve` on quit. `teardownSession`
+    // calls this instead.
+    await agent.startForSettings();
+    expect(agent.connection, AgentConnectionState.error);
+
+    await agent.stop();
+
+    expect(agent.isServeRunning, isFalse);
+    expect(agent.connection, AgentConnectionState.idle);
+  });
 }

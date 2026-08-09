@@ -173,6 +173,11 @@ class McpController extends ChangeNotifier implements HotRestartView {
     // The runner went away mid-flight. Fall back to waiting for it rather than
     // leaving a button that looks live but cannot deliver.
     if (outcome.isRunnerMissing) _connection = McpConnection.connecting;
+    // The runner reports its own browser refresh once the Flutter app has
+    // restarted, but that goes through DWDS and leaves the cached
+    // `main.dart.js` in place. Ours ignores the cache, which is the only way to
+    // be sure the preview is showing the code that was just compiled.
+    if (!outcome.isError) process.requestPreviewReload();
     _notify();
     await _probe();
   }

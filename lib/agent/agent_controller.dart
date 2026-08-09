@@ -318,17 +318,33 @@ class AgentController extends ChangeNotifier implements ProvidersView {
     final dir = Directory(
       p.join(toolchains.paths.appSupportRoot, _kSettingsScratchDirName),
     );
+    // Claimed before the first await. Set after, a Settings dialog closed while
+    // the directory was still being created would find the flag false, decline
+    // to stop, and leave a scratch serve running that nothing owns.
+    _startedForSettings = true;
     try {
       await dir.create(recursive: true);
     } catch (e) {
+      _startedForSettings = false;
       _error = 'Could not prepare a workspace for the agent: $e';
       _connection = AgentConnectionState.error;
       notifyListeners();
       return;
     }
-    _startedForSettings = true;
+    // Settings closed while the directory was being created, so
+    // [stopIfStartedForSettings] has already released the claim. Starting now
+    // would spawn a serve with nobody left to stop it.
+    if (!_startedForSettings) return;
     await _startForProject(dir.path);
   }
+
+  /// Stops the agent and waits for `opencode serve` to actually be gone.
+  ///
+  /// [dispose] cannot await — `ChangeNotifier.dispose()` is synchronous — so it
+  /// can only fire the teardown and return, which is how every quit left an
+  /// orphaned `opencode serve` reparented to launchd. The session teardown calls
+  /// this instead.
+  Future<void> stop() => _teardown(clearMessages: true);
 
   /// Stops a serve that [startForSettings] started. A project's own agent is
   /// left running — closing Settings must not tear down a live session.
@@ -340,14 +356,19 @@ class AgentController extends ChangeNotifier implements ProvidersView {
 
   Future<void> _startForProject(String projectPath) async {
     final epoch = ++_epoch;
-    await _teardown(clearMessages: true, bumpEpoch: false);
-    if (epoch != _epoch) return;
-
+    // Claimed *before* the teardown, not after. `_teardown` nulls
+    // `_boundProjectPath` and sets the connection back to idle, and `process`
+    // notifies on every poll tick — so a tick landing inside the teardown used
+    // to pass `_onSessionOrProcessChanged`'s idempotency guard and start a
+    // second serve concurrently with this one.
     _boundProjectPath = projectPath;
     _connection = AgentConnectionState.starting;
     _statusMessage = 'Starting agent…';
     _error = null;
     notifyListeners();
+
+    await _teardown(clearMessages: true, bumpEpoch: false, keepClaim: true);
+    if (epoch != _epoch) return;
 
     try {
       final base = await _serve.start(projectPath);
@@ -494,15 +515,20 @@ class AgentController extends ChangeNotifier implements ProvidersView {
     final messages = List<AgentChatMessage>.from(_messages);
     final sessionId = _sessionId;
     final epoch = ++_epoch;
-    await _teardown(clearMessages: false, bumpEpoch: false);
+    // Claimed before the teardown for the same reason as [_startForProject]: a
+    // `process` tick landing while the serve is being stopped would otherwise
+    // see an idle, unclaimed controller and start a second one.
+    _connection = AgentConnectionState.starting;
+    _statusMessage = 'Reloading agent…';
+    notifyListeners();
+
+    await _teardown(clearMessages: false, bumpEpoch: false, keepClaim: true);
     if (epoch != _epoch) return;
     _messages
       ..clear()
       ..addAll(messages);
     _sessionId = sessionId;
     _boundProjectPath = path;
-    _connection = AgentConnectionState.starting;
-    _statusMessage = 'Reloading agent…';
     notifyListeners();
     try {
       final base = await _serve.start(path);
@@ -1227,6 +1253,7 @@ class AgentController extends ChangeNotifier implements ProvidersView {
   Future<void> _teardown({
     required bool clearMessages,
     bool bumpEpoch = true,
+    bool keepClaim = false,
   }) async {
     if (bumpEpoch) _epoch++;
     await _sseSub?.cancel();
@@ -1235,15 +1262,19 @@ class AgentController extends ChangeNotifier implements ProvidersView {
     _client.detach();
     await _serve.stop();
     _sessionId = null;
-    _boundProjectPath = null;
+    // A start in progress has already claimed the project and the `starting`
+    // state; clearing them here is what let a concurrent start slip through.
+    if (!keepClaim) _boundProjectPath = null;
     _pendingPermissions.clear();
     _pendingQuestions.clear();
     _hiddenToolCalls.clear();
     _availableModels = [];
     if (clearMessages) _messages.clear();
-    _connection = AgentConnectionState.idle;
-    _statusMessage = null;
-    _error = null;
+    if (!keepClaim) {
+      _connection = AgentConnectionState.idle;
+      _statusMessage = null;
+      _error = null;
+    }
     notifyListeners();
   }
 

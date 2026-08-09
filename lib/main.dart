@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
@@ -110,6 +111,16 @@ class _AppStudioAppState extends State<AppStudioApp> {
   UninstallResult? _uninstalled;
   bool _uninstalling = false;
 
+  /// Lets the teardown run *before* macOS terminates us.
+  ///
+  /// This is the only place a quit can be awaited. `dispose()` is synchronous,
+  /// and on ⌘Q the isolate is killed at the OS's convenience — measured: the
+  /// server and the MCP bridge died with us, but `opencode serve` is an ordinary
+  /// child process and survived every single quit, reparented to launchd. The
+  /// pid-file reclaim in `main()` is the backstop; this is the fix.
+  AppLifecycleListener? _lifecycle;
+  bool _exiting = false;
+
   /// The project the startup notice last fired for.
   ///
   /// Tracked as a path rather than a bool: switching straight from one project
@@ -152,10 +163,31 @@ class _AppStudioAppState extends State<AppStudioApp> {
     widget.toolchains.addListener(_onToolchainsChanged);
     _noticedProjectPath = widget.session.projectPath;
     widget.session.addListener(_onSessionChanged);
+    _lifecycle = AppLifecycleListener(onExitRequested: _onExitRequested);
     unawaited(_macMenu!.install());
     // Clear anything a crashed install left behind. Fire and forget, so it
     // never delays launch; ToolchainSetupScreen drives the install itself.
     unawaited(widget.toolchains.collectGarbage());
+  }
+
+  /// Always answers [AppExitResponse.exit] — refusing would make the app
+  /// unquittable, which is a far worse bug than a stray child process. The
+  /// timeout is shorter than the one `dispose()` uses because the user is
+  /// watching a quit here, not a relaunch.
+  Future<AppExitResponse> _onExitRequested() async {
+    if (_exiting) return AppExitResponse.exit;
+    _exiting = true;
+    try {
+      await teardownSession(
+        process: widget.process,
+        agent: widget.agent,
+        mcp: widget.mcp,
+        timeout: const Duration(seconds: 6),
+      );
+    } catch (e) {
+      debugPrint('exit teardown failed: $e');
+    }
+    return AppExitResponse.exit;
   }
 
   void _syncMenu() => _macMenu?.refresh();
@@ -239,21 +271,28 @@ class _AppStudioAppState extends State<AppStudioApp> {
 
   @override
   void dispose() {
+    _lifecycle?.dispose();
     widget.updates.removeListener(_syncMenu);
     widget.toolchains.removeListener(_onToolchainsChanged);
     widget.session.removeListener(_onSessionChanged);
     _macMenu?.dispose();
     // Same teardown Sparkle runs before it relaunches, so the two paths cannot
-    // drift apart.
-    unawaited(
-      teardownSession(
-        process: widget.process,
-        agent: widget.agent,
-        mcp: widget.mcp,
-      ),
-    );
+    // drift apart. Skipped when the exit hook already ran it — that one was
+    // awaited, and this one cannot be.
+    if (!_exiting) {
+      unawaited(
+        teardownSession(
+          process: widget.process,
+          agent: widget.agent,
+          mcp: widget.mcp,
+        ),
+      );
+    }
     widget.updates.dispose();
     widget.mcp.dispose();
+    // `teardownSession` stops the agent; this releases the notifier. It used to
+    // do both, which is why the stop could not be awaited.
+    widget.agent.dispose();
     widget.process.dispose();
     widget.terminal.dispose();
     widget.session.dispose();

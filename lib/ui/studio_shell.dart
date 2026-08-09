@@ -12,6 +12,7 @@ import '../terminal/studio_terminal.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import '../toolchain/toolchain_controller.dart';
+import 'full_restart_button.dart';
 import 'hot_restart_button.dart';
 import 'new_project_dialog.dart';
 import 'preview_pane.dart';
@@ -217,22 +218,10 @@ class _Toolbar extends StatelessWidget {
           else
             const Spacer(),
           _ToolchainBadge(toolchains: toolchains, onTap: onManageTools),
-          const SizedBox(width: 4),
+          const SizedBox(width: 10),
           HotRestartButton(mcp: mcp),
-          _IconAction(
-            icon: LucideIcons.play,
-            tooltip: 'Start',
-            onPressed: session.hasProject && process.canStart
-                ? process.start
-                : null,
-          ),
-          _IconAction(
-            icon: LucideIcons.square,
-            tooltip: 'Stop',
-            onPressed: session.hasProject && process.canStop
-                ? process.stop
-                : null,
-          ),
+          const SizedBox(width: 8),
+          FullRestartButton(process: process),
         ],
       ),
     );

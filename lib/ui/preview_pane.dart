@@ -307,8 +307,6 @@ class PreviewPaneState extends State<PreviewPane> {
           viewMode: _viewMode,
           onPreviewThemeChanged: _setPreviewTheme,
           onViewModeChanged: _setViewMode,
-          onReload: reload,
-          canReload: widget.process.previewReady,
         ),
         Expanded(
           child: Stack(
@@ -408,16 +406,12 @@ class _PreviewHeaderBar extends StatelessWidget {
     required this.viewMode,
     required this.onPreviewThemeChanged,
     required this.onViewModeChanged,
-    required this.onReload,
-    required this.canReload,
   });
 
   final Brightness previewBrightness;
   final PreviewViewMode viewMode;
   final ValueChanged<Brightness> onPreviewThemeChanged;
   final ValueChanged<PreviewViewMode> onViewModeChanged;
-  final VoidCallback onReload;
-  final bool canReload;
 
   @override
   Widget build(BuildContext context) {
@@ -486,13 +480,6 @@ class _PreviewHeaderBar extends StatelessWidget {
                 icon: LucideIcons.moon,
               ),
             ],
-          ),
-          const SizedBox(width: 8),
-          SegmentedIconButton(
-            icon: LucideIcons.refreshCw,
-            tooltip: 'Reload preview',
-            onMutedSurface: true,
-            onPressed: canReload ? onReload : null,
           ),
         ],
       ),

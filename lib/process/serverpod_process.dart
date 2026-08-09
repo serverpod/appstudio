@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 
 import '../preview/preview_phase.dart';
 import '../process/dev_session_cleanup.dart';
+import '../process/full_restart_view.dart';
 import '../process/registration_code.dart';
 import '../session/project_session.dart';
 import '../terminal/studio_terminal.dart';
@@ -31,7 +32,8 @@ final _lineBreak = RegExp(r'\r\n|\r|\n');
 /// Cap on a console line that never terminates (e.g. a progress spinner).
 const _maxPartialLine = 4096;
 
-class ServerpodProcessController extends ChangeNotifier {
+class ServerpodProcessController extends ChangeNotifier
+    implements FullRestartView {
   ServerpodProcessController({
     required this.toolchains,
     required this.session,
@@ -59,6 +61,7 @@ class ServerpodProcessController extends ChangeNotifier {
   final _partialLine = StringBuffer();
   bool _scheduledVmServiceReload = false;
   String? _registrationCode;
+  bool _restarting = false;
 
   ProcessState get state => _state;
   PreviewPhase get phase => _phase;
@@ -81,6 +84,27 @@ class ServerpodProcessController extends ChangeNotifier {
   bool get canStart => session.hasProject && _state == ProcessState.idle;
   bool get canStop =>
       _state == ProcessState.running || _state == ProcessState.starting;
+
+  /// True for the whole of [restart], across the stop *and* the start.
+  ///
+  /// Without it the UI sees a moment of [ProcessState.idle] between the two and
+  /// flips the restart button to "start the server", which reads as the restart
+  /// having failed.
+  bool get isRestarting => _restarting;
+
+  /// Whether the server is coming up or going down, from the UI's point of
+  /// view. A restart is not offered while one is already in flight.
+  @override
+  bool get isTransitioning =>
+      _restarting ||
+      _state == ProcessState.starting ||
+      _state == ProcessState.stopping;
+
+  @override
+  bool get canRestart => session.hasProject && !isTransitioning;
+
+  @override
+  bool get isStopped => _state == ProcessState.idle;
 
   void _onSessionChanged() {
     final path = session.projectPath;
@@ -372,6 +396,66 @@ class ServerpodProcessController extends ChangeNotifier {
         '(force server recompile)\r\n',
       );
     }
+  }
+
+  /// Stops the server, waits for it to actually be gone, then starts it again.
+  ///
+  /// The wait is the whole point. `stop()` returns once the PTY is reaped, but
+  /// the runner's children can outlive the process-group kill by a moment and
+  /// they still hold the preview port — a `start()` that races them comes up
+  /// unable to bind, which looks like a broken restart rather than a collision.
+  ///
+  /// Starting from [ProcessState.idle] is a plain start: after a crash or a
+  /// failed compile there is nothing to stop, and refusing to act would leave
+  /// the one button that fixes it doing nothing.
+  @override
+  Future<void> restart() async {
+    final projectPath = session.projectPath;
+    if (projectPath == null || isTransitioning) return;
+
+    _restarting = true;
+    notifyListeners();
+    try {
+      if (canStop) {
+        await stop();
+        await _awaitPreviewPortReleased();
+      }
+      // Opening another project mid-restart supersedes this one, and that path
+      // starts the server itself.
+      if (session.projectPath != projectPath) return;
+      await start();
+    } finally {
+      _restarting = false;
+      notifyListeners();
+    }
+  }
+
+  /// Waits for the preview port to go quiet after a stop.
+  ///
+  /// Bounded, then reclaimed by force: a straggler holding the port is exactly
+  /// what [releaseTcpPort] exists for, and `main()` already runs it on launch
+  /// for the same reason. Better to take the port back than to start a server
+  /// that cannot bind it.
+  Future<void> _awaitPreviewPortReleased({
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      if (!await _tcpReady(kPreviewPort)) return;
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    }
+    await releaseTcpPort(kPreviewPort);
+  }
+
+  /// Reloads the CEF preview, ignoring its cache.
+  ///
+  /// Goes through the same token the DWDS attach uses, so there is one reload
+  /// path and it is always the hard one — a plain navigation re-serves the
+  /// cached `main.dart.js`, so a rebuilt app would look unchanged.
+  void requestPreviewReload() {
+    if (!_previewReady) return;
+    _previewReloadToken++;
+    notifyListeners();
   }
 
   Future<void> stop() async {

@@ -43,12 +43,19 @@ UI reference for design patterns: `../cloudui/cloudui_flutter/`.
   the card is attached next to that tool part and the raw row is hidden.
 - Ground truth for events/endpoints is the running server: `curl <base>/doc`.
 
-## Hot restart (Serverpod MCP)
+## Hot Restart (Serverpod MCP)
 
-The toolbar's flash icon recompiles and reboots the running server, then
-hot-restarts the Flutter app. It goes through `serverpod mcp-server`, the CLI's
-own MCP bridge — `lib/mcp/serverpod_mcp_bridge.dart` speaks the protocol,
-`McpController` owns the policy, `HotRestartButton` is the one control.
+The toolbar's **Hot Restart** button recompiles and reboots the running server,
+then hot-restarts the Flutter app and force-reloads the preview. It goes through
+`serverpod mcp-server`, the CLI's own MCP bridge —
+`lib/mcp/serverpod_mcp_bridge.dart` speaks the protocol, `McpController` owns the
+policy, `HotRestartButton` is the one control.
+
+- **It runs the bridge's `hot_restart`, and the button says so.** `hot_reload`
+  also exists and is *not* what this is: it preserves in-memory state and skips
+  the server reboot, which means it does not pick up a change to `main()`.
+  Switching is a one-line change in `McpController.hotRestart` — a behaviour
+  change, and the label would have to move with it.
 
 - **Transport is stdio MCP** — newline-delimited JSON-RPC 2.0, protocol
   `2024-11-05`…`2025-11-25`, server name `serverpod-bridge`. We use
@@ -88,12 +95,126 @@ own MCP bridge — `lib/mcp/serverpod_mcp_bridge.dart` speaks the protocol,
   one.** Our bridge therefore displaces an IDE-spawned `serverpod mcp-server`
   for the same project, and it displaces ours. Calls reconnect lazily, so this
   self-heals, but it is why two App Studio windows on one project would fight.
-- **A hot restart needs no preview reload from us.** The runner hot-restarts the
-  Flutter app and triggers the browser refresh itself (`✓ Browser refresh
-  triggered.` in the server log), and the CEF preview comes back on its own.
-  Forcing `reloadIgnoreCache()` here would race that.
+- **A success force-reloads the preview** via
+  `ServerpodProcessController.requestPreviewReload()`. The runner does trigger a
+  browser refresh of its own (`✓ Browser refresh triggered.` in the server log)
+  and the preview does come back without us — but that goes through DWDS and
+  leaves the cached `main.dart.js` in place, so it cannot be *trusted* to be
+  showing the code that was just compiled. Ours ignores the cache. Only on
+  success: reloading after a failed restart would just re-serve the old app and
+  make it look like the restart worked.
 - `hot_reload` exists on the bridge too, along with migrations, log tails and
   `get_flutter_app_dtd`. Only `hot_restart` is wired up.
+
+### The toolbar is two buttons, and that is the whole surface
+
+**Hot Restart** (fast, MCP) and **Full Restart** (slow, process). Both are
+`ToolbarActionButton` — an outline icon button with a spinner in the icon's place
+while busy — so they cannot drift in size or spinner size sitting next to each
+other.
+
+- **Icon-only, so the tooltip is load-bearing** and carries the name as well as
+  the reason it is unavailable. `label` is still passed: it becomes
+  `semanticLabel`, which is otherwise the icon glyph and nothing.
+
+- **Full Restart replaced separate Start and Stop icons.** They were two controls
+  for one question, and the pair invited the state that actually breaks things:
+  stopped on purpose, with a preview pane and an agent still waiting for a server
+  that is never coming back. `ServerpodProcessController.restart()` is stop → wait
+  → start.
+- **It stays enabled with the server stopped**, where it is a plain start. That is
+  the recovery path after a crash or a failed compile, and it is now the only
+  control that can bring the server back — disabling it there would strand the
+  user. `test/process/full_restart_button_test.dart` pins this.
+- **`restart()` waits for the preview port to go quiet before starting.** `stop()`
+  returns once the PTY is reaped, but the runner's children can outlive the
+  process-group kill by a moment and they still hold the port; a start that races
+  them comes up unable to bind, which reads as a broken restart rather than a
+  collision. Bounded at 5s, then `releaseTcpPort` takes the port back — the same
+  reclaim `main()` runs on launch.
+- **`isRestarting` spans the stop *and* the start.** Without it the UI sees a
+  moment of `ProcessState.idle` between them and flips the button to "start the
+  server", which reads as the restart having failed. `isTransitioning` is what the
+  button actually reads.
+- The button talks to `FullRestartView`, not the controller, for the same reason
+  `ToolsView` exists: the state rules are worth testing without spawning a real
+  Serverpod runner.
+
+## Child processes and teardown
+
+App Studio spawns four long-lived children: the `serverpod start` PTY, `opencode
+serve`, `serverpod mcp-server`, and CEF's helpers. Getting them all down is
+harder than it looks, and the failure is silent — an orphan is reparented to
+launchd, where nothing will ever clean it up. This was found with **17 orphaned
+`opencode serve` processes** on one machine, accumulated over days, one per
+session.
+
+Three mechanisms, and all three are needed:
+
+1. **`AppLifecycleListener.onExitRequested`** (`main.dart`) is the *only* place a
+   quit can be awaited. `dispose()` is synchronous, and on ⌘Q the isolate is
+   killed at the OS's convenience — measured: the server and the bridge died with
+   us because they are stdio/PTY-coupled, but `opencode serve` is an ordinary
+   `Process.start` child and survived **every** quit. `AppDelegate` must keep
+   *not* overriding `applicationShouldTerminate`, or this hook stops firing.
+   It always answers `AppExitResponse.exit`: refusing would make the app
+   unquittable, which is far worse than a stray process.
+2. **An awaitable `stop()` on every controller that owns a child.**
+   `AgentController.stop()` and `McpController.stop()` exist for this and are
+   what `teardownSession` calls. It used to call `agent.dispose()`, which could
+   only fire the teardown and return — the stop was never awaited by anyone.
+3. **A pid file per child, reclaimed on next launch** (`dev_session_cleanup.dart`,
+   `DevProcessKind`). The backstop for a crash, a `kill -9`, and a Flutter hot
+   restart — which re-runs `main()` without `dispose()`, so the previous
+   isolate's children are already orphaned by the time the new one starts. Only
+   the PTY used to register, which is why only the PTY was ever reclaimed.
+
+### The group-kill trap
+
+`Process.killPid(-pid, …)` signals the process *group* led by `pid` — and reports
+failure by **returning `false`, not by throwing**. The old reclaim wrapped it in
+a `try`/`catch` with a single-pid fallback in the `catch`, so the fallback never
+ran. That mattered because only a child that called `setsid` leads its own group:
+the PTY does, so `-pid` reaches its whole tree, but a plain `Process.start` child
+inherits our group and leads nothing, so `-pid` matched **nothing, silently**.
+That is how orphaned agents survived every launch even with a reclaim in place.
+`_signal` now branches on the return value. `test/process/dev_session_cleanup_test.dart`
+pins it against a real child.
+
+### `OpenCodeServe` publishes its handle late, so starts must be generation-guarded
+
+`_process` is assigned two awaits after `start()` begins (`_freePort`, then
+`Process.start`). A second start arriving in that window found `_process == null`,
+killed nothing, and then *overwrote* the handle when the first one finally
+published — stranding a live serve that nothing could reach again, which is
+exactly the "one orphan per port" signature. Every start now takes a generation
+and kills its own process if it finds itself superseded; `stop()` bumps the
+generation too, so it cancels a start in flight. Concurrent starts are reachable
+from a provider save/remove landing on top of a project start, and from `process`
+notifying on every poll tick.
+
+- **Claim state *before* awaiting a teardown, not after.** `_startForProject` and
+  `_restartServePreservingChat` set `_boundProjectPath`/`_connection` first, then
+  tear down with `keepClaim: true`. Setting them afterwards left a window where
+  `_onSessionOrProcessChanged`'s idempotency guard saw an idle, unclaimed
+  controller and started a second serve.
+- **`startForSettings` claims `_startedForSettings` before its first await and
+  re-checks it after.** Set after, a Settings dialog closed mid-start found the
+  flag false, declined to stop, and left a scratch serve nobody owned; and
+  without the re-check the start proceeded even after being disowned.
+
+### Known gaps, deliberately not fixed
+
+- `dart pub get` (`serverpod_process.dart`) and `serverpod create`
+  (`project_creator.dart`) keep no handle and are never killed. Quitting during a
+  cold first run leaves a `pub get` to finish on its own. They exit by themselves;
+  a cancellation path is real work.
+- Neither `OpenCodeServe.stop()` nor `ServerpodMcpBridge.stop()` group-kills, so a
+  grandchild (an LSP server opencode spawned) could outlive its parent. Not
+  observed — every orphan found was the direct child — and a group kill on a
+  non-leader is a no-op anyway, so this needs the child in its own session first.
+- `tool_probe.dart` times out its version probes with `Future.timeout`, which does
+  not kill the process. A wedged probe binary is orphaned.
 
 ## Setup & toolchain
 
@@ -427,7 +548,8 @@ install. Sparkle would also catch it, but later and less clearly.
 
 - **Shell theme ≠ preview theme.** Preview light/dark toggles a JS shim (`preview_theme.dart`) that fakes `prefers-color-scheme` inside CEF.
 - **View modes:** `PreviewViewMode` — portrait phone (default), landscape phone, desktop. Defined in `preview_device.dart`.
-- **Reload:** the preview reload button and the DWDS-attach token both go through `PreviewPaneState.reload()`, which calls `reloadIgnoreCache()` — a plain navigation re-serves the cached `main.dart.js`, so a rebuilt app looks unchanged. Re-apply the theme shim afterwards: it is injected at load start with the brightness captured when the webview was created.
+- **Reload: there is no reload button, and no second path.** Every reload goes through `previewReloadToken` → `PreviewPaneState.reload()` → `reloadIgnoreCache()`, so it is always the hard one — a plain navigation re-serves the cached `main.dart.js`, so a rebuilt app looks unchanged. Three things bump the token: the DWDS attach, `ServerpodProcessController.requestPreviewReload()`, and a successful Hot Restart. Re-apply the theme shim afterwards: it is injected at load start with the brightness captured when the webview was created.
+- The header's reload button is **gone on purpose.** Hot Restart now force-reloads the preview itself, so the button's only remaining job was papering over a reload that had not happened — and the honest fix for that is the token, not a second control that does the same thing by hand.
 - **Backdrop:** CEF composites with alpha, so an opaque `ColoredBox` (`previewBackdropColor`) sits under the surface, following the *previewed* app's brightness, not the shell's.
 - **CEF sizing:** `PreviewSurfaceSync` + `burstSyncPreviewSurface` keep the webview sized on panel/mode changes. Defer layout reads to post-frame callbacks; avoid `MediaQuery` in `initState`.
 - **webview_cef:** path dependency `packages/webview_cef` (fork of 0.5.1). Includes CEF resize surface sync and skips embedding `Helper (Alerts)`. CEF itself is fetched by `pod install` into `macos/third/cef/` (gitignored).

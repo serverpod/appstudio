@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../process/dev_session_cleanup.dart';
 import '../toolchain/tool_status.dart';
 import '../toolchain/toolchain_controller.dart';
 
@@ -20,6 +21,16 @@ class OpenCodeServe {
   String? _error;
   final _stdout = StringBuffer();
 
+  /// Bumped by every [start] and every [stop].
+  ///
+  /// This is what makes a superseded start clean up after itself. The handle is
+  /// published two awaits after `Process.start` is called, so a second start
+  /// arriving in that window used to find `_process == null`, kill nothing, and
+  /// then overwrite the handle when the first one finally published — stranding
+  /// a live `opencode serve` that nothing could ever reach again. Each start now
+  /// checks that it is still the current one and kills its own process if not.
+  int _generation = 0;
+
   OpenCodeServeState get state => _state;
   Uri? get baseUrl => _baseUrl;
   String? get projectPath => _projectPath;
@@ -34,6 +45,7 @@ class OpenCodeServe {
     }
     await stop();
 
+    final generation = ++_generation;
     _state = OpenCodeServeState.starting;
     _error = null;
     _projectPath = projectPath;
@@ -52,8 +64,9 @@ class OpenCodeServe {
     // Avoid password prompt / leave local-only unsecured (loopback).
     env.remove('OPENCODE_SERVER_PASSWORD');
 
+    final Process process;
     try {
-      _process = await Process.start(
+      process = await Process.start(
         opencode,
         [
           'serve',
@@ -67,12 +80,25 @@ class OpenCodeServe {
         runInShell: false,
       );
     } catch (e) {
-      _state = OpenCodeServeState.stopped;
-      _error = 'Failed to start opencode: $e';
+      if (generation == _generation) {
+        _state = OpenCodeServeState.stopped;
+        _error = 'Failed to start opencode: $e';
+      }
       rethrow;
     }
 
-    final process = _process!;
+    // Superseded while spawning. Nothing else holds this handle, so if it is not
+    // killed here it is orphaned for the life of the machine.
+    if (generation != _generation) {
+      await _reap(process);
+      throw StateError('opencode start was superseded');
+    }
+
+    _process = process;
+    // Registered before the health check: a process that is up but not yet
+    // answering is exactly the one a crash would strand.
+    await registerDevSessionPid(DevProcessKind.agent, process.pid);
+
     process.stdout.transform(utf8.decoder).listen((chunk) {
       _stdout.write(chunk);
     });
@@ -84,13 +110,17 @@ class OpenCodeServe {
         _state = OpenCodeServeState.stopped;
         _baseUrl = null;
         _error ??= 'opencode exited with code $code';
+        unawaited(clearDevSessionPid(DevProcessKind.agent));
       }
     }));
 
     final base = Uri.parse('http://127.0.0.1:$port');
     final deadline = DateTime.now().add(const Duration(seconds: 20));
     while (DateTime.now().isBefore(deadline)) {
-      if (_process != process) {
+      if (generation != _generation || _process != process) {
+        // Same reasoning as above: whoever superseded us could not have killed
+        // this process, so it is ours to clean up.
+        await _reap(process);
         throw StateError(_error ?? 'opencode stopped while starting');
       }
       try {
@@ -116,30 +146,48 @@ class OpenCodeServe {
     throw StateError(_error!);
   }
 
+  /// Stops the serve and waits for the process to actually be gone.
+  ///
+  /// Awaiting matters: callers use this to guarantee the port is free before the
+  /// next start, and the quit path uses it to guarantee we are not leaving a
+  /// child behind. Bumping the generation also cancels any start still in
+  /// flight, which then kills its own process.
   Future<void> stop() async {
+    _generation++;
     final process = _process;
     if (process == null) {
       _state = OpenCodeServeState.stopped;
       _baseUrl = null;
+      await clearDevSessionPid(DevProcessKind.agent);
       return;
     }
     _state = OpenCodeServeState.stopping;
     _process = null;
-    try {
-      process.kill(ProcessSignal.sigterm);
-      await process.exitCode.timeout(
-        const Duration(seconds: 3),
-        onTimeout: () {
-          process.kill(ProcessSignal.sigkill);
-          return -1;
-        },
-      );
-    } catch (_) {}
+    await _reap(process);
     _state = OpenCodeServeState.stopped;
     _baseUrl = null;
+    await clearDevSessionPid(DevProcessKind.agent);
   }
 
   Future<void> dispose() => stop();
+
+  /// SIGTERM, wait, then SIGKILL — and wait again, so this returns only once the
+  /// process is really reaped rather than once a signal has been sent.
+  static Future<void> _reap(Process process) async {
+    try {
+      process.kill(ProcessSignal.sigterm);
+      await process.exitCode.timeout(const Duration(seconds: 3));
+      return;
+    } on TimeoutException {
+      // Ignored it. Escalate below.
+    } catch (_) {
+      return;
+    }
+    try {
+      process.kill(ProcessSignal.sigkill);
+      await process.exitCode.timeout(const Duration(seconds: 2));
+    } catch (_) {}
+  }
 
   static Future<int> _freePort() async {
     final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);

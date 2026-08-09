@@ -47,7 +47,10 @@ Future<void> teardownSession({
 
   await Future.wait([
     guarded('server stop', process.stop),
-    guarded('agent dispose', () async => agent.dispose()),
+    // `stop`, not `dispose`. `dispose()` is synchronous and could only fire the
+    // teardown and return, so every quit left an orphaned `opencode serve`
+    // reparented to launchd — 17 of them on the machine where this was found.
+    guarded('agent stop', agent.stop),
     // Awaited rather than left to the controller's own listener: the bridge
     // is a child process, and Sparkle relaunching over one that is still
     // shutting down is exactly the stray process this exists to prevent.
