@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import '../preview/preview_phase.dart';
 import '../process/dev_session_cleanup.dart';
 import '../process/full_restart_view.dart';
+import '../process/project_ready_view.dart';
 import '../process/registration_code.dart';
 import '../session/project_session.dart';
 import '../terminal/studio_terminal.dart';
@@ -33,7 +34,7 @@ final _lineBreak = RegExp(r'\r\n|\r|\n');
 const _maxPartialLine = 4096;
 
 class ServerpodProcessController extends ChangeNotifier
-    implements FullRestartView {
+    implements FullRestartView, ProjectReadyView {
   ServerpodProcessController({
     required this.toolchains,
     required this.session,
@@ -68,6 +69,15 @@ class ServerpodProcessController extends ChangeNotifier
 
   /// Web server is accepting connections on :9998 (CEF may load).
   bool get previewReady => _previewReady;
+
+  /// The whole stack is up and the app is live in the preview.
+  ///
+  /// Stricter than [previewReady], which only means the port answers: the app
+  /// served on it is usually still a blank page until DWDS has attached and
+  /// reloaded. `PreviewPhase.ready` is the first moment there is a running
+  /// project to hand to an editor.
+  @override
+  bool get projectIsReady => _phase == PreviewPhase.ready;
 
   /// Increments when the preview should reload (DWDS/VM service attach).
   int get previewReloadToken => _previewReloadToken;
@@ -205,9 +215,7 @@ class ServerpodProcessController extends ChangeNotifier
     }
 
     if (workspaceRoot != null) {
-      terminal.writeLocal(
-        'Dart workspace: ${p.basename(workspaceRoot)}\r\n',
-      );
+      terminal.writeLocal('Dart workspace: ${p.basename(workspaceRoot)}\r\n');
     }
 
     for (final pkg in packages) {
@@ -216,8 +224,9 @@ class ServerpodProcessController extends ChangeNotifier
           ? await _workspaceHasFlutterPackage(workspaceRoot)
           : await _isFlutterPackage(pkg);
       final toolchain = toolchains.current;
-      final exe =
-          useFlutter ? toolchain.flutterExecutable : toolchain.dartExecutable;
+      final exe = useFlutter
+          ? toolchain.flutterExecutable
+          : toolchain.dartExecutable;
       if (exe == null) {
         throw Exception(toolchain.unavailableReason(ToolId.flutter));
       }
@@ -248,16 +257,12 @@ class ServerpodProcessController extends ChangeNotifier
       }
     }
 
-    await _assertServerpodPackageResolved(
-      workspaceRoot ?? projectPath,
-    );
+    await _assertServerpodPackageResolved(workspaceRoot ?? projectPath);
 
     // serverpod start reuses `.dart_tool/serverpod/server.dill` when sources
     // look unchanged — it does *not* invalidate on package_config changes.
     // After a fresh pub get (new PUB_CACHE paths), force a recompile.
-    await _invalidateServerpodCompileCaches(
-      workspaceRoot ?? projectPath,
-    );
+    await _invalidateServerpodCompileCaches(workspaceRoot ?? projectPath);
   }
 
   /// Walk up from [start] looking for a pubspec with a `workspace:` key.
@@ -331,7 +336,8 @@ class ServerpodProcessController extends ChangeNotifier
 
     late final Map<String, dynamic> config;
     try {
-      config = jsonDecode(await configFile.readAsString()) as Map<String, dynamic>;
+      config =
+          jsonDecode(await configFile.readAsString()) as Map<String, dynamic>;
     } catch (e) {
       throw Exception('Invalid package_config.json: $e');
     }
@@ -380,9 +386,7 @@ class ServerpodProcessController extends ChangeNotifier
       );
     }
 
-    terminal.writeLocal(
-      'Resolved package:serverpod → $rootPath\r\n',
-    );
+    terminal.writeLocal('Resolved package:serverpod → $rootPath\r\n');
   }
 
   Future<void> _invalidateServerpodCompileCaches(String root) async {

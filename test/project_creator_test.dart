@@ -1,6 +1,11 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:appstudio/process/project_creator.dart';
+import 'package:appstudio/session/project_settings.dart';
+
+import 'support/toolchain_support.dart';
 
 /// Tail of a pubspec written by `serverpod create` (4.0.0-beta.1).
 const _serverPubspec = '''
@@ -47,6 +52,68 @@ void main() {
 
     test('says nothing about an empty name', () {
       expect(validateProjectName(''), isNull);
+    });
+  });
+
+  group('recordProjectSettings', () {
+    late Directory project;
+
+    setUp(() {
+      project = Directory.systemTemp.createTempSync('appstudio_creator_test');
+    });
+
+    tearDown(() {
+      if (project.existsSync()) project.deleteSync(recursive: true);
+    });
+
+    test(
+      'writes down the picks, not the editors that got configured',
+      () async {
+        final creator = ProjectCreator(
+          toolchains: await emptyToolchainController(),
+        );
+        await creator.recordProjectSettings(
+          projectPath: project.path,
+          ides: {IdeIntegration.cursor},
+        );
+
+        // `configuredIdes` would have added OpenCode here, and every project
+        // ever created would carry an Open in OpenCode button because of it.
+        final settings = await ProjectSettings.load(project.path);
+        expect(settings.editors, {IdeIntegration.cursor});
+      },
+    );
+
+    test('an unpicked built-in editor leaves nothing behind', () async {
+      final creator = ProjectCreator(
+        toolchains: await emptyToolchainController(),
+      );
+      await creator.recordProjectSettings(
+        projectPath: project.path,
+        ides: const {},
+      );
+
+      final settings = await ProjectSettings.load(project.path);
+      expect(settings.editors, isEmpty);
+    });
+  });
+
+  group('configuredIdes', () {
+    test('adds the built-in editors to whatever was picked', () {
+      expect(configuredIdes({IdeIntegration.cursor}), {
+        IdeIntegration.opencode,
+        IdeIntegration.cursor,
+      });
+    });
+
+    test('picking nothing still configures the built-in agent', () {
+      expect(configuredIdes(const {}), {IdeIntegration.opencode});
+    });
+
+    test('picking a built-in editor changes nothing', () {
+      expect(configuredIdes({IdeIntegration.opencode}), {
+        IdeIntegration.opencode,
+      });
     });
   });
 

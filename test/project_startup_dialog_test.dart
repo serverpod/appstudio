@@ -1,9 +1,23 @@
+import 'package:appstudio/process/project_ready_view.dart';
 import 'package:appstudio/theme/app_theme.dart';
 import 'package:appstudio/ui/project_startup_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shad/shad.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+/// A project that is still compiling until the test says otherwise.
+class _FakeProcess extends ChangeNotifier implements ProjectReadyView {
+  bool _ready = false;
+
+  @override
+  bool get projectIsReady => _ready;
+
+  void markReady() {
+    _ready = true;
+    notifyListeners();
+  }
+}
 
 /// The notice is the only warning that a first start takes minutes, and its
 /// "don't show again" is a one-way door: if the preference is written when the
@@ -16,13 +30,16 @@ void main() {
 
   /// Pumps a host that opens the notice as soon as it is mounted, the way
   /// opening a project does.
-  Future<void> pumpAndOpen(WidgetTester tester) async {
+  Future<void> pumpAndOpen(WidgetTester tester, [_FakeProcess? process]) async {
     await tester.pumpWidget(
       ShadApp(
         theme: buildLightTheme(),
         home: Builder(
           builder: (context) => TextButton(
-            onPressed: () => maybeShowProjectStartupNotice(context),
+            onPressed: () => maybeShowProjectStartupNotice(
+              context,
+              process: process ?? _FakeProcess(),
+            ),
             child: const Text('open'),
           ),
         ),
@@ -54,6 +71,31 @@ void main() {
     await tester.tap(find.byType(ShadCheckbox));
     await tester.pumpAndSettle();
     await tester.tap(find.text("Let's Go"));
+    await tester.pumpAndSettle();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('project.startup_notice_dismissed'), isTrue);
+  });
+
+  testWidgets('closes itself once the project is up', (tester) async {
+    final process = _FakeProcess();
+    await pumpAndOpen(tester, process);
+    expect(find.byType(ProjectStartupDialog), findsOneWidget);
+
+    process.markReady();
+    await tester.pumpAndSettle();
+
+    // The wait it describes is over, and the "has started" notice follows it.
+    expect(find.byType(ProjectStartupDialog), findsNothing);
+  });
+
+  testWidgets('a self-close carries the ticked box with it', (tester) async {
+    final process = _FakeProcess();
+    await pumpAndOpen(tester, process);
+    await tester.tap(find.byType(ShadCheckbox));
+    await tester.pumpAndSettle();
+
+    process.markReady();
     await tester.pumpAndSettle();
 
     final prefs = await SharedPreferences.getInstance();

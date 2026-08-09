@@ -2,39 +2,19 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 
+import '../session/project_settings.dart';
 import '../toolchain/tool_status.dart';
 import '../toolchain/toolchain_controller.dart';
 import 'dev_session_cleanup.dart';
+import 'ide_integration.dart';
 
-/// Editors `serverpod create --ide` can configure with agent skills and MCP.
-///
-/// `--ide` is a multi-option, so each one is passed as its own flag.
-enum IdeIntegration {
-  opencode('opencode', 'OpenCode', builtIn: true),
-  antigravity('antigravity', 'Antigravity'),
-  claude('claude', 'Claude Code'),
-  codex('codex', 'Codex'),
-  cursor('cursor', 'Cursor'),
-  vscode('vscode', 'VS Code');
-
-  const IdeIntegration(this.option, this.label, {this.builtIn = false});
-
-  /// Value passed to `serverpod create --ide`.
-  final String option;
-
-  /// Name shown in the New Project dialog.
-  final String label;
-
-  /// Configured whether or not it was asked for. OpenCode is the agent App
-  /// Studio runs itself, so a project without it would open with an Agent tab
-  /// that has no skills and no MCP server.
-  ///
-  /// The New Project dialog does not mark these — they are offered like any
-  /// other editor, and ticking one changes nothing.
-  final bool builtIn;
-}
+// `IdeIntegration` moved out to keep it clear of `dart:io`, which
+// `ProjectSettings` needs it to be. Re-exported so the New Project dialog and
+// its tests still reach it through the creator, where it reads naturally.
+export 'ide_integration.dart';
 
 final _ansiEscape = RegExp(r'\x1B\[[0-9;]*[A-Za-z]');
 
@@ -116,14 +96,38 @@ class ProjectCreator {
       throw ProjectCreationException(
         _failureMessage(log.toString(), code),
         log: _logTail(log.toString()),
-        createdPath:
-            await Directory(projectPath).exists() ? projectPath : null,
+        createdPath: await Directory(projectPath).exists() ? projectPath : null,
       );
     }
 
     onStatus?.call('Configuring preview…');
     await _configureFlutterAppForPreview(projectPath: projectPath, name: name);
+    await recordProjectSettings(projectPath: projectPath, ides: ides);
     return projectPath;
+  }
+
+  /// Writes `.appstudio/settings.json` so the toolbar knows which editors this
+  /// project was set up for.
+  ///
+  /// Records [ides] as picked, *not* `configuredIdes(ides)`. The built-in
+  /// entries go out as `--ide` flags whether or not they were asked for, and
+  /// writing them down here would put an Open in OpenCode button on every
+  /// project anyone ever created.
+  ///
+  /// Never fails the creation: the project is complete and usable without it,
+  /// and `ProjectSettings.load` falls back to the config files the CLI just
+  /// wrote. Losing a finished project to an unwritable dotfile would be a far
+  /// worse trade.
+  @visibleForTesting
+  Future<void> recordProjectSettings({
+    required String projectPath,
+    required Set<IdeIntegration> ides,
+  }) async {
+    try {
+      await ProjectSettings(editors: ides).save(projectPath);
+    } on FileSystemException {
+      // Ignored — see above.
+    }
   }
 
   Future<int> _runCreate({
@@ -149,8 +153,7 @@ class ProjectCreator {
         [
           'create',
           name,
-          for (final ide in IdeIntegration.values)
-            if (ide.builtIn || ides.contains(ide)) ...['--ide', ide.option],
+          for (final ide in configuredIdes(ides)) ...['--ide', ide.option],
           '--no-interactive',
         ],
         workingDirectory: workingDirectory,
@@ -169,10 +172,8 @@ class ProjectCreator {
       if (status != null) onStatus?.call(status);
     }
 
-    final stdoutSub =
-        process.stdout.transform(utf8.decoder).listen(consume);
-    final stderrSub =
-        process.stderr.transform(utf8.decoder).listen(consume);
+    final stdoutSub = process.stdout.transform(utf8.decoder).listen(consume);
+    final stderrSub = process.stderr.transform(utf8.decoder).listen(consume);
     final code = await process.exitCode;
     await stdoutSub.cancel();
     await stderrSub.cancel();

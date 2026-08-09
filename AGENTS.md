@@ -106,7 +106,7 @@ policy, `HotRestartButton` is the one control.
 - `hot_reload` exists on the bridge too, along with migrations, log tails and
   `get_flutter_app_dtd`. Only `hot_restart` is wired up.
 
-### The toolbar is two buttons, and that is the whole surface
+### The restart surface is two buttons, and that is all of it
 
 **Hot Restart** (fast, MCP) and **Full Restart** (slow, process). Both are
 `ToolbarActionButton` — an outline icon button with a spinner in the icon's place
@@ -139,6 +139,73 @@ other.
 - The button talks to `FullRestartView`, not the controller, for the same reason
   `ToolsView` exists: the state rules are worth testing without spawning a real
   Serverpod runner.
+
+### Open in … — handing the project to an external editor
+
+One `ShadButton.ghost` per external editor, reading **“Open in Cursor”** with a
+trailing `LucideIcons.arrowUpRight`, between the toolbar's project path and the
+restart buttons. `ui/open_in_editor_buttons.dart` draws them,
+`session/external_editors.dart` decides which exist, and the widget imports only
+`ExternalEditorsView` — the same narrow-interface split as Hot/Full Restart.
+
+- **A button appears only when all three are true**: the project was configured
+  for that editor, the editor's `.app` is on this Mac, and we know a way to hand
+  that app a folder. The third is a hardcoded map (`_editorApps`), not a probe.
+- **`open` cannot tell you whether it worked**, which is why that map is
+  conservative. It exits 0 for an app that launched and ignored the path exactly
+  as it does for one that opened it; a non-zero exit only means the *bundle*
+  could not be launched. A button that silently does nothing is worse than an
+  absent one.
+- **Everything goes through `open`, and that is the point.** It hands the
+  request to LaunchServices, which routes it to the copy that is *already
+  running*. The bundled VS Code-style CLIs
+  (`Contents/Resources/app/bin/{cursor,code}`) were tried here and reverted:
+  invoked from a GUI process they miss the running instance's IPC socket and
+  start a **second copy of the editor**. Two forms:
+  - **The folder as a document** — `open -a <bundle> <path>`, for Cursor and
+    VS Code, which both declare `public.folder` in `CFBundleDocumentTypes`.
+  - **A deep link** — `open <scheme>://…`, for Claude
+    (`claude://code/new?folder=`), Codex (`codex://threads/new?path=`) and
+    OpenCode (`opencode://open-project?directory=`). None of the three takes a
+    folder as a document; all need the path percent-encoded. The installed
+    check matters *most* here: `open <scheme>://…` exits 0 even when nothing
+    claims the scheme.
+- **Claude's host is `code`, not `cowork`.** Both are real routes on `/new` and
+  both take `folder`, but `cowork` lands in Cowork with the directory merely
+  selected while `code` opens a Claude Code session in it — confirmed by
+  `LocalSessions.checkGhAvailable: cwd=<project>` in `~/Library/Logs/Claude`.
+  The `open-file` handler the bundle also registers goes to Cowork too, which
+  is why the deep link is preferred over handing it the folder as a document.
+  No `q`/`prompt` is sent: that would prefill *and* start a task, and the
+  button only promises to open the project.
+- **Antigravity is the one `IdeIntegration` with no button.**
+  `/Applications/Antigravity.app` is not the IDE — it is a thin Electron shell
+  around a Go language server, with no `open-file` handler and no
+  `CFBundleDocumentTypes`, so a folder handed to it is dropped. The editor is a
+  separate bundle, `Antigravity IDE.app`, and no route into it has been
+  confirmed. It is out only because no build of it has been seen to open the
+  folder it was given.
+- **Order is preference order**, and `ProjectStartedDialog` features the first.
+  OpenCode is last deliberately: it only appears when the box was ticked, but
+  App Studio already runs it in the Agent tab, so an editor it does *not* have
+  is the more useful next step to feature.
+- **Launch is by bundle path, not by name.** `open -a Cursor` asks
+  LaunchServices to resolve the name, which can land on a different copy than
+  the one `_findApp` checked for. `/Applications` is searched before
+  `~/Applications`.
+- A failed launch posts a notification with `force: true` — the user just
+  clicked a button in this window, so App Studio is frontmost and
+  `StudioNotifications` would otherwise suppress it.
+- **The buttons are disabled, not hidden, until `PreviewPhase.ready`**
+  (`ProjectReadyView.projectIsReady`). An editor opened mid-compile attaches to
+  a server that cannot answer it, and a control that materialises minutes later
+  is one the user never learns is there. `ShadTooltip` needs the
+  `ShadGestureDetector` wrapper to open over the disabled button.
+- **The toolchain badge no longer shows a version.** It used to sit in this spot
+  permanently reading `managed 3.35.0` — a number the user cannot act on.
+  `_ToolchainWarningBadge` now draws nothing unless `missingRequired` is
+  non-empty. That half has to stay: a required tool we cannot supply never
+  reaches the first-run setup screen, so the badge is the only place it surfaces.
 
 ## Child processes and teardown
 
@@ -843,6 +910,42 @@ that could not work — there is no Flutter SDK to build with yet.
 - Names must match `^[a-z][a-z0-9_]*$` (they become Dart package names); the input folds case and drops separators as you type.
 - After the CLI succeeds, `patchFlutterAppForPreview` adds `device: web-server` and `web-port: 9998` to the `flutter_apps` entry in `<name>_server/pubspec.yaml` — without it `serverpod start` opens a browser instead of feeding the preview pane. The project is then opened, which auto-starts it.
 - Last used location is remembered in `ProjectSession` (`new_project_directory` pref).
+- **`IdeIntegration` lives in `process/ide_integration.dart`, not in the creator**, purely so `ProjectSettings` can use it without dragging `dart:io` in. `project_creator.dart` re-exports it, so every existing import still reads naturally.
+- **`configuredIdes()` is the one place "which editors got configured" is computed**, shared by the `--ide` flags and the settings write below. Two lists of the same thing is how the record drifts from the reality.
+
+### `.appstudio/settings.json`
+
+`ProjectCreator` writes `<project>/.appstudio/settings.json` after the CLI
+succeeds (`session/project_settings.dart`). It records which editors the user
+**picked**, which is what the toolbar's Open in … buttons are drawn from.
+
+- **Picked, not configured — the distinction is the whole point of the file.**
+  `configuredIdes` adds the `builtIn` entries whether or not they were asked
+  for, so writing that set down would put an Open in OpenCode button on every
+  project anyone ever created. `recordProjectSettings` takes the raw selection
+  and `test/project_creator_test.dart` pins it.
+
+- **It is project state, not preferences.** Preferences are global and live in
+  `SharedPreferences`; this belongs to the project, so a copy of it carries the
+  answer and a second machine reads the same one.
+- **A failed write never fails the creation.** The project is complete and
+  usable without it, and losing a finished project to an unwritable dotfile
+  would be a far worse trade than losing two buttons.
+- **A missing or corrupt file falls back to the config files the CLI itself
+  wrote** — `.cursor/mcp.json`, `.vscode/mcp.json`, `.mcp.json`,
+  `.codex/config.toml`, `.agents/plugins/serverpod-local/mcp_config.json` —
+  mirroring the CLI's own `TemplateIde.filePath`. Without it the feature would
+  do nothing for any project that predates it. Each path is specific enough that
+  its presence really does mean `--ide` ran: half the projects on a Mac have a
+  `.vscode/`, but `.vscode/mcp.json` is ours.
+- **Inference skips the `builtIn` integrations**, so `opencode.json` is listed
+  in that map and never read. It is in *every* project App Studio has created,
+  picked or not, so it carries no signal about the choice — inferring from it
+  would reinstate the button the picked/configured split exists to keep off.
+- **A file that parses wins even when it lists nothing.** Ticking no editor is a
+  real choice, and the config the CLI left behind must not be read as one.
+- An id the running build does not know is dropped without taking the rest of
+  the list with it — that is a newer App Studio's editor, not a corrupt file.
 
 ## Opening a project
 
@@ -854,6 +957,43 @@ that could not work — there is no Flutter SDK to build with yet.
   - **`ShadDialog.alert` has no close X**; `ShadDialog` (primary) does. The only difference is that `primaryDialogTheme` sets `closeIconData` and `alertDialogTheme` does not, and there is no flag to turn it off — so pick the variant, don't fight it. Alert is also the right semantics for a notice you acknowledge rather than dismiss.
   - **Body copy belongs in `description`, not a `child` with `textTheme.small`.** `small` is shadcn's *label* role — `w500` at `height: 1.0` (`font-medium leading-none`) — so paragraphs set in it read bold and cramped. `description` resolves to `style.body` over `textTheme.muted`: `w400` at `height: 1.43`.
 - The checkbox sits in `actions` beside the confirm button. The actions row defaults to `MainAxisSize.min` / `MainAxisAlignment.end`, so `spaceBetween` does nothing on its own — it needs `actionsMainAxisSize: MainAxisSize.max` too.
+
+### Two notices, in sequence, never stacked
+
+Opening a project raises **"Starting your project"** while it compiles, then
+**"Your project has started"** (`ui/project_started_dialog.dart`) once
+`PreviewPhase.ready` lands. `main.dart`'s `_showProjectNotices` runs them one
+after the other.
+
+- **The startup notice closes itself when the project comes up**, carrying its
+  ticked checkbox with it. That is also what makes the sequencing work: awaiting
+  its future is how the second notice waits out a user who left the first one
+  sitting there. Showing the second on a timer instead would land it *on top of*
+  the first. The self-close is guarded on `ModalRoute.isCurrent` — popping a
+  route that has already gone takes `home` with it and empties the navigator.
+- Its second paragraph ("When the app has started, open this project in your AI
+  editor…") is gone: that is the whole job of the notice that now follows it,
+  and saying it during a two-minute compile is advice the user cannot act on.
+- **The started notice names one editor and offers one button** —
+  `featuredEditor`, the first of `ExternalEditorsView.editors`. A row of equally
+  weighted buttons is a decision; this is a next step. The toolbar carries the
+  full set. With nothing openable the copy falls back to "your editor" and there
+  is no button: naming an editor we cannot launch is an offer we can't keep.
+- **The Cursor tip carries a screenshot** (`assets/cursor-setup.png`), because
+  the MCP toggles it points at live behind a search field that is hard to
+  describe in a sentence. `Image.asset` needs `width: double.infinity` — the
+  asset is 842px wide and would otherwise ask for 842 *logical* pixels and blow
+  the dialog open.
+- **The actions row wraps its checkbox in `Flexible`.** This one carries two
+  buttons and the wider is named after whatever editor turns up, so unlike the
+  startup notice it can overflow. Note that `flutter_test`'s font makes every
+  glyph a full em, so text there is roughly twice its real width — a row that is
+  fine in the app can still overflow in a test, and the fix is to make the row
+  survive it rather than to widen the dialog until the test passes.
+- Both preferences are one-way doors and both are written by the caller, not the
+  widget: `project.startup_notice_dismissed` and
+  `project.started_notice_dismissed`. Opening the editor is the caller's job for
+  the same reason — it keeps the dialogs clear of `dart:io`.
 
 ## Conventions for agents
 

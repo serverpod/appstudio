@@ -8,6 +8,7 @@ import 'agent/agent_controller.dart';
 import 'mcp/mcp_controller.dart';
 import 'process/dev_session_cleanup.dart';
 import 'process/serverpod_process.dart';
+import 'session/external_editors.dart';
 import 'session/project_session.dart';
 import 'terminal/studio_terminal.dart';
 import 'theme/app_theme.dart';
@@ -18,6 +19,7 @@ import 'update/update_controller.dart';
 import 'platform/macos_app_menu.dart';
 import 'ui/landing_scaffold.dart';
 import 'ui/new_project_dialog.dart';
+import 'ui/project_started_dialog.dart';
 import 'ui/project_startup_dialog.dart';
 import 'ui/uninstall/uninstall_confirm_dialog.dart';
 import 'ui/uninstall/uninstalled_screen.dart';
@@ -52,6 +54,7 @@ Future<void> main() async {
     session: session,
     process: process,
   );
+  final editors = ExternalEditorsController(session: session, process: process);
 
   // Never blocks launch: create() swallows its own failures and reports the
   // updater as unavailable.
@@ -70,6 +73,7 @@ Future<void> main() async {
       process: process,
       agent: agent,
       mcp: mcp,
+      editors: editors,
       updates: updates,
     ),
   );
@@ -85,6 +89,7 @@ class AppStudioApp extends StatefulWidget {
     required this.process,
     required this.agent,
     required this.mcp,
+    required this.editors,
     required this.updates,
   });
 
@@ -95,6 +100,7 @@ class AppStudioApp extends StatefulWidget {
   final ServerpodProcessController process;
   final AgentController agent;
   final McpController mcp;
+  final ExternalEditorsController editors;
   final UpdateController updates;
 
   @override
@@ -238,7 +244,58 @@ class _AppStudioAppState extends State<AppStudioApp> {
       // load behind it.
       _clearPushedRoutes();
       if (path == null) return;
-      unawaited(maybeShowProjectStartupNotice(navigatorContext));
+      unawaited(_showProjectNotices(path));
+    });
+  }
+
+  /// The two project notices, in order and never stacked.
+  ///
+  /// "Starting your project" covers the compile; it closes itself the moment
+  /// the project is up, so awaiting it here is also how we wait out a user who
+  /// leaves it sitting there. Only then does the "has started" notice go up.
+  /// Pushing that one on a timer instead would land it on top of the first.
+  Future<void> _showProjectNotices(String path) async {
+    final startupContext = _navigatorKey.currentContext;
+    if (startupContext == null) return;
+    await maybeShowProjectStartupNotice(
+      startupContext,
+      process: widget.process,
+    );
+    if (!mounted || widget.session.projectPath != path) return;
+
+    await _awaitProjectReady(path);
+    // The project can be closed, swapped or restarted across a compile that
+    // takes minutes, and the notice must not arrive for a project that is no
+    // longer open.
+    if (!mounted || widget.session.projectPath != path) return;
+
+    final navigatorContext = _navigatorKey.currentContext;
+    if (navigatorContext == null || !navigatorContext.mounted) return;
+    await maybeShowProjectStartedNotice(
+      navigatorContext,
+      editors: widget.editors,
+    );
+  }
+
+  /// Completes when the project is running, or when it is no longer [path].
+  Future<void> _awaitProjectReady(String path) {
+    if (widget.process.projectIsReady) return Future.value();
+
+    final done = Completer<void>();
+    void check() {
+      if (done.isCompleted) return;
+      if (!widget.process.projectIsReady &&
+          widget.session.projectPath == path) {
+        return;
+      }
+      done.complete();
+    }
+
+    widget.process.addListener(check);
+    widget.session.addListener(check);
+    return done.future.whenComplete(() {
+      widget.process.removeListener(check);
+      widget.session.removeListener(check);
     });
   }
 
@@ -367,6 +424,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
               process: widget.process,
               agent: widget.agent,
               mcp: widget.mcp,
+              editors: widget.editors,
               themeController: widget.themeController,
             ),
           },

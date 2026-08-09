@@ -7,6 +7,7 @@ import '../agent/agent_controller.dart';
 import '../mcp/mcp_controller.dart';
 import '../preview/preview_phase.dart';
 import '../process/serverpod_process.dart';
+import '../session/external_editors_view.dart';
 import '../session/project_session.dart';
 import '../terminal/studio_terminal.dart';
 import '../theme/app_theme.dart';
@@ -15,6 +16,7 @@ import '../toolchain/toolchain_controller.dart';
 import 'full_restart_button.dart';
 import 'hot_restart_button.dart';
 import 'new_project_dialog.dart';
+import 'open_in_editor_buttons.dart';
 import 'preview_pane.dart';
 import 'settings/settings_dialog.dart';
 import 'start_page.dart';
@@ -29,6 +31,7 @@ class StudioShell extends StatefulWidget {
     required this.process,
     required this.agent,
     required this.mcp,
+    required this.editors,
     required this.themeController,
   });
 
@@ -38,6 +41,7 @@ class StudioShell extends StatefulWidget {
   final ServerpodProcessController process;
   final AgentController agent;
   final McpController mcp;
+  final ExternalEditorsView editors;
   final ThemeController themeController;
 
   @override
@@ -114,6 +118,7 @@ class _StudioShellState extends State<StudioShell> {
               session: widget.session,
               process: widget.process,
               mcp: widget.mcp,
+              editors: widget.editors,
               leftPanelVisible: _leftPanelVisible,
               onToggleLeftPanel: () {
                 setState(() {
@@ -154,6 +159,7 @@ class _Toolbar extends StatelessWidget {
     required this.session,
     required this.process,
     required this.mcp,
+    required this.editors,
     required this.leftPanelVisible,
     required this.onToggleLeftPanel,
     required this.onManageTools,
@@ -163,6 +169,7 @@ class _Toolbar extends StatelessWidget {
   final ProjectSession session;
   final ServerpodProcessController process;
   final McpController mcp;
+  final ExternalEditorsView editors;
   final bool leftPanelVisible;
   final VoidCallback? onToggleLeftPanel;
   final VoidCallback onManageTools;
@@ -217,8 +224,8 @@ class _Toolbar extends StatelessWidget {
             )
           else
             const Spacer(),
-          _ToolchainBadge(toolchains: toolchains, onTap: onManageTools),
-          const SizedBox(width: 10),
+          _ToolchainWarningBadge(toolchains: toolchains, onTap: onManageTools),
+          OpenInEditorButtons(editors: editors),
           HotRestartButton(mcp: mcp),
           const SizedBox(width: 8),
           FullRestartButton(process: process),
@@ -343,10 +350,16 @@ class _IconAction extends StatelessWidget {
   }
 }
 
-/// Toolbar badge showing which toolchain is in use. Turns destructive and
-/// opens the Tools Manager when something required is missing.
-class _ToolchainBadge extends StatelessWidget {
-  const _ToolchainBadge({required this.toolchains, required this.onTap});
+/// Destructive toolbar badge for a required tool that could not be resolved,
+/// opening the Tools Manager.
+///
+/// Nothing is drawn while the toolchain is complete. It used to sit there
+/// permanently reading "managed 3.35.0" — a version the user cannot act on, in
+/// the spot the Open in … buttons now occupy. The warning half stays: a
+/// required tool we cannot supply never reaches the first-run setup screen, so
+/// this badge is the only place it surfaces.
+class _ToolchainWarningBadge extends StatelessWidget {
+  const _ToolchainWarningBadge({required this.toolchains, required this.onTap});
 
   final ToolchainController toolchains;
   final VoidCallback onTap;
@@ -358,38 +371,35 @@ class _ToolchainBadge extends StatelessWidget {
       builder: (context, _) {
         final theme = ShadTheme.of(context);
         final scheme = theme.colorScheme;
-        final missing = toolchains.inventory.missingRequired.length;
-        final color = missing > 0 ? scheme.destructive : scheme.mutedForeground;
+        if (toolchains.inventory.missingRequired.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        final color = scheme.destructive;
 
-        return ShadTooltip(
-          builder: (context) => Text(
-            missing > 0
-                ? 'Some tools are missing — open Settings \u2192 Tools'
-                : 'Settings \u2192 Tools',
-          ),
-          child: MouseRegion(
-            cursor: SystemMouseCursors.click,
-            child: GestureDetector(
-              onTap: onTap,
-              child: ShadBadge.secondary(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      missing > 0
-                          ? LucideIcons.circleAlert
-                          : LucideIcons.package,
-                      size: 12,
-                      color: color,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      toolchains.current.badgeLabel,
-                      style: theme.textTheme.small
-                          .copyWith(color: color)
-                          .medium,
-                    ),
-                  ],
+        return Padding(
+          padding: const EdgeInsets.only(right: 10),
+          child: ShadTooltip(
+            builder: (context) => const Text(
+              'Some tools are missing — open Settings \u2192 Tools',
+            ),
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                onTap: onTap,
+                child: ShadBadge.secondary(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(LucideIcons.circleAlert, size: 12, color: color),
+                      const SizedBox(width: 6),
+                      Text(
+                        toolchains.current.badgeLabel,
+                        style: theme.textTheme.small
+                            .copyWith(color: color)
+                            .medium,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
