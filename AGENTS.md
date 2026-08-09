@@ -758,6 +758,33 @@ that could not work — there is no Flutter SDK to build with yet.
 - `_drive()` re-checks `installable` after the preflight. A newer manifest can
   pin versions the host already satisfies, and the plan dialog only self-closes
   once an install has run, so an empty one would strand a modal over the shell.
+- **An install runs to the end without ever going back to the plan.** There is
+  real work after the last byte lands — a deep re-probe, then the shell `PATH`
+  write — and showing the download plan again through it read as the install
+  having been thrown away, right before the dialog closed. Two flags keep the
+  progress view up, because the tail spans two owners:
+  `ToolchainController._finalizing` folds into `isInstalling` and covers the
+  re-probe, and the dialog's own `_running` covers `setShellPathEnabled`, which
+  runs after `installMissing()` has already returned. `_closeIfComplete` defers
+  to `_running`, so the self-close fires once — after the last step, from
+  `_download`'s `finally`.
+- **The dialog is closed from outside, and its self-close checks for that.**
+  Because it now outlives the moment `installable` goes empty, `main.dart`'s
+  post-frame `_clearPushedRoutes()` is what actually takes it off on a first
+  run. A `Navigator.pop` afterwards pops **`home`** instead and leaves an empty
+  navigator — a white window, with the start page's page transition playing out
+  as it goes, which is precisely the failure the comment in
+  `_onToolchainsChanged` has always warned about. `_closeIfComplete` therefore
+  pops only while its own route `isCurrent`. The window is one frame wide (the
+  route is out of the history, the `State` is not yet unmounted) and the shell
+  PATH write lands right in it; `test/toolchain/toolchain_setup_dialog_test.dart`
+  reproduces it with `removeRoute` and fails without the check.
+- Past the last download there is nothing left to cancel, so **Cancel dims
+  rather than disappearing** — in the setup dialog and in the Tools tab's
+  banner. The line over the bar comes from `InstallProgress.statusLabel`, which
+  names the first tool still working and calls the tail "Finishing up…";
+  without it the label fell back to "Installed Developer tools…", which claims
+  the run is over while the dialog is visibly still busy.
 
 ## New projects
 

@@ -174,6 +174,28 @@ final downloadingProgress = InstallProgress(
   ],
 );
 
+/// The tail of an install: every download has landed, and the re-probe and the
+/// shell PATH write are still running. The UI stays on the progress view here
+/// rather than dropping back to the plan for a second.
+final finishingProgress = InstallProgress(
+  startedAt: DateTime.utc(2026, 1, 1, 12),
+  now: DateTime.utc(2026, 1, 1, 12, 2, 10),
+  tools: const [
+    ToolProgress(
+      id: ToolId.flutter,
+      phase: ToolPhase.done,
+      receivedBytes: 662 * 1024 * 1024,
+      totalBytes: 662 * 1024 * 1024,
+    ),
+    ToolProgress(
+      id: ToolId.serverpodCli,
+      phase: ToolPhase.done,
+      receivedBytes: 11 * 1024 * 1024,
+      totalBytes: 11 * 1024 * 1024,
+    ),
+  ],
+);
+
 // -----------------------------------------------------------------------------
 // Fakes
 // -----------------------------------------------------------------------------

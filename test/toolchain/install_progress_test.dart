@@ -147,6 +147,30 @@ void main() {
       );
     });
 
+    test('names the first tool still working', () {
+      final progress = InstallProgress(
+        startedAt: started,
+        tools: [
+          at(ToolId.flutter, ToolPhase.done, total: 100),
+          at(ToolId.git, ToolPhase.extracting, total: 100),
+        ],
+      );
+      expect(progress.statusLabel, 'Extracting Git…');
+    });
+
+    test('calls the tail after the last download "Finishing up"', () {
+      // The re-probe and the shell PATH write still have to run, so naming the
+      // last tool here would report the install as over while it is not.
+      final progress = InstallProgress(
+        startedAt: started,
+        tools: [
+          at(ToolId.flutter, ToolPhase.done, total: 100),
+          at(ToolId.git, ToolPhase.done, total: 100),
+        ],
+      );
+      expect(progress.statusLabel, 'Finishing up…');
+    });
+
     test('looks up a tool by id', () {
       final progress = InstallProgress(
         startedAt: started,

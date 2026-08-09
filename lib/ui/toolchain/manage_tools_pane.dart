@@ -204,20 +204,19 @@ class _InstallBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final scheme = theme.colorScheme;
-    final active = progress.tools.firstWhere(
-      (t) => !t.phase.isTerminal,
-      orElse: () => progress.tools.last,
-    );
 
     return ShadCard(
       backgroundColor: scheme.muted,
-      title: Text('${active.phase.label} ${active.id.displayName}…'),
+      title: Text(progress.statusLabel),
       // A card title defaults to `h3`, which is a headline role and so is set
       // in Inter Black — far too loud for a progress banner inside a pane.
       // This one is a label for the bar underneath it.
       titleStyle: theme.textTheme.large,
+      // Only a download can be called off; past that the tools are on disk and
+      // what is left is the re-probe.
       action: ShadButton.ghost(
-        onPressed: onCancel,
+        enabled: !progress.isDone,
+        onPressed: progress.isDone ? null : onCancel,
         child: const Text('Cancel'),
       ),
       child: DeterminateProgress(

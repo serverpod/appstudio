@@ -104,6 +104,7 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
   InstallProgress? _progress;
   CancelToken? _cancel;
   String? _installError;
+  bool _finalizing = false;
 
   Toolchain get current => _current;
   @override
@@ -114,8 +115,15 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
   /// Non-null while an install is running, and until the next one starts.
   @override
   InstallProgress? get progress => _progress;
+
+  /// True from the moment [install] is called until every step it owns has
+  /// finished — including the deep re-probe that runs after the last tool
+  /// lands. Dropping it the instant the downloads were terminal put the setup
+  /// dialog back on its download plan for the second the re-probe took, which
+  /// read as the install having been thrown away.
   @override
-  bool get isInstalling => _progress != null && !_progress!.isDone;
+  bool get isInstalling =>
+      _finalizing || (_progress != null && !_progress!.isDone);
   @override
   String? get installError => _installError;
 
@@ -206,6 +214,7 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
     if (specs.isEmpty) return;
 
     _installError = null;
+    _finalizing = true;
     _cancel = CancelToken();
     _progress = InstallProgress(
       tools: [
@@ -220,22 +229,30 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
     );
     notifyListeners();
 
-    await _requireInstaller.installAll(
-      specs,
-      cancel: _cancel,
-      onProgress: (progress) {
-        _progress = progress;
-        notifyListeners();
-      },
-    );
+    try {
+      await _requireInstaller.installAll(
+        specs,
+        cancel: _cancel,
+        onProgress: (progress) {
+          _progress = progress;
+          notifyListeners();
+        },
+      );
 
-    final failed = _progress?.tools.where((t) => t.phase == ToolPhase.failed);
-    if (failed != null && failed.isNotEmpty) {
-      _installError = failed.first.error ?? 'Some tools could not be installed.';
+      final failed = _progress?.tools.where((t) => t.phase == ToolPhase.failed);
+      if (failed != null && failed.isNotEmpty) {
+        _installError =
+            failed.first.error ?? 'Some tools could not be installed.';
+      }
+      _cancel = null;
+      // Pick up whatever landed, even on partial failure.
+      await refresh(deep: true);
+    } finally {
+      // A throw here would otherwise leave the UI reporting an install that is
+      // no longer running, with no way back to the plan.
+      _finalizing = false;
+      _notify();
     }
-    _cancel = null;
-    // Pick up whatever landed, even on partial failure.
-    await refresh(deep: true);
   }
 
   @override

@@ -199,11 +199,15 @@ class _AppStudioAppState extends State<AppStudioApp> {
     _menuCanOpenProjects = canOpen;
     // The same flip swaps the setup screen for the shell, or back.
     //
-    // Deferred, unlike the other two callers: `ToolchainSetupDialog` closes
-    // *itself* on this very notification, and it is a later listener, so a pop
-    // here would land first and leave its `Navigator.pop` to hit the route
-    // underneath — which is `home`, emptying the navigator. By the next frame
-    // it has popped itself and this finds nothing left to clear.
+    // Deferred, unlike the other two callers: this notification arrives from a
+    // listener that can be running mid-build, and popping a route from inside a
+    // build is illegal.
+    //
+    // This is what closes `ToolchainSetupDialog` on a first run — the flip
+    // lands while the install is still finishing up, so the dialog has not
+    // popped itself yet. Its own self-close checks that its route is still
+    // current for exactly that reason: a second pop here would take `home` with
+    // it and leave an empty navigator.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _clearPushedRoutes();
     });

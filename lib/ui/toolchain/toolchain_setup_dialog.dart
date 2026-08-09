@@ -65,10 +65,29 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
   /// install settles, and popping a route twice throws.
   bool _closing = false;
 
+  /// True from the moment Download is pressed until every step this dialog owns
+  /// has finished. `toolchains.isInstalling` covers the downloads and the
+  /// re-probe; the global PATH write happens after that returns and is ours
+  /// alone to wait for. Without it the dialog dropped back to its download plan
+  /// for the tail of the run, so the last thing the user saw before it closed
+  /// was the screen they started on.
+  bool _running = false;
+
+  /// The route this dialog sits on, so the self-close can tell "still mine to
+  /// close" from "already taken off by someone else". Captured here rather than
+  /// read at close time: by then the element may no longer find it.
+  ModalRoute<dynamic>? _route;
+
   @override
   void initState() {
     super.initState();
     widget.toolchains.addListener(_onToolchains);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _route = ModalRoute.of(context);
   }
 
   @override
@@ -80,31 +99,55 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
   void _onToolchains() {
     if (!mounted) return;
     setState(() {});
-    // Close once everything required is in place.
+    _closeIfComplete();
+  }
+
+  /// Closes once everything required is in place — but never while this dialog
+  /// still has work of its own outstanding.
+  void _closeIfComplete() {
+    if (_closing || _running) return;
     final toolchains = widget.toolchains;
-    if (!_closing &&
-        !toolchains.isInstalling &&
-        toolchains.progress != null &&
-        toolchains.inventory.installable.isEmpty &&
-        toolchains.installError == null) {
-      _closing = true;
-      // `pop`, not `maybePop`: the PopScope below refuses the user's own
-      // dismissal, and maybePop honours it, so it would refuse this too.
-      Navigator.of(context).pop();
+    if (toolchains.isInstalling ||
+        toolchains.progress == null ||
+        toolchains.inventory.installable.isNotEmpty ||
+        toolchains.installError != null) {
+      return;
     }
+    // `main.dart` drops everything pushed over `home` the moment the toolchain
+    // gate flips, and that flip arrives while this dialog is still finishing
+    // up — so it is routinely closed from outside. Popping anyway would pop
+    // `home` instead and leave an empty navigator: a white window, with the
+    // start page it should have revealed animating away.
+    if (_route?.isCurrent != true) return;
+    _closing = true;
+    // `pop`, not `maybePop`: the PopScope below refuses the user's own
+    // dismissal, and maybePop honours it, so it would refuse this too.
+    Navigator.of(context).pop();
   }
 
   Future<void> _download() async {
-    await widget.toolchains.installMissing();
-    if (!mounted || !_installGlobally) return;
-    await widget.toolchains.setShellPathEnabled(true);
+    setState(() => _running = true);
+    try {
+      await widget.toolchains.installMissing();
+      if (mounted && _installGlobally) {
+        await widget.toolchains.setShellPathEnabled(true);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _running = false);
+        // The listener that would normally close us fired while `_running` held
+        // it off, so the last word is this one.
+        _closeIfComplete();
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final toolchains = widget.toolchains;
-    final installing = toolchains.isInstalling;
+    final installing = _running || toolchains.isInstalling;
+    final canCancel = toolchains.progress?.isDone == false;
 
     return PopScope(
       // Nothing downstream works without these tools, and this is the only
@@ -119,8 +162,12 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
         ),
         actions: installing
             ? [
+                // Only a download can be called off. Past that the tools are on
+                // disk and the rest is bookkeeping, so the button stays in
+                // place and dims rather than disappearing under the pointer.
                 ShadButton.outline(
-                  onPressed: toolchains.cancelInstall,
+                  enabled: canCancel,
+                  onPressed: canCancel ? toolchains.cancelInstall : null,
                   child: const Text('Cancel'),
                 ),
               ]
@@ -198,11 +245,6 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
 
   Widget _buildProgress(ShadThemeData theme) {
     final progress = widget.toolchains.progress;
-    if (progress == null) return const SizedBox.shrink();
-    final active = progress.tools.firstWhere(
-      (t) => !t.phase.isTerminal,
-      orElse: () => progress.tools.last,
-    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -210,20 +252,24 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
       children: [
         const SizedBox(height: 4),
         Text(
-          '${active.phase.label} ${active.id.displayName}…',
+          // No progress yet means a run that has not published its first update
+          // — the tail state, and the only honest thing to call it.
+          progress?.statusLabel ?? 'Finishing up…',
           style: theme.textTheme.small.semibold,
         ),
         const SizedBox(height: 12),
         DeterminateProgress(
-          fraction: progress.fraction,
-          caption: formatTransferCaption(
-            received: progress.bytesReceived,
-            total: progress.bytesTotal,
-            eta: progress.eta,
-          ),
+          fraction: progress?.fraction,
+          caption: progress == null
+              ? null
+              : formatTransferCaption(
+                  received: progress.bytesReceived,
+                  total: progress.bytesTotal,
+                  eta: progress.eta,
+                ),
         ),
         const SizedBox(height: 14),
-        for (final tool in progress.tools)
+        for (final tool in progress?.tools ?? const <ToolProgress>[])
           Padding(
             padding: const EdgeInsets.only(bottom: 2),
             child: Row(

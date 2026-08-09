@@ -163,6 +163,33 @@ Widget toolchainSetup() => previewShell(
       ToolchainSetupDialog(toolchains: FakeToolsView(inventory: emptyInventory)),
     );
 
+@Preview(name: 'Toolchain setup — downloading', group: 'First run')
+Widget toolchainSetupDownloading() => previewShell(
+      ToolchainSetupDialog(
+        toolchains: FakeToolsView(
+          inventory: emptyInventory,
+          progress: downloadingProgress,
+          isInstalling: true,
+          isBusy: true,
+        ),
+      ),
+    );
+
+@Preview(name: 'Toolchain setup — finishing up', group: 'First run')
+Widget toolchainSetupFinishing() => previewShell(
+      // The downloads have landed and the re-probe is still out. The plan must
+      // not come back here — it is the last thing seen before the dialog
+      // closes, and it looks like the install was discarded.
+      ToolchainSetupDialog(
+        toolchains: FakeToolsView(
+          inventory: emptyInventory,
+          progress: finishingProgress,
+          isInstalling: true,
+          isBusy: true,
+        ),
+      ),
+    );
+
 @Preview(name: 'Toolchain setup — dark', group: 'First run')
 Widget toolchainSetupDark() => previewShell(
       ToolchainSetupDialog(toolchains: FakeToolsView(inventory: emptyInventory)),

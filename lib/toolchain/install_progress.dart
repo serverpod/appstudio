@@ -102,6 +102,21 @@ class InstallProgress {
   bool get isDone => tools.every((t) => t.phase.isTerminal);
   bool get hasFailure => tools.any((t) => t.phase == ToolPhase.failed);
 
+  /// The line above the bar: what is happening to which tool.
+  ///
+  /// Once every tool is terminal there is still work in flight — the re-probe,
+  /// and the shell PATH write the setup dialog adds — so this keeps naming a
+  /// step rather than falling back to `Installed <the last tool>`, which read
+  /// as finished while the dialog was visibly still busy.
+  String get statusLabel {
+    for (final tool in tools) {
+      if (!tool.phase.isTerminal) {
+        return '${tool.phase.label} ${tool.id.displayName}…';
+      }
+    }
+    return 'Finishing up…';
+  }
+
   int get bytesReceived =>
       tools.fold(0, (sum, t) => sum + t.receivedBytes);
 
