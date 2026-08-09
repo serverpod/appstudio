@@ -20,7 +20,6 @@ import 'ui/landing_scaffold.dart';
 import 'ui/new_project_dialog.dart';
 import 'ui/project_startup_dialog.dart';
 import 'ui/uninstall/uninstall_confirm_dialog.dart';
-import 'util/pretty_path.dart';
 import 'ui/uninstall/uninstalled_screen.dart';
 import 'uninstall/uninstaller.dart';
 import 'ui/toolchain/toolchain_setup_screen.dart';
@@ -148,8 +147,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
       onCheckForUpdates: () => unawaited(widget.updates.checkForUpdates()),
       onUninstall: _confirmUninstall,
       canCheckForUpdates: () => widget.updates.state.canCheck,
-      updatesUnavailableReason: () =>
-          widget.updates.state.unavailableReason,
+      updatesUnavailableReason: () => widget.updates.state.unavailableReason,
       onSetAutomaticUpdates: (enabled) =>
           unawaited(widget.updates.setAutomaticallyChecks(enabled)),
       automaticUpdatesEnabled: () => widget.updates.state.automaticallyChecks,
@@ -279,7 +277,6 @@ class _AppStudioAppState extends State<AppStudioApp> {
     );
     final choice = await showUninstallConfirmDialog(
       navigatorContext,
-      supportRootLabel: prettyPath(widget.toolchains.paths.appSupportRoot),
       measureBytes: uninstaller.measureSupportBytes,
     );
     if (choice == null || !mounted) return;
@@ -360,17 +357,18 @@ class _AppStudioAppState extends State<AppStudioApp> {
             null when _uninstalling => const _UninstallingScreen(),
             // Before the start page, not over it: there is nothing to create or
             // open a project with yet.
-            null when _needsToolchainSetup =>
-              ToolchainSetupScreen(toolchains: widget.toolchains),
+            null when _needsToolchainSetup => ToolchainSetupScreen(
+              toolchains: widget.toolchains,
+            ),
             null => StudioShell(
-                toolchains: widget.toolchains,
-                session: widget.session,
-                terminal: widget.terminal,
-                process: widget.process,
-                agent: widget.agent,
-                mcp: widget.mcp,
-                themeController: widget.themeController,
-              ),
+              toolchains: widget.toolchains,
+              session: widget.session,
+              terminal: widget.terminal,
+              process: widget.process,
+              agent: widget.agent,
+              mcp: widget.mcp,
+              themeController: widget.themeController,
+            ),
           },
         );
       },

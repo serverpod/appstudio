@@ -19,15 +19,14 @@ class UninstallChoice {
 
 Future<UninstallChoice?> showUninstallConfirmDialog(
   BuildContext context, {
-  required String supportRootLabel,
   required Future<int?> Function() measureBytes,
 }) {
   return showShadDialog<UninstallChoice>(
     context: context,
-    builder: (context) => UninstallConfirmDialog(
-      supportRootLabel: supportRootLabel,
-      measureBytes: measureBytes,
-    ),
+    // A stray click on the barrier must not throw away the decision — Cancel
+    // is the way out.
+    barrierDismissible: false,
+    builder: (context) => UninstallConfirmDialog(measureBytes: measureBytes),
   );
 }
 
@@ -41,14 +40,7 @@ Future<UninstallChoice?> showUninstallConfirmDialog(
 /// shared with every other Dart project on the machine and holds
 /// `dart install`-ed global packages, so it is re-downloadable but not ours.
 class UninstallConfirmDialog extends StatefulWidget {
-  const UninstallConfirmDialog({
-    super.key,
-    required this.supportRootLabel,
-    required this.measureBytes,
-  });
-
-  /// Already shortened for display.
-  final String supportRootLabel;
+  const UninstallConfirmDialog({super.key, required this.measureBytes});
 
   /// Total size on disk, or null if it could not be measured. Injected rather
   /// than shelled out to here: `du` is `dart:io`, and this dialog has to stay
@@ -77,9 +69,8 @@ class _UninstallConfirmDialogState extends State<UninstallConfirmDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-
-    return ShadDialog(
+    // The alert variant is the one with no close X — Cancel is the way out.
+    return ShadDialog.alert(
       title: const Text('Uninstall App Studio'),
       // The lead paragraph belongs in `description`, which resolves to shad's
       // body role. Set in `textTheme.small` it picked up the *label* style —
@@ -88,8 +79,7 @@ class _UninstallConfirmDialogState extends State<UninstallConfirmDialog> {
         'This removes the downloaded tools, the shell PATH entry and all '
         'App Studio settings'
         '${_supportBytes == null ? '' : ' (${formatBytes(_supportBytes!)})'}'
-        '. The app itself is not deleted — you can drag it to the Trash '
-        'afterwards.',
+        '. The app itself is not deleted, drag it to the Trash afterwards.',
       ),
       actions: [
         ShadButton.outline(
@@ -109,38 +99,17 @@ class _UninstallConfirmDialogState extends State<UninstallConfirmDialog> {
         // the safe default — keys off the 640 **screen** breakpoint, not this
         // width. Nothing here can prevent it; this only sets content width.
         width: _kDialogWidth,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              widget.supportRootLabel,
-              style: theme.textTheme.muted.copyWith(fontSize: 11),
-            ),
-            const SizedBox(height: 10),
-            // Say what survives, so nobody has to guess whether their API keys
-            // or every other Dart project just went with it.
-            Text(
-              'Tools already on your Mac, your Dart package cache and your '
-              'OpenCode API keys are left alone. The keys are shared with the '
-              'OpenCode CLI, so removing them here would affect more than App '
-              'Studio.',
-              style: theme.textTheme.muted.copyWith(fontSize: 11),
-            ),
-            const SizedBox(height: 14),
-            ShadCheckbox(
-              value: _clearPubCache,
-              onChanged: (v) => setState(() => _clearPubCache = v),
-              label: Text(
-                'Also clear the Dart package cache',
-                style: kWeightMedium,
-              ),
-              sublabel: const Text(
-                'Runs "dart pub cache clean". This cache is shared with every '
-                'Dart project on your Mac, not just App Studio.',
-              ),
-            ),
-          ],
+        child: ShadCheckbox(
+          value: _clearPubCache,
+          onChanged: (v) => setState(() => _clearPubCache = v),
+          label: Text(
+            'Also clear the Dart package cache',
+            style: kWeightMedium,
+          ),
+          sublabel: const Text(
+            'Runs "dart pub cache clean". This cache is shared with every '
+            'Dart project on your Mac, not just App Studio.',
+          ),
         ),
       ),
     );

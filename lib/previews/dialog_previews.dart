@@ -26,52 +26,48 @@ import 'preview_data.dart';
 
 @Preview(name: 'Providers — connected', group: 'Settings')
 Widget settingsProviders() => previewShell(
-      SettingsDialog(
-        agent: connectedProvidersFake(),
-        toolchains: FakeToolsView(),
-      ),
-    );
+  SettingsDialog(agent: connectedProvidersFake(), toolchains: FakeToolsView()),
+);
 
 @Preview(name: 'Providers — no keys yet', group: 'Settings')
 Widget settingsProvidersEmpty() => previewShell(
-      SettingsDialog(
-        agent: FakeProvidersView(),
-        toolchains: FakeToolsView(),
-      ),
-    );
+  SettingsDialog(agent: FakeProvidersView(), toolchains: FakeToolsView()),
+);
 
 /// What Settings shows while `opencode serve` is still coming up — the state
 /// you hit by opening Settings during a cold project's first build.
 @Preview(name: 'Providers — waiting for agent', group: 'Settings')
 Widget settingsProvidersWaiting() => previewShell(
-      SettingsDialog(
-        agent: FakeProvidersView(agentReady: false),
-        toolchains: FakeToolsView(),
-      ),
-    );
+  SettingsDialog(
+    agent: FakeProvidersView(agentReady: false),
+    toolchains: FakeToolsView(),
+  ),
+);
 
 /// The Add Provider dialog, with two providers already holding keys — the
 /// dropdown leaves those out.
 @Preview(name: 'Providers — add', group: 'Settings')
 Widget settingsAddProvider() => previewShell(
-      AddProviderDialog(
-        connected: const {'anthropic', 'openai'},
-        onConnect: previewConnectSucceeds,
-      ),
-    );
+  AddProviderDialog(
+    connected: const {'anthropic', 'openai'},
+    onConnect: previewConnectSucceeds,
+  ),
+);
 
 /// The failure path, which needs a broken agent to reach for real.
 @Preview(name: 'Providers — add fails', group: 'Settings')
 Widget settingsAddProviderError() => previewShell(
-      AddProviderDialog(
-        connected: const {'anthropic'},
-        onConnect: previewConnectFails,
-      ),
-    );
+  AddProviderDialog(
+    connected: const {'anthropic'},
+    onConnect: previewConnectFails,
+  ),
+);
 
 /// Must be static, non-private functions to be usable from an annotation.
-Future<String?> previewConnectSucceeds(String providerId, String apiKey) async =>
-    null;
+Future<String?> previewConnectSucceeds(
+  String providerId,
+  String apiKey,
+) async => null;
 
 Future<String?> previewConnectFails(String providerId, String apiKey) async =>
     'The key was saved, but the agent did not report the provider as '
@@ -79,185 +75,183 @@ Future<String?> previewConnectFails(String providerId, String apiKey) async =>
 
 @Preview(name: 'Tools — all installed', group: 'Settings')
 Widget settingsToolsComplete() => previewShell(
-      SettingsDialog(
-        agent: connectedProvidersFake(),
-        toolchains: FakeToolsView(inventory: completeInventory),
-        initialTab: SettingsTab.tools,
-      ),
-    );
+  SettingsDialog(
+    agent: connectedProvidersFake(),
+    toolchains: FakeToolsView(inventory: completeInventory),
+    initialTab: SettingsTab.tools,
+  ),
+);
 
 /// One tool missing and a host copy too old — the state that produces both the
 /// warning banner and a `3.44.2 → 4.0.0-beta.1` row.
 @Preview(name: 'Tools — missing and outdated', group: 'Settings')
 Widget settingsToolsMixed() => previewShell(
-      SettingsDialog(
-        agent: connectedProvidersFake(),
-        toolchains: FakeToolsView(inventory: mixedInventory),
-        initialTab: SettingsTab.tools,
-      ),
-    );
+  SettingsDialog(
+    agent: connectedProvidersFake(),
+    toolchains: FakeToolsView(inventory: mixedInventory),
+    initialTab: SettingsTab.tools,
+  ),
+);
 
 /// Everything already on the user's own PATH, so the global-install opt-in is
 /// checked and inert — there is nothing our shell block would add.
 @Preview(name: 'Tools — nothing to add globally', group: 'Settings')
 Widget settingsToolsAllNative() => previewShell(
-      SettingsDialog(
-        agent: connectedProvidersFake(),
-        toolchains: FakeToolsView(inventory: allNativeInventory),
-        initialTab: SettingsTab.tools,
-      ),
-    );
+  SettingsDialog(
+    agent: connectedProvidersFake(),
+    toolchains: FakeToolsView(inventory: allNativeInventory),
+    initialTab: SettingsTab.tools,
+  ),
+);
 
 /// The only state where "Update All" is enabled: managed installs behind the
 /// pin, with a host copy that is also behind and must be left alone.
 @Preview(name: 'Tools — updates available', group: 'Settings')
 Widget settingsToolsOutdated() => previewShell(
-      SettingsDialog(
-        agent: connectedProvidersFake(),
-        toolchains: FakeToolsView(inventory: outdatedInventory),
-        initialTab: SettingsTab.tools,
-      ),
-    );
+  SettingsDialog(
+    agent: connectedProvidersFake(),
+    toolchains: FakeToolsView(inventory: outdatedInventory),
+    initialTab: SettingsTab.tools,
+  ),
+);
 
 @Preview(name: 'Tools — downloading', group: 'Settings')
 Widget settingsToolsInstalling() => previewShell(
-      SettingsDialog(
-        agent: connectedProvidersFake(),
-        toolchains: FakeToolsView(
-          inventory: emptyInventory,
-          progress: downloadingProgress,
-          isInstalling: true,
-          isBusy: true,
-        ),
-        initialTab: SettingsTab.tools,
-      ),
-    );
+  SettingsDialog(
+    agent: connectedProvidersFake(),
+    toolchains: FakeToolsView(
+      inventory: emptyInventory,
+      progress: downloadingProgress,
+      isInstalling: true,
+      isBusy: true,
+    ),
+    initialTab: SettingsTab.tools,
+  ),
+);
 
 @Preview(name: 'Tools — install failed', group: 'Settings')
 Widget settingsToolsError() => previewShell(
-      SettingsDialog(
-        agent: connectedProvidersFake(),
-        toolchains: FakeToolsView(
-          inventory: mixedInventory,
-          installError: 'Download failed: connection closed before the '
-              'archive finished (Flutter SDK).',
-        ),
-        initialTab: SettingsTab.tools,
-      ),
-    );
+  SettingsDialog(
+    agent: connectedProvidersFake(),
+    toolchains: FakeToolsView(
+      inventory: mixedInventory,
+      installError:
+          'Download failed: connection closed before the '
+          'archive finished (Flutter SDK).',
+    ),
+    initialTab: SettingsTab.tools,
+  ),
+);
 
 @Preview(name: 'Tools — dark', group: 'Settings')
 Widget settingsToolsDark() => previewShell(
-      SettingsDialog(
-        agent: connectedProvidersFake(),
-        toolchains: FakeToolsView(inventory: mixedInventory),
-        initialTab: SettingsTab.tools,
-      ),
-      dark: true,
-    );
+  SettingsDialog(
+    agent: connectedProvidersFake(),
+    toolchains: FakeToolsView(inventory: mixedInventory),
+    initialTab: SettingsTab.tools,
+  ),
+  dark: true,
+);
 
 // --- First run --------------------------------------------------------------
 
 @Preview(name: 'Toolchain setup', group: 'First run')
 Widget toolchainSetup() => previewShell(
-      ToolchainSetupDialog(toolchains: FakeToolsView(inventory: emptyInventory)),
-    );
+  ToolchainSetupDialog(toolchains: FakeToolsView(inventory: emptyInventory)),
+);
 
 @Preview(name: 'Toolchain setup — downloading', group: 'First run')
 Widget toolchainSetupDownloading() => previewShell(
-      ToolchainSetupDialog(
-        toolchains: FakeToolsView(
-          inventory: emptyInventory,
-          progress: downloadingProgress,
-          isInstalling: true,
-          isBusy: true,
-        ),
-      ),
-    );
+  ToolchainSetupDialog(
+    toolchains: FakeToolsView(
+      inventory: emptyInventory,
+      progress: downloadingProgress,
+      isInstalling: true,
+      isBusy: true,
+    ),
+  ),
+);
 
 @Preview(name: 'Toolchain setup — finishing up', group: 'First run')
 Widget toolchainSetupFinishing() => previewShell(
-      // The downloads have landed and the re-probe is still out. The plan must
-      // not come back here — it is the last thing seen before the dialog
-      // closes, and it looks like the install was discarded.
-      ToolchainSetupDialog(
-        toolchains: FakeToolsView(
-          inventory: emptyInventory,
-          progress: finishingProgress,
-          isInstalling: true,
-          isBusy: true,
-        ),
-      ),
-    );
+  // The downloads have landed and the re-probe is still out. The plan must
+  // not come back here — it is the last thing seen before the dialog
+  // closes, and it looks like the install was discarded.
+  ToolchainSetupDialog(
+    toolchains: FakeToolsView(
+      inventory: emptyInventory,
+      progress: finishingProgress,
+      isInstalling: true,
+      isBusy: true,
+    ),
+  ),
+);
 
 @Preview(name: 'Toolchain setup — dark', group: 'First run')
 Widget toolchainSetupDark() => previewShell(
-      ToolchainSetupDialog(toolchains: FakeToolsView(inventory: emptyInventory)),
-      dark: true,
-    );
+  ToolchainSetupDialog(toolchains: FakeToolsView(inventory: emptyInventory)),
+  dark: true,
+);
 
 /// The screen the dialog sits on, held at the spinner it shows while the plan
 /// is still being fetched.
 @Preview(name: 'Setup screen — loading', group: 'First run')
 Widget toolchainSetupLoading() => previewShell(
-      ToolchainSetupScreen(
-        toolchains: FakeToolsView(
-          inventory: emptyInventory,
-          preflightDelay: const Duration(days: 1),
-        ),
-      ),
-    );
+  ToolchainSetupScreen(
+    toolchains: FakeToolsView(
+      inventory: emptyInventory,
+      preflightDelay: const Duration(days: 1),
+    ),
+  ),
+);
 
 /// What a first run with no network looks like — the one state that decides
 /// whether someone can get started at all.
 @Preview(name: 'Setup screen — offline', group: 'First run')
 Widget toolchainSetupOffline() => previewShell(
-      ToolchainSetupScreen(
-        toolchains: FakeToolsView(
-          inventory: emptyInventory,
-          preflightError: 'Could not reach the download server for Flutter SDK '
-              'and Serverpod CLI. Check your internet connection and try again.',
-        ),
-      ),
-    );
+  ToolchainSetupScreen(
+    toolchains: FakeToolsView(
+      inventory: emptyInventory,
+      preflightError:
+          'Could not reach the download server for Flutter SDK '
+          'and Serverpod CLI. Check your internet connection and try again.',
+    ),
+  ),
+);
 
 // --- Uninstall --------------------------------------------------------------
 
 @Preview(name: 'Confirm', group: 'Uninstall')
-Widget uninstallConfirm() => previewShell(
-      UninstallConfirmDialog(
-        supportRootLabel: '~/Library/Application Support/App Studio',
-        measureBytes: previewSupportBytes,
-      ),
-    );
+Widget uninstallConfirm() =>
+    previewShell(UninstallConfirmDialog(measureBytes: previewSupportBytes));
 
 /// Must be a static, non-private function to be usable from an annotation.
 Future<int?> previewSupportBytes() async => 1_932_735_283;
 
 @Preview(name: 'Done — clean', group: 'Uninstall')
 Widget uninstalledClean() => previewShell(
-      const UninstalledScreen(result: UninstallResult(failures: [])),
-    );
+  const UninstalledScreen(result: UninstallResult(failures: [])),
+);
 
 @Preview(name: 'Done — clean (dark)', group: 'Uninstall')
 Widget uninstalledCleanDark() => previewShell(
-      const UninstalledScreen(result: UninstallResult(failures: [])),
-      dark: true,
-    );
+  const UninstalledScreen(result: UninstallResult(failures: [])),
+  dark: true,
+);
 
 /// The path nobody sees until something has already gone wrong, which is
 /// exactly why it is worth being able to look at.
 @Preview(name: 'Done — partial failure', group: 'Uninstall')
 Widget uninstalledWithFailures() => previewShell(
-      const UninstalledScreen(
-        result: UninstallResult(
-          failures: [
-            'removing the shell PATH entry',
-            'deleting the App Studio support folder',
-          ],
-        ),
-      ),
-    );
+  const UninstalledScreen(
+    result: UninstallResult(
+      failures: [
+        'removing the shell PATH entry',
+        'deleting the App Studio support folder',
+      ],
+    ),
+  ),
+);
 
 // --- Project startup --------------------------------------------------------
 
