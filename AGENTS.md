@@ -518,7 +518,9 @@ install. Sparkle would also catch it, but later and less clearly.
 - **Component library:** `shad` (`ShadApp`, `ShadTheme`, `LucideIcons`). No Material-heavy custom widgets unless necessary. Replaced `shadcn_ui` — same `Shad*` API, higher fidelity to upstream shadcn/ui. Two defaults differ: `ShadTabs.expandTabs` now defaults to `false` (the Settings tabs pass `expandTabs: true`), and `ghost`/`outline` buttons take their foreground from `foreground` rather than `primary`, so they are no longer brand-blue — that change was kept.
 - `shad` deliberately does **not** re-export the extensions on `double`/`Duration`/`List`/`TextStyle` that `shadcn_ui` did, nor `boxy`/`flutter_svg`/`universal_image`. Depend on those directly if you ever need them.
 - **Theme** (`app_theme.dart`): Slate base, **Nova** style, **Medium** radius (`--radius` 10, so the component step is 8). Serverpod brand blue is the *accent*: `ShadSlateColorScheme.…().applyAccent(kBrandBlue)` derives `primary`, `primaryForeground`, `ring` and `selection` from the one constant, so there is nothing to keep in sync by hand.
-- **Fonts:** `.AppleSystemUIFont` (UI), `Menlo` (terminal via `kMacMonoFont`). The text theme is otherwise stock — `ShadTextTheme(family:)` swaps only the family, so every weight, size and line height matches upstream shad.
+- **Fonts:** `.AppleSystemUIFont` (UI), `Menlo` (terminal via `kMacMonoFont`), **Inter Black for the headline roles** (`kHeadlineFont`). The text theme is otherwise stock — `ShadTextTheme(family:)` swaps only the family, so every weight, size and line height matches upstream shad.
+- **`h1Large`…`h4` are Inter Black (900) and nothing else is.** `assets/fonts/Inter-Black.ttf` is bundled — 400 KB, one weight, OFL — rather than reached for through shad's own `packages/shad/Inter`, so the display face cannot change under a package bump. Headlines are also the one place the weight correction below does *not* apply: Inter is the typeface shad's metrics were drawn for, and the static cut carries no `wght` axis to correct on anyway.
+- **A `ShadCard` `title:` resolves to `h3`, so it is now a Black headline.** That is right for a title and wrong for a label — the tools install banner passes an explicit `titleStyle: textTheme.large` for exactly this reason. Check any new card title before letting it default.
 - **Our font's weight axis moves about twice as fast as shad's**, and the whole type scale is corrected for it. Measured over the same string at 14px: Inter (shad's default) widens ~1.65px per 100 weight units, `.AppleSystemUIFont` ~3.17px — so an uncorrected `w500` lands where Inter's `w600` would. Both axes resolve correctly and neither synthesises bold; it is a typeface difference. `app_theme.dart` rebuilds every `ShadTextTheme` role with a `wght` variation at the corrected value, including the `w400` ones — a variation beats an inherited `fontWeight`, so a component that copies a role and bumps the weight (`ShadCheckbox` does this to its label) lands on the corrected weight instead of a too-heavy one.
 - **Never write `copyWith(fontWeight: …)` on UI-font text — it is silently ignored.** Every role already carries a variation and the variation wins, so a raw weight leaves the text at its role's weight. Use the `.medium` / `.semibold` getters from the `UiTextWeight` extension instead. Monospace is the exception: `Menlo` is not variable, so `fontWeight` is the right lever there and the variation is a no-op.
 - **`textTheme.small` is the *label* role, not body copy.** It is `w500` at `height: 1.0` (`font-medium leading-none`), so prose set in it reads bold and cramped the moment it wraps. Use it for single-line labels, list rows and badges. For anything that wraps use `textTheme.muted` (`w400`, `height: 1.43`), and for a dialog's lead paragraph use `ShadDialog`'s `description` slot, which resolves to `style.body` over `textTheme.muted`. The agent transcript is the one place that keeps `small` for prose, and only because it sets an explicit `height: 1.4`.
@@ -666,6 +668,44 @@ that could not work — there is no Flutter SDK to build with yet.
   with no project — so a different backdrop on each read as a different app. It
   is its own file rather than something exported from `start_page.dart` because
   that one imports `ProjectSession` and so drags in `dart:io`.
+- **Everything over that backdrop runs on `buildLandingTheme()`, in both system
+  brightnesses.** `LandingScaffold` wraps its child in it, so the landing screens
+  never read the system's light/dark setting: the image behind them does not
+  change either way, and light chrome on it would be dark text on a photograph.
+  Dialogs raised from these screens are `Navigator` routes and so are *not*
+  covered — they sit above the scaffold and keep the app's theme.
+- **The backdrop is drawn, not loaded.** `_LandingBackground` is one vertical
+  `LinearGradient` — black at the banner, through navy and indigo, to orchid at
+  the floor. It replaced a 19 KB WebP that had to be decoded and rescaled on
+  every resize and letterboxed by hand to keep its aspect ratio. Retune the
+  whole backdrop by editing that one stop list. The stops bunch through the
+  middle deliberately: spread evenly, the indigo-to-purple leg bands visibly
+  down a tall window.
+- **Both landing surfaces are white glass, and that is downstream of the
+  gradient.** The action cards (`kLandingCardSurface`) sit in the middle of it;
+  the recents panel (`kLandingPanelSurface` / `kLandingPanelBorder`) is thinner
+  so the deepest part still reads through. This only works because the drawn
+  backdrop stays dark at the bottom — the photograph it replaced washed out to
+  pale pink there, where a white scrim lightens an already-light surface, and
+  the panel had to be black glass with a *darker* edge to survive it. Restore a
+  light-bottomed backdrop and that inversion comes back with it. Everything with
+  an obvious slot rides in the scheme (`primary`, `card`, `accent`, `border`,
+  `mutedForeground`); the panel is the exception, having no token of its own.
+- **Both landing actions are the same pink** (`kLandingActionColor`, pink-600).
+  Creating and opening are the two ways in, not a choice with a recommended
+  answer, so neither gets primary/secondary weighting — and the app's brand blue
+  is a poor neighbour to the blues this gradient starts in.
+- **Nothing over the backdrop may leave a text colour unset.** A shad text role
+  with no colour falls through to the `DefaultTextStyle` `ShadApp` installed
+  from the *app* theme, which is the one thing on these screens that still
+  follows the system's light/dark setting. A recent project's path was set in
+  bare `textTheme.muted` and so went black in light mode while every explicitly
+  coloured string beside it stayed white. `kLandingSubduedForeground` is the
+  translucent white for type that should recede.
+- **A card nested around a control needs `concentricRadius`**, not the same
+  radius as the control. The two action buttons sit in 10px of card; sharing one
+  radius makes the visible ring of card measurably fatter at the corners than
+  along the edges.
 - The setup spinner is explicitly `Colors.white`. The backdrop is a fixed brand
   image in both themes and the spinner sits over its saturated middle, where the
   default (`primary`, brand blue) all but disappears — the same reason the banner

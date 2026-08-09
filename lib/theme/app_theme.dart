@@ -12,6 +12,14 @@ const _kMacUiFont = '.AppleSystemUIFont';
 /// macOS monospace font for terminal output.
 const kMacMonoFont = 'Menlo';
 
+/// Headline face, bundled at Black (900) and no other weight.
+///
+/// It is the font shad's metrics were drawn for, so unlike [_kMacUiFont] it
+/// needs no correction — see [_kWeightAxisRatio]. The static cut carries no
+/// `wght` axis either, so a variation on a headline role would be ignored:
+/// headlines set [FontWeight.w900] and nothing else.
+const kHeadlineFont = 'Inter';
+
 /// How far our font's weight axis travels compared with the one shad's
 /// metrics were drawn for.
 ///
@@ -68,12 +76,17 @@ ShadTextTheme _buildTextTheme() {
   final base = ShadTextTheme(family: _kMacUiFont);
   TextStyle fix(TextStyle s) =>
       s.merge(correctedWeight(s.fontWeight ?? FontWeight.w400));
+  // Headlines leave the UI font entirely, so they leave the correction behind
+  // with it: [kHeadlineFont] ships one weight and shad's scale was drawn for
+  // that typeface. Sizes, line heights and tracking stay shad's.
+  TextStyle headline(TextStyle s) =>
+      s.copyWith(fontFamily: kHeadlineFont, fontWeight: FontWeight.w900);
   return base.copyWith(
-    h1Large: fix(base.h1Large),
-    h1: fix(base.h1),
-    h2: fix(base.h2),
-    h3: fix(base.h3),
-    h4: fix(base.h4),
+    h1Large: headline(base.h1Large),
+    h1: headline(base.h1),
+    h2: headline(base.h2),
+    h3: headline(base.h3),
+    h4: headline(base.h4),
     p: fix(base.p),
     blockquote: fix(base.blockquote),
     table: fix(base.table),
@@ -209,3 +222,76 @@ ShadThemeData buildLightTheme() =>
     _buildTheme(Brightness.light, lightColorScheme);
 
 ShadThemeData buildDarkTheme() => _buildTheme(Brightness.dark, darkColorScheme);
+
+/// Glass over the landing backdrop.
+///
+/// Fixed alphas rather than palette entries because these sit on a brand image
+/// rather than on `background` — there is no token that describes them, and the
+/// image does not change with the system's brightness. Same reasoning that has
+/// the landing banner hardcode black.
+///
+/// Two surfaces, both white, differing only in how much of the backdrop they
+/// let through. The action cards sit in the middle of the gradient and are
+/// lifted off it; the recents panel sits at the floor and is thinner, so the
+/// deepest part of the gradient still reads through it.
+///
+/// White throughout only because the backdrop is drawn rather than
+/// photographed — see `_LandingBackground`. The image it replaced washed out to
+/// pale pink at the bottom, where a white scrim lightens an already-light
+/// surface, and the panel had to be black to survive it.
+const kLandingCardSurface = Color(0x1FFFFFFF);
+const kLandingPanelSurface = Color(0x14FFFFFF);
+const kLandingPanelBorder = Color(0x24FFFFFF);
+const _kLandingHairline = Color(0x2EFFFFFF);
+const _kLandingHover = Color(0x1FFFFFFF);
+const _kLandingMutedForeground = Color(0xC7FFFFFF);
+
+/// Type set over the backdrop is white throughout; the second value is for the
+/// text that should recede without picking up a hue, such as a project's path.
+const kLandingSubduedForeground = Color(0xB3FFFFFF);
+
+/// The landing actions. Pink rather than the app's brand blue, which is a poor
+/// neighbour to the blues this gradient starts in.
+const kLandingActionColor = Color(0xFFDB2777); // pink-600
+
+/// The outer radius a [padding]-wide card needs for its border to look the same
+/// thickness all the way round a child with [inner] corners.
+///
+/// Concentric, not equal: a card and its child sharing one radius leaves the
+/// gap between them visibly fatter at the corners than along the edges.
+BorderRadius concentricRadius(BorderRadius inner, double padding) =>
+    BorderRadius.all(Radius.circular(inner.topLeft.x + padding));
+
+/// The theme every pre-project screen uses, in both system brightnesses.
+///
+/// `LandingScaffold` paints one saturated brand image whatever the system is
+/// set to, so following light mode there would put pale chrome and dark text on
+/// a dark photograph. Dark is not a preference here, it is what the backdrop
+/// is.
+///
+/// Everything with one obvious slot is folded into the *scheme* rather than
+/// handed to each widget, so the screens on top keep reading `scheme.primary` /
+/// `scheme.card` / `scheme.accent` like the rest of the app. The recents panel
+/// is the exception: it is the second surface, and there is no token for that.
+ShadThemeData buildLandingTheme() => _landingTheme;
+
+/// Built once: unlike the app themes this is rebuilt on every frame of a
+/// landing screen, and a fresh [ShadThemeData] each time would make every
+/// descendant that depends on it rebuild too.
+final _landingTheme = _buildTheme(
+  Brightness.dark,
+  darkColorScheme.copyWith(
+    primary: kLandingActionColor,
+    primaryForeground: Colors.white,
+    ring: kLandingActionColor,
+    card: kLandingCardSurface,
+    cardForeground: Colors.white,
+    accent: _kLandingHover,
+    accentForeground: Colors.white,
+    muted: kLandingCardSurface,
+    mutedForeground: _kLandingMutedForeground,
+    border: _kLandingHairline,
+    input: _kLandingHairline,
+    foreground: Colors.white,
+  ),
+);

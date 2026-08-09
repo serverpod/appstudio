@@ -212,6 +212,10 @@ class _InstallBanner extends StatelessWidget {
     return ShadCard(
       backgroundColor: scheme.muted,
       title: Text('${active.phase.label} ${active.id.displayName}…'),
+      // A card title defaults to `h3`, which is a headline role and so is set
+      // in Inter Black — far too loud for a progress banner inside a pane.
+      // This one is a label for the bar underneath it.
+      titleStyle: theme.textTheme.large,
       action: ShadButton.ghost(
         onPressed: onCancel,
         child: const Text('Cancel'),

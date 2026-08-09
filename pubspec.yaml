@@ -44,3 +44,13 @@ flutter:
   uses-material-design: true
   assets:
     - assets/
+  fonts:
+    # Headline face. Bundled rather than reached for through `shad`'s own copy
+    # so the display type cannot change under us when the package updates.
+    # Black is the only weight we ship — headlines are the only thing that uses
+    # it, and 400 KB is already the largest asset in the app.
+    # SIL Open Font License 1.1, see assets/fonts/Inter-LICENSE.txt.
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Black.ttf
+          weight: 900
