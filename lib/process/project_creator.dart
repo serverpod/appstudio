@@ -8,8 +8,33 @@ import '../toolchain/tool_status.dart';
 import '../toolchain/toolchain_controller.dart';
 import 'dev_session_cleanup.dart';
 
-/// IDE integration installed into new projects (agent skills + MCP config).
-const _kIdeOption = 'opencode';
+/// Editors `serverpod create --ide` can configure with agent skills and MCP.
+///
+/// `--ide` is a multi-option, so each one is passed as its own flag.
+enum IdeIntegration {
+  opencode('opencode', 'OpenCode', builtIn: true),
+  antigravity('antigravity', 'Antigravity'),
+  claude('claude', 'Claude Code'),
+  codex('codex', 'Codex'),
+  cursor('cursor', 'Cursor'),
+  vscode('vscode', 'VS Code');
+
+  const IdeIntegration(this.option, this.label, {this.builtIn = false});
+
+  /// Value passed to `serverpod create --ide`.
+  final String option;
+
+  /// Name shown in the New Project dialog.
+  final String label;
+
+  /// Configured whether or not it was asked for. OpenCode is the agent App
+  /// Studio runs itself, so a project without it would open with an Agent tab
+  /// that has no skills and no MCP server.
+  ///
+  /// The New Project dialog does not mark these — they are offered like any
+  /// other editor, and ticking one changes nothing.
+  final bool builtIn;
+}
 
 final _ansiEscape = RegExp(r'\x1B\[[0-9;]*[A-Za-z]');
 
@@ -57,6 +82,7 @@ class ProjectCreator {
   Future<String> create({
     required String name,
     required String parentDirectory,
+    Set<IdeIntegration> ides = const {},
     void Function(String status)? onStatus,
   }) async {
     final nameError = validateProjectName(name);
@@ -81,6 +107,7 @@ class ProjectCreator {
     final code = await _runCreate(
       name: name,
       workingDirectory: parent,
+      ides: ides,
       log: log,
       onStatus: onStatus,
     );
@@ -102,6 +129,7 @@ class ProjectCreator {
   Future<int> _runCreate({
     required String name,
     required String workingDirectory,
+    required Set<IdeIntegration> ides,
     required StringBuffer log,
     void Function(String status)? onStatus,
   }) async {
@@ -118,7 +146,13 @@ class ProjectCreator {
     try {
       process = await Process.start(
         serverpod,
-        ['create', name, '--ide', _kIdeOption, '--no-interactive'],
+        [
+          'create',
+          name,
+          for (final ide in IdeIntegration.values)
+            if (ide.builtIn || ides.contains(ide)) ...['--ide', ide.option],
+          '--no-interactive',
+        ],
         workingDirectory: workingDirectory,
         environment: toolchain.processEnvironment(),
       );

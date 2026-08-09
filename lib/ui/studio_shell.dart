@@ -84,7 +84,7 @@ class _StudioShellState extends State<StudioShell> {
   }
 
   void _newProject() {
-    showNewProjectDialog(
+    showNewProjectScreen(
       context,
       toolchains: widget.toolchains,
       session: widget.session,

@@ -19,6 +19,7 @@ namespace webview_cef {
 	std::string g_macSubprocessPath;
 	std::string g_macFrameworkDirPath;
 	std::string g_macMainBundlePath;
+	std::string g_macRootCachePath;
 
 	void setMacCEFPaths(const std::string& subprocessPath,
 	                    const std::string& frameworkDirPath,
@@ -26,6 +27,10 @@ namespace webview_cef {
 		g_macSubprocessPath = subprocessPath;
 		g_macFrameworkDirPath = frameworkDirPath;
 		g_macMainBundlePath = mainBundlePath;
+	}
+
+	void setMacRootCachePath(const std::string& rootCachePath) {
+		g_macRootCachePath = rootCachePath;
 	}
 #endif
 
@@ -698,6 +703,14 @@ namespace webview_cef {
 		}
 		if (!g_macMainBundlePath.empty()) {
 			CefString(&cefs.main_bundle_path) = g_macMainBundlePath;
+		}
+		// Unset, this defaults to ~/Library/Application Support/CEF/User Data —
+		// the same directory for every CEF app that also left it unset, and the
+		// one holding SingletonLock/SingletonCookie/SingletonSocket. Sharing it
+		// is what CEF warns about as "unintended process singleton behavior".
+		// cache_path stays empty, so the HTTP cache is still in-memory only.
+		if (!g_macRootCachePath.empty()) {
+			CefString(&cefs.root_cache_path) = g_macRootCachePath;
 		}
 #else
 		//cef message run in another thread on windows/linux

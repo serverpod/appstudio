@@ -462,6 +462,30 @@ private:
                                             std::string([frameworkDir UTF8String]),
                                             std::string([bundlePath UTF8String]));
             }
+            // Give CEF a root cache directory of our own. The default is
+            // ~/Library/Application Support/CEF/User Data, which every CEF app
+            // that leaves the setting unset shares — and it holds the process
+            // singleton lock, so they can end up fighting over it. Set outside
+            // the check above because it applies in single-process mode too.
+            NSString* appName = [mainBundle objectForInfoDictionaryKey:@"CFBundleName"];
+            if (appName.length == 0) {
+                appName = exeName;
+            }
+            NSString* appSupport = [NSSearchPathForDirectoriesInDomains(
+                NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
+            if (appSupport.length > 0 && appName.length > 0) {
+                NSString* rootCachePath = [[appSupport
+                    stringByAppendingPathComponent:appName]
+                    stringByAppendingPathComponent:@"CEF"];
+                // CEF asserts on a root_cache_path it cannot use, so only hand
+                // it one we know exists.
+                if ([[NSFileManager defaultManager] createDirectoryAtPath:rootCachePath
+                                              withIntermediateDirectories:YES
+                                                               attributes:nil
+                                                                    error:nil]) {
+                    webview_cef::setMacRootCachePath(std::string([rootCachePath UTF8String]));
+                }
+            }
             webview_cef::initCEFProcesses();
             isCefProcessInit = YES;
         }

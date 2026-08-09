@@ -16,6 +16,7 @@ import 'toolchain/toolchain_controller.dart';
 import 'update/session_teardown.dart';
 import 'update/update_controller.dart';
 import 'platform/macos_app_menu.dart';
+import 'ui/landing_scaffold.dart';
 import 'ui/new_project_dialog.dart';
 import 'ui/project_startup_dialog.dart';
 import 'ui/uninstall/uninstall_confirm_dialog.dart';
@@ -143,7 +144,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
       process: widget.process,
       agent: widget.agent,
       themeController: widget.themeController,
-      onNewProject: _showNewProjectDialog,
+      onNewProject: _showNewProjectScreen,
       onCheckForUpdates: () => unawaited(widget.updates.checkForUpdates()),
       onUninstall: _confirmUninstall,
       canCheckForUpdates: () => widget.updates.state.canCheck,
@@ -196,6 +197,16 @@ class _AppStudioAppState extends State<AppStudioApp> {
     final canOpen = !_needsToolchainSetup;
     if (canOpen == _menuCanOpenProjects) return;
     _menuCanOpenProjects = canOpen;
+    // The same flip swaps the setup screen for the shell, or back.
+    //
+    // Deferred, unlike the other two callers: `ToolchainSetupDialog` closes
+    // *itself* on this very notification, and it is a later listener, so a pop
+    // here would land first and leave its `Navigator.pop` to hit the route
+    // underneath — which is `home`, emptying the navigator. By the next frame
+    // it has popped itself and this finds nothing left to clear.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _clearPushedRoutes();
+    });
     _syncMenu();
   }
 
@@ -214,15 +225,37 @@ class _AppStudioAppState extends State<AppStudioApp> {
     final path = widget.session.projectPath;
     if (path == _noticedProjectPath) return;
     _noticedProjectPath = path;
-    if (path == null) return;
     // The session can notify mid-build (closing a project rebuilds the shell),
     // and pushing a route from inside a build is illegal.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final navigatorContext = _navigatorKey.currentContext;
       if (!mounted || navigatorContext == null) return;
+      // The shell swaps the start page for the panes underneath whatever is
+      // pushed over it — ⌘O and Open Recent stay live while the Create
+      // Project screen is up, and a project opened that way would otherwise
+      // load behind it.
+      _clearPushedRoutes();
+      if (path == null) return;
       unawaited(maybeShowProjectStartupNotice(navigatorContext));
     });
   }
+
+  /// Drops everything pushed over [ShadApp.home].
+  ///
+  /// `home` is the *first* route, so swapping it happens underneath anything
+  /// pushed on top: the new screen is there, and invisible. That is how
+  /// uninstalling with the Create Project screen open left the user filling in
+  /// a form for an app that had just deleted itself.
+  ///
+  /// Called from the three transitions that replace the screen rather than
+  /// from `build`, so it stays a consequence of the thing that happened and
+  /// not a side effect of painting.
+  ///
+  /// `Navigator.pop` does not consult `PopScope`, which is what makes this
+  /// work on the Create Project screen mid-run — a screen the *user* may not
+  /// dismiss is still cleared by the app.
+  void _clearPushedRoutes() =>
+      _navigatorKey.currentState?.popUntil((route) => route.isFirst);
 
   /// Runs the full uninstall, then replaces the UI with a dead-end screen.
   ///
@@ -247,6 +280,9 @@ class _AppStudioAppState extends State<AppStudioApp> {
     );
     if (choice == null || !mounted) return;
 
+    // Both screens this leads to replace `home`, which is below anything the
+    // user still has open.
+    _clearPushedRoutes();
     setState(() => _uninstalling = true);
     final result = await uninstaller.run(clearPubCache: choice.clearPubCache);
 
@@ -257,11 +293,11 @@ class _AppStudioAppState extends State<AppStudioApp> {
     });
   }
 
-  void _showNewProjectDialog() {
+  void _showNewProjectScreen() {
     final navigatorContext = _navigatorKey.currentContext;
     if (!mounted || navigatorContext == null) return;
     unawaited(
-      showNewProjectDialog(
+      showNewProjectScreen(
         navigatorContext,
         toolchains: widget.toolchains,
         session: widget.session,
@@ -340,16 +376,30 @@ class _AppStudioAppState extends State<AppStudioApp> {
 
 /// Shown while the uninstall runs. Brief, but the teardown can take a few
 /// seconds and a frozen IDE would read as a hang.
+///
+/// On the same backdrop as [UninstalledScreen], which it hands straight over
+/// to: two treatments across one uninstall would read as the window being
+/// replaced twice.
 class _UninstallingScreen extends StatelessWidget {
   const _UninstallingScreen();
 
   @override
   Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    return ColoredBox(
-      color: theme.colorScheme.background,
-      child: Center(
-        child: Text('Uninstalling…', style: theme.textTheme.muted),
+    return LandingScaffold(
+      // Built under the scaffold, so it is the landing theme being read here
+      // and the colour is white rather than the app's foreground.
+      child: Builder(
+        builder: (context) {
+          final theme = ShadTheme.of(context);
+          return Center(
+            child: Text(
+              'Uninstalling…',
+              style: theme.textTheme.muted.copyWith(
+                color: theme.colorScheme.foreground,
+              ),
+            ),
+          );
+        },
       ),
     );
   }

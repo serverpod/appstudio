@@ -13,19 +13,80 @@ import '../toolchain/toolchain_controller.dart';
 import '../util/pretty_path.dart';
 import '../widgets/error_banner.dart';
 import '../widgets/field_label.dart';
+import 'landing_scaffold.dart';
 
 const _kDialogWidth = 460.0;
 
-Future<void> showNewProjectDialog(
+/// Pushes the Create Project screen. Completes when it is left, whether the
+/// project was created or cancelled.
+///
+/// A route rather than a dialog: creating a project is the whole task for as
+/// long as it lasts, there is nothing behind it worth reading through a
+/// blurred barrier, and a stray click outside a form holding a typed name
+/// should not throw it away. Cancel pops back to whatever opened it.
+Future<void> showNewProjectScreen(
   BuildContext context, {
   required ToolchainController toolchains,
   required ProjectSession session,
 }) {
-  return showShadDialog<void>(
-    context: context,
-    builder: (context) =>
-        NewProjectDialog(toolchains: toolchains, session: session),
+  return Navigator.of(context).push(
+    PageRouteBuilder<void>(
+      barrierDismissible: false,
+      transitionDuration: const Duration(milliseconds: 150),
+      reverseTransitionDuration: const Duration(milliseconds: 150),
+      pageBuilder: (context, _, _) =>
+          NewProjectScreen(toolchains: toolchains, session: session),
+      transitionsBuilder: (context, animation, _, child) =>
+          FadeTransition(opacity: animation, child: child),
+    ),
   );
+}
+
+/// The Create Project form on the shared landing backdrop.
+///
+/// It uses [LandingScaffold] so arriving here from the start page reads as the
+/// same app rather than a new one.
+///
+/// The form is put back on the *app's* theme, though. [LandingScaffold] gives
+/// its child the landing theme, which is fixed dark because the gradient
+/// behind it is — right for chrome sitting directly on that backdrop, wrong
+/// for a surface with its own background, which would then be the one dark
+/// panel in a light app. That is the same rule dialogs raised from the start
+/// page already follow, by virtue of being routes that land outside the
+/// scaffold.
+class NewProjectScreen extends StatelessWidget {
+  const NewProjectScreen({
+    super.key,
+    required this.toolchains,
+    required this.session,
+  });
+
+  final ToolchainController toolchains;
+  final ProjectSession session;
+
+  @override
+  Widget build(BuildContext context) {
+    // Read above the scaffold, which is where the app's theme still is.
+    final appTheme = ShadTheme.of(context);
+
+    return LandingScaffold(
+      // Centre outside the scroll view, not inside it: a scroll view sized to
+      // its viewport pins a short child to the top, and this one is short in
+      // any window taller than the form.
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(vertical: 24),
+          child: ShadTheme(
+            data: appTheme,
+            child: NewProjectDialog(
+              toolchains: toolchains,
+              session: session,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Collects a project name + location, runs `serverpod create`, then opens the
@@ -47,6 +108,10 @@ class NewProjectDialog extends StatefulWidget {
 class _NewProjectDialogState extends State<NewProjectDialog> {
   final _nameController = TextEditingController();
   late String _directory = widget.session.suggestedNewProjectDirectory;
+  late final _directoryController = TextEditingController(
+    text: prettyPath(_directory),
+  );
+  final _ides = <IdeIntegration>{};
 
   bool _creating = false;
   String? _status;
@@ -66,6 +131,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
   void dispose() {
     _nameController.removeListener(_onNameChanged);
     _nameController.dispose();
+    _directoryController.dispose();
     super.dispose();
   }
 
@@ -87,6 +153,10 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
 
   bool get _canCreate => !_creating && _name.isNotEmpty && _nameError == null;
 
+  /// Whether anything the user actually chose is ticked. A `builtIn` is
+  /// installed either way, so it is not a choice and does not count as one.
+  bool get _hasExternalEditor => _ides.any((ide) => !ide.builtIn);
+
   Future<void> _chooseDirectory() async {
     final path = await getDirectoryPath(
       confirmButtonText: 'Choose',
@@ -95,6 +165,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
     if (path == null || !mounted) return;
     setState(() {
       _directory = p.normalize(path);
+      _directoryController.text = prettyPath(_directory);
       _error = null;
       _errorLog = null;
     });
@@ -102,6 +173,10 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
 
   Future<void> _create() async {
     if (!_canCreate) return;
+    if (!_hasExternalEditor) {
+      final proceed = await _confirmNoExternalEditor(context);
+      if (!proceed || !mounted || !_canCreate) return;
+    }
     final name = _name;
     setState(() {
       _creating = true;
@@ -115,6 +190,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
       final path = await ProjectCreator(toolchains: widget.toolchains).create(
         name: name,
         parentDirectory: _directory,
+        ides: _ides,
         onStatus: (status) {
           if (mounted) setState(() => _status = status);
         },
@@ -152,13 +228,10 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
 
     return PopScope(
       canPop: !_creating,
-      child: ShadDialog(
-        title: const Text('New Project'),
-        description: const Text(
-          'Creates a Serverpod project with the bundled CLI and opens it.',
-        ),
-        // No way out mid-run — the CLI keeps writing files either way.
-        closeIcon: _creating ? const SizedBox.shrink() : null,
+      // `alert` is the variant without a close X — Cancel is the way out, and
+      // mid-run there is none, since the CLI keeps writing files either way.
+      child: ShadDialog.alert(
+        title: const Text('Create Project'),
         actions: _buildActions(),
         child: SizedBox(
           width: _kDialogWidth,
@@ -190,7 +263,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
       ShadButton(
         enabled: _canCreate,
         onPressed: _create,
-        child: Text(_creating ? 'Creating…' : 'Create Project'),
+        child: Text(_creating ? 'Creating…' : 'Create'),
       ),
     ];
   }
@@ -222,21 +295,42 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
           ],
           onSubmitted: (_) => _create(),
         ),
-        const SizedBox(height: 6),
-        Text(
-          nameError ??
-              'Names the project folder and its Dart packages, e.g. my_app.',
-          style: textTheme.muted.copyWith(
-            fontSize: 11,
-            color: nameError != null ? scheme.destructive : null,
+        // The error takes the space rather than being given a slot of its
+        // own that is empty most of the time — an always-drawn line is most
+        // of the gap down to Location. The cost is that the form grows by a
+        // line when a name stops being a legal Dart package name.
+        if (nameError != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            nameError,
+            style: textTheme.muted.copyWith(
+              fontSize: 11,
+              color: scheme.destructive,
+            ),
           ),
-        ),
-        const SizedBox(height: 16),
+          const SizedBox(height: 6),
+        ] else
+          const SizedBox(height: 12),
         FieldLabel('Location'),
         const SizedBox(height: 6),
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(child: _PathField(path: _directory)),
+            Expanded(
+              child: ShadInput(
+                controller: _directoryController,
+                enabled: false,
+                leading: Icon(
+                  LucideIcons.folder,
+                  size: 14,
+                  color: scheme.mutedForeground,
+                ),
+                style: textTheme.small.copyWith(
+                  fontFamily: kMacMonoFont,
+                  fontSize: 11.5,
+                ),
+              ),
+            ),
             const SizedBox(width: 8),
             ShadButton.outline(
               onPressed: _chooseDirectory,
@@ -244,26 +338,27 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
             ),
           ],
         ),
+        const SizedBox(height: 24),
+        FieldLabel('External AI editors'),
         const SizedBox(height: 6),
-        Text.rich(
-          TextSpan(
-            children: [
-              const TextSpan(text: 'Creates '),
-              TextSpan(
-                text: prettyPath(
-                  p.join(_directory, _name.isEmpty ? '…' : _name),
-                ),
-                style: TextStyle(
-                  fontFamily: kMacMonoFont,
-                  color: scheme.foreground.withValues(alpha: 0.75),
-                ),
-              ),
-            ],
-          ),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
+        Text(
+          'Installs agent skills and MCP servers for the editors you pick.',
           style: textTheme.muted.copyWith(fontSize: 11),
         ),
+        const SizedBox(height: 12),
+        _IdeCheckboxes(
+          selected: _ides,
+          onChanged: (ide, value) => setState(() {
+            if (value) {
+              _ides.add(ide);
+            } else {
+              _ides.remove(ide);
+            }
+          }),
+        ),
+        // The dialog's own gap alone leaves the last row of boxes sitting on
+        // top of the buttons.
+        const SizedBox(height: 16),
       ],
     );
   }
@@ -296,42 +391,69 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
   }
 }
 
-/// Read-only folder display matching the height and chrome of [ShadInput].
-class _PathField extends StatelessWidget {
-  const _PathField({required this.path});
+/// Asks before creating a project with no external editor configured.
+///
+/// Returns whether to go ahead. Dismissing the prompt counts as Pick Editor:
+/// the whole point of it is that continuing should be the deliberate answer.
+///
+/// It is a plain dialog over the Create Project screen — the one thing the
+/// screen has that this needs is somewhere to go back to.
+Future<bool> _confirmNoExternalEditor(BuildContext context) async {
+  final proceed = await showShadDialog<bool>(
+    context: context,
+    builder: (context) => ShadDialog.alert(
+      title: const Text('No external editor selected'),
+      description: const Text(
+        "It's recommended that you use App Studio with an external editor. "
+        'Are you sure that you want to continue?',
+      ),
+      actions: [
+        ShadButton.outline(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('Continue'),
+        ),
+        // The recommended answer, so it is the primary one.
+        ShadButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Pick Editor'),
+        ),
+      ],
+    ),
+  );
+  return proceed ?? false;
+}
 
-  final String path;
+/// Editor checkboxes, three to a row — one per line would make this section
+/// taller than the two fields above it put together.
+class _IdeCheckboxes extends StatelessWidget {
+  const _IdeCheckboxes({required this.selected, required this.onChanged});
+
+  final Set<IdeIntegration> selected;
+  final void Function(IdeIntegration ide, bool value) onChanged;
 
   @override
   Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    final scheme = theme.colorScheme;
+    const columns = 3;
+    const spacing = 8.0;
+    final width = (_kDialogWidth - spacing * (columns - 1)) / columns;
 
-    return Container(
-      height: 36,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(
-        color: scheme.muted.withValues(alpha: 0.45),
-        borderRadius: theme.radii.sm,
-        border: Border.all(color: scheme.border),
-      ),
-      child: Row(
-        children: [
-          Icon(LucideIcons.folder, size: 14, color: scheme.mutedForeground),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              prettyPath(path),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.small.copyWith(
-                fontFamily: kMacMonoFont,
-                fontSize: 11.5,
-              ),
+    return Wrap(
+      spacing: spacing,
+      runSpacing: spacing,
+      children: [
+        for (final ide in IdeIntegration.values)
+          SizedBox(
+            width: width,
+            child: ShadCheckbox(
+              // Every box is an ordinary opt-in, including OpenCode's. What
+              // it says about OpenCode does not decide anything, though —
+              // `IdeIntegration.builtIn` is installed either way.
+              value: selected.contains(ide),
+              onChanged: (value) => onChanged(ide, value),
+              label: Text(ide.label),
             ),
           ),
-        ],
-      ),
+      ],
     );
   }
 }

@@ -78,6 +78,11 @@ namespace webview_cef {
     void setMacCEFPaths(const std::string& subprocessPath,
                         const std::string& frameworkDirPath,
                         const std::string& mainBundlePath);
+    // Where CEF keeps the data it stores outside a request context, including
+    // the process singleton lock. Left unset, CEF falls back to a directory
+    // shared by every CEF app on the machine. Set independently of the paths
+    // above: it applies in single-process mode too. Must precede startCEF().
+    void setMacRootCachePath(const std::string& rootCachePath);
 #endif
     void doMessageLoopWork();
     void SwapBufferFromBgraToRgba(void* _dest, const void* _src, int width, int height);

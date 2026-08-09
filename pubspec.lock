@@ -592,10 +592,10 @@ packages:
     dependency: "direct main"
     description:
       name: shad
-      sha256: "28006ffb49ecbe7be4aaa07eca1ac02962cb67b976082a55bbc40dc1684ce6e5"
+      sha256: "29eba40fbc9ebcd10b5d590dc7ef738db287c3c45d6fab2d6072fb383d1d357d"
       url: "https://pub.dev"
     source: hosted
-    version: "0.99.2"
+    version: "0.99.3"
   shared_preferences:
     dependency: "direct main"
     description:

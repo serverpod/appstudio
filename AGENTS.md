@@ -555,6 +555,21 @@ install. Sparkle would also catch it, but later and less clearly.
 - **Backdrop:** CEF composites with alpha, so an opaque `ColoredBox` (`previewBackdropColor`) sits under the surface, following the *previewed* app's brightness, not the shell's.
 - **CEF sizing:** `PreviewSurfaceSync` + `burstSyncPreviewSurface` keep the webview sized on panel/mode changes. Defer layout reads to post-frame callbacks; avoid `MediaQuery` in `initState`.
 - **webview_cef:** path dependency `packages/webview_cef` (fork of 0.5.1). Includes CEF resize surface sync and skips embedding `Helper (Alerts)`. CEF itself is fetched by `pod install` into `macos/third/cef/` (gitignored).
+- **`root_cache_path` is set, and it has to be.** Left unset, CEF falls back to
+  `~/Library/Application Support/CEF/User Data` — *one* directory for every CEF
+  app on the Mac that also left it unset, and the one holding `SingletonLock`,
+  `SingletonCookie` and `SingletonSocket`. That is the "unintended process
+  singleton behavior" CEF warns about on every launch: another vendor's CEF app
+  can hold the lock our browser needs. `CefWrapper.mm` resolves
+  `~/Library/Application Support/<CFBundleName>/CEF` — `App Studio/CEF` here, so
+  the uninstaller's recursive sweep of the support directory takes it too — and
+  passes it through `setMacRootCachePath` before `startCEF()`. It is set
+  *outside* the bundled-helper check that guards the other three paths, because
+  it applies in single-process mode as well.
+- **`cache_path` stays empty on purpose**, so the HTTP cache remains in-memory
+  only. Setting it would start persisting the previewed app's `main.dart.js`
+  across launches, which is the exact thing `reloadIgnoreCache()` exists to
+  defeat. `root_cache_path` alone does not turn that on.
 - The fork's event getters (`onToolTip`, `onCursorChanged`, `onFocusedNodeChangeMessage`, …) carry **explicit types**; upstream leaves them inferred, which makes them `dynamic` and silences the analyzer at every call site. Annotating them surfaced a real one: `onFocusedNodeChangeMessage` was invoked unguarded while every sibling case used `?.call`, so a focus change arriving before a WebView registered its callback would throw. Keep the annotations through any rebase — they are what makes that class of bug visible.
 - **Registration codes:** `serverpod start` logs `Registration code for <email>: <code>` instead of mailing it. `ServerpodProcessController` reassembles console lines across PTY chunks (`_scanLines`) and exposes `registrationCode`; `RegistrationCodeToast` floats it over the preview until dismissed or superseded.
 - **Keyboard into CEF (macOS):** a local `NSEvent` monitor (`CefWrapper.processKeyboardEvent`) routes keys. It only forwards to `current_focused_browser_`, which is set from `setClientFocus` — never let it consume an event it can't deliver, or the webview looks dead.
@@ -592,6 +607,14 @@ install. Sparkle would also catch it, but later and less clearly.
 - Deliberately **not** removed: `~/.pub-cache` (opt-in checkbox — shared with
   every Dart project) and `~/.local/share/opencode/auth.json` (API keys the
   OpenCode CLI uses independently of App Studio).
+- **Both uninstall screens ride on `LandingScaffold`**, like the start page and
+  first-run setup: with no project, no toolchain and no session left, the
+  branded gradient is the one surface here that does not depend on something
+  that was just deleted. That means the fixed dark landing theme, so **every
+  colour on them is set explicitly** — a text role with no colour of its own
+  falls through to the `DefaultTextStyle` `ShadApp` installed from the *app*
+  theme, and lands as black text on the gradient in light mode.
+  `test/uninstall/uninstalled_screen_test.dart` pins that in both brightnesses.
 - The final screen is a dead end by design. The session is stopped, the
   toolchain is gone and preferences are cleared, so any control would either
   fail or silently recreate what was just removed.
@@ -634,6 +657,8 @@ so it has no preview yet.
 - **`teardownSession` takes every controller that owns a child process, and the parameters are required on purpose.** It is the one function both the quit path and Sparkle's `prepareForRelaunch` call, so anything optional there is a stray process waiting to happen — a bridge still shutting down when Sparkle swaps the bundle.
 - `ServerpodProcessController` owns process lifecycle and signals when preview is ready to load.
 - The menu bar lives above `ShadApp`, so menu-triggered dialogs use the `navigatorKey` context from `main.dart`.
+- **Swapping `home` does not clear what is pushed over it — call `_clearPushedRoutes()`.** `home` is the *first* route, so a screen swap happens underneath any open route and is simply invisible: uninstalling with the Create Project screen up left the user filling in a form for an app that had just deleted itself. The menu bar stays live behind every dialog and every full-screen route, so this is reachable from all three transitions that replace the screen, and all three call it — uninstall, the toolchain flip that swaps setup for the shell, and a project opening (⌘O and Open Recent work while Create Project is up, and the project would otherwise load behind it). `Navigator.pop` ignores `PopScope`, which is what lets this clear a screen the *user* may not dismiss; `test/new_project_dialog_test.dart` pins that.
+- **The toolchain caller defers to a post-frame callback and the other two do not.** `ToolchainSetupDialog` closes itself on the same `ToolchainController` notification and is a later listener, so popping synchronously there would land first and leave its own `Navigator.pop` to hit `home`, emptying the navigator.
 - **`MacAppMenu.install()` calls `MacMenuBar.reset()` first, and must keep doing so.** A hot restart replaces the Dart isolate but not the engine, its plugins or the native `NSMenu`, so without it every menu is added again on each restart — and `_recentItemIds` comes back empty, so Open Recent duplicates too. `reset()` removes exactly the items this plugin added: those are the ones carrying a String `representedObject`, which is also how the plugin finds items by id, so stock MainMenu.xib entries cannot be stripped.
 - **Never return `menuItem.isEnabled` from `validateMenuItem`** for an item the plugin overrode. Under automatic enabling AppKit *writes* `isEnabled` from the previous validation pass, so reading it back is a latch, not a query. MainMenu.xib ships `Preferences…` with no action at all, so AppKit disabled it before the override was installed and it could never re-enable — the Settings item was permanently greyed out. Overridden standard items are tracked in `overriddenItems` and validate to `true`; the Dart handler decides what happens when they fire.
 
@@ -736,7 +761,13 @@ that could not work — there is no Flutter SDK to build with yet.
 
 ## New projects
 
-- **New Project** (start page + File menu) opens `ui/new_project_dialog.dart`: project name + location, then `ProjectCreator` (`process/project_creator.dart`) runs the bundled `serverpod create <name> --ide opencode --no-interactive` in that location.
+- **New Project** (start page + File menu) opens `ui/new_project_dialog.dart`: project name + location + external AI editors, then `ProjectCreator` (`process/project_creator.dart`) runs the bundled `serverpod create <name> --ide … --no-interactive` in that location.
+- **It is a screen, not a dialog over one.** `showNewProjectScreen` pushes a route whose `NewProjectScreen` draws the form on `LandingScaffold` — the same backdrop and fixed dark theme the start page uses, so arriving here does not read as a different app. There is no barrier, so nothing to blur and nothing to click through: a stray click beside a form holding a typed name used to throw it away. Cancel pops back to wherever it was opened from, which is the start page in the common case and the shell when it came from the File menu.
+- The form itself is still a `ShadDialog.alert` (`NewProjectDialog`), which is the variant with no close X — Cancel is the way out, and mid-run there is none. It is centred *outside* its `SingleChildScrollView`: a scroll view sized to its viewport pins a short child to the top.
+- **The form is put back on the app's theme**, with a `ShadTheme` read above `LandingScaffold` and reinstalled inside it. The landing theme is fixed dark because the gradient is, which is right for chrome sitting on that backdrop and wrong for a surface with its own background — a light app would otherwise show one dark panel here. Routes raised from the start page already behave this way by landing outside the scaffold; this one is inside it and has to say so.
+- **Every `--ide` value is an `IdeIntegration`, one checkbox each**, and each one selected goes out as its own flag — it is a multi-option, and passing any value at all replaces the CLI's own defaults (claude, cursor, vscode). Unchecking everything is therefore a real choice, not a fallback to those defaults.
+- **`opencode` carries `builtIn: true`: it is passed whether or not it is selected**, because it is the agent App Studio runs itself and a project without it would open with an Agent tab that has no skills and no MCP server. The dialog does not mark it — its box is an ordinary opt-in, clear by default like the rest — so ticking or clearing OpenCode changes nothing about what gets installed. Do not "fix" the checkbox to reflect `builtIn` (checked, disabled): that was tried and deliberately reverted.
+- **Create with no external editor ticked asks first** — "No external editor selected", with Continue and Pick Editor. The check is `_hasExternalEditor`, which ignores `builtIn`: OpenCode on its own is not a choice the user made, so ticking it alone still gets the prompt. Dismissing counts as Pick Editor; only Continue proceeds, and it creates exactly what it would have without the prompt. Pick Editor is the primary button because it is the recommended answer.
 - Names must match `^[a-z][a-z0-9_]*$` (they become Dart package names); the input folds case and drops separators as you type.
 - After the CLI succeeds, `patchFlutterAppForPreview` adds `device: web-server` and `web-port: 9998` to the `flutter_apps` entry in `<name>_server/pubspec.yaml` — without it `serverpod start` opens a browser instead of feeding the preview pane. The project is then opened, which auto-starts it.
 - Last used location is remembered in `ProjectSession` (`new_project_directory` pref).
