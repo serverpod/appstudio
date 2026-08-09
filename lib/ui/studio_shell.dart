@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 
 import '../agent/agent_controller.dart';
+import '../mcp/mcp_controller.dart';
 import '../preview/preview_phase.dart';
 import '../process/serverpod_process.dart';
 import '../session/project_session.dart';
@@ -11,6 +12,7 @@ import '../terminal/studio_terminal.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import '../toolchain/toolchain_controller.dart';
+import 'hot_restart_button.dart';
 import 'new_project_dialog.dart';
 import 'preview_pane.dart';
 import 'settings/settings_dialog.dart';
@@ -25,6 +27,7 @@ class StudioShell extends StatefulWidget {
     required this.terminal,
     required this.process,
     required this.agent,
+    required this.mcp,
     required this.themeController,
   });
 
@@ -33,6 +36,7 @@ class StudioShell extends StatefulWidget {
   final StudioTerminal terminal;
   final ServerpodProcessController process;
   final AgentController agent;
+  final McpController mcp;
   final ThemeController themeController;
 
   @override
@@ -108,6 +112,7 @@ class _StudioShellState extends State<StudioShell> {
               onManageTools: _openManageTools,
               session: widget.session,
               process: widget.process,
+              mcp: widget.mcp,
               leftPanelVisible: _leftPanelVisible,
               onToggleLeftPanel: () {
                 setState(() {
@@ -147,6 +152,7 @@ class _Toolbar extends StatelessWidget {
     required this.toolchains,
     required this.session,
     required this.process,
+    required this.mcp,
     required this.leftPanelVisible,
     required this.onToggleLeftPanel,
     required this.onManageTools,
@@ -155,6 +161,7 @@ class _Toolbar extends StatelessWidget {
   final ToolchainController toolchains;
   final ProjectSession session;
   final ServerpodProcessController process;
+  final McpController mcp;
   final bool leftPanelVisible;
   final VoidCallback? onToggleLeftPanel;
   final VoidCallback onManageTools;
@@ -211,6 +218,7 @@ class _Toolbar extends StatelessWidget {
             const Spacer(),
           _ToolchainBadge(toolchains: toolchains, onTap: onManageTools),
           const SizedBox(width: 4),
+          HotRestartButton(mcp: mcp),
           _IconAction(
             icon: LucideIcons.play,
             tooltip: 'Start',
@@ -335,9 +343,12 @@ class _IconAction extends StatelessWidget {
       builder: (context) => Text(tooltip),
       child: ShadIconButton.ghost(
         icon: Icon(icon, size: 16),
+        // A null handler alone leaves the button inert but undimmed, which
+        // reads as a broken click rather than an unavailable action.
+        enabled: onPressed != null,
         onPressed: onPressed,
-        width: 34,
-        height: 34,
+        width: kToolbarIconButtonSize,
+        height: kToolbarIconButtonSize,
       ),
     );
   }

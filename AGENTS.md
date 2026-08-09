@@ -9,6 +9,7 @@ lib/
   main.dart              # ShadApp, wires controllers
   agent/                 # OpenCode serve client, SSE, AgentController, transcript
   ui/                    # studio_shell, preview_pane, terminal_pane, agent/, settings/
+  mcp/                   # serverpod mcp-server bridge, McpController (hot restart)
   preview/               # CEF preview: device modes, theme shim, surface sync
   process/               # ServerpodProcessController (start/stop/reload), ProjectCreator
   session/               # ProjectSession (open project, recents)
@@ -41,6 +42,58 @@ UI reference for design patterns: `../cloudui/cloudui_flutter/`.
   `POST /question/{id}/reject`. Both events carry `tool.{messageID,callID}`;
   the card is attached next to that tool part and the raw row is hidden.
 - Ground truth for events/endpoints is the running server: `curl <base>/doc`.
+
+## Hot restart (Serverpod MCP)
+
+The toolbar's flash icon recompiles and reboots the running server, then
+hot-restarts the Flutter app. It goes through `serverpod mcp-server`, the CLI's
+own MCP bridge — `lib/mcp/serverpod_mcp_bridge.dart` speaks the protocol,
+`McpController` owns the policy, `HotRestartButton` is the one control.
+
+- **Transport is stdio MCP** — newline-delimited JSON-RPC 2.0, protocol
+  `2024-11-05`…`2025-11-25`, server name `serverpod-bridge`. We use
+  `package:dart_mcp`, which is the *same* package the bridge is built on, so the
+  two ends cannot drift. Ground truth is the running bridge: pipe an
+  `initialize` + `tools/list` into `serverpod mcp-server` and read the answer.
+- The bridge forwards to a unix socket the runner opens at
+  `<serverDir>/.dart_tool/serverpod/mcp.sock`. **Nothing has to be enabled on
+  `serverpod start`** — the socket is unconditional, in both TUI and `--no-tui`
+  mode, so App Studio's `--no-tui` runner is fine. No flag, no env var.
+- `serverDir` is auto-detected from the working directory, and we hand the bridge
+  the *same* project root `serverpod start` gets. Both ends then run the same
+  detection and cannot end up pointed at different projects. Do not compute the
+  `*_server` path here — nothing else in the app does either.
+- **The bridge starts and answers happily with no runner behind it**, and
+  `tools/list` returns the full surface either way, so "the bridge is up" says
+  nothing about whether anything can be delivered. The only honest signal is the
+  `serverpod://vm-service` resource: `{"uri": …}` with a runner,
+  `{"uri": null, "error": "not-running"}` without — and the latter is *not*
+  flagged as an error result, so the payload has to be read.
+- That answer is **polled** (2s). The bridge only re-emits resource updates from
+  a runner it is already talking to, so nothing arrives to announce a runner's
+  *arrival* — subscribing would not help. Polling stops while a hot restart is in
+  flight, so the button cannot flicker disabled mid-restart.
+- Spawned with **`-q`** (a *global* option, so it precedes the command) and every
+  stdout line that is not a JSON object is dropped before it reaches the
+  protocol. The CLI's update notice is written to stdout, which is the protocol
+  channel, and one stray line is a parse error that takes the connection down.
+  Dropped lines are kept as diagnostics and reported.
+- **Shut the bridge down by closing the protocol channel, never by killing it.**
+  A `SIGKILL`ed bridge leaves the runner writing into a dead socket, which it
+  reports in the user's server log as an internal error with a 35-frame stack
+  trace and a "file an issue" banner. `stop()` closes the channel, waits, and
+  only then falls back to a signal; `teardownSession` awaits it for the same
+  reason the server and agent are awaited.
+- **The runner's socket accepts one client at a time and evicts the previous
+  one.** Our bridge therefore displaces an IDE-spawned `serverpod mcp-server`
+  for the same project, and it displaces ours. Calls reconnect lazily, so this
+  self-heals, but it is why two App Studio windows on one project would fight.
+- **A hot restart needs no preview reload from us.** The runner hot-restarts the
+  Flutter app and triggers the browser refresh itself (`✓ Browser refresh
+  triggered.` in the server log), and the CEF preview comes back on its own.
+  Forcing `reloadIgnoreCache()` here would race that.
+- `hot_reload` exists on the bridge too, along with migrations, log tails and
+  `get_flutter_app_dtd`. Only `hot_restart` is wired up.
 
 ## Setup & toolchain
 
@@ -364,7 +417,8 @@ install. Sparkle would also catch it, but later and less clearly.
 - **The Add Provider dialog does the save itself** and stays open on failure with the key still in the field, because losing a pasted key to a dialog that closed is the worst possible response to an error. Be careful what it claims: `saveApiKey` writes to the auth store and treats that as the source of truth — it swallows a failed `PUT /auth/{id}` and restarts serve — so **a wrong-but-well-formed key does not fail here**. What the pane's `_connect` can report is an exception from the write, and the provider not appearing in `connectedProviders` afterwards, which is "that did not take effect" rather than "your key is wrong". Do not word it as validation.
 - Its width comes from `ShadDialog.constraints`, not a fixed-width child: the dialog sizes itself to its widest content, so a narrower child just leaves the inputs floating short of the edge.
 - **`ShadBadge.secondary` is invisible on a `muted` card** — slate defines `secondary` and `muted` as the same colour, in both brightnesses. Use `.outline` on a muted surface, and check any `secondary`-on-`muted` pairing before assuming it reads.
-- **`onPressed: null` does not grey out a `ShadButton` — pass `enabled: false` too.** The dimming is an `Opacity(.5)` driven by `ShadState.disabled`, which shad sets from the `enabled` property alone; that defaults to `true` no matter what `onPressed` is. A null handler on its own gets you a button that is inert but looks live, which reads as a broken click rather than an unavailable action. Settings → Tools passes both.
+- **`onPressed: null` does not grey out a `ShadButton` — pass `enabled: false` too.** The dimming is an `Opacity(.5)` driven by `ShadState.disabled`, which shad sets from the `enabled` property alone; that defaults to `true` no matter what `onPressed` is. A null handler on its own gets you a button that is inert but looks live, which reads as a broken click rather than an unavailable action. Settings → Tools passes both. The toolbar's `_IconAction` derives it as `enabled: onPressed != null`, so Start and Stop dim like everything else.
+- **A `ShadTooltip` never opens on a disabled `ShadButton`** — which is exactly when its text is worth reading. `ShadTooltip` owns no `MouseRegion`: it injects `onHoverChange` into the theme's hover strategies and relies on the *child* to report hover, and a disabled button puts its content behind an `AbsorbPointer`, so nothing ever reports. Wrap the button in a bare `ShadGestureDetector` — that sits outside the absorber and reports hover regardless. `HotRestartButton` does this, because "start the server first" is the whole point of the tooltip there.
 - **Success and warning badges go through `appSuccessBadge` / `appWarningBadge`** (`app_theme.dart`), which wash the status colour at 10% (light) / 20% (dark) the way shad tints `destructive`. Warning, not destructive, is right for "not installed yet": nothing is broken and there is a button on the same screen that fixes it.
 - **Terminal tabs:** VS Code–style; selected tab overlaps bottom border via `Transform.translate`, not negative margin.
 - **Split resize:** panes meet with no gap. Draw a full-height 1px `ColoredBox` in a `Stack` on the split line; overlay a transparent drag handle (`kSplitHandleWidth`). Do not use a separate wide column or `DecoratedBox` border behind opaque pane content — it won't show.
@@ -452,7 +506,8 @@ so it has no preview yet.
 
 ## Architecture notes
 
-- Long-lived controllers created in `main.dart`: `ThemeController`, `ProjectSession`, `StudioTerminal`, `ServerpodProcessController`.
+- Long-lived controllers created in `main.dart`: `ThemeController`, `ProjectSession`, `StudioTerminal`, `ServerpodProcessController`, `AgentController`, `McpController`.
+- **`teardownSession` takes every controller that owns a child process, and the parameters are required on purpose.** It is the one function both the quit path and Sparkle's `prepareForRelaunch` call, so anything optional there is a stray process waiting to happen — a bridge still shutting down when Sparkle swaps the bundle.
 - `ServerpodProcessController` owns process lifecycle and signals when preview is ready to load.
 - The menu bar lives above `ShadApp`, so menu-triggered dialogs use the `navigatorKey` context from `main.dart`.
 - **`MacAppMenu.install()` calls `MacMenuBar.reset()` first, and must keep doing so.** A hot restart replaces the Dart isolate but not the engine, its plugins or the native `NSMenu`, so without it every menu is added again on each restart — and `_recentItemIds` comes back empty, so Open Recent duplicates too. `reset()` removes exactly the items this plugin added: those are the ones carrying a String `representedObject`, which is also how the plugin finds items by id, so stock MainMenu.xib entries cannot be stripped.

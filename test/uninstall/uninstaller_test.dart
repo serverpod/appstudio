@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:appstudio/agent/agent_controller.dart';
+import 'package:appstudio/mcp/mcp_controller.dart';
 import 'package:appstudio/process/serverpod_process.dart';
 import 'package:appstudio/session/project_session.dart';
 import 'package:appstudio/terminal/studio_terminal.dart';
@@ -27,6 +28,7 @@ void main() {
   late ToolchainController toolchains;
   late ServerpodProcessController process;
   late AgentController agent;
+  late McpController mcp;
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({
@@ -57,6 +59,11 @@ void main() {
       session: session,
       process: process,
     );
+    mcp = McpController(
+      toolchains: toolchains,
+      session: session,
+      process: process,
+    );
   });
 
   tearDown(() async {
@@ -67,6 +74,7 @@ void main() {
         toolchains: toolchains,
         process: process,
         agent: agent,
+        mcp: mcp,
       );
 
   /// A stand-in for an install: a file buried in the support directory.

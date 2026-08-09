@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../agent/agent_controller.dart';
+import '../mcp/mcp_controller.dart';
 import '../process/serverpod_process.dart';
 import 'session_teardown.dart';
 import 'update_state.dart';
@@ -26,6 +27,7 @@ class UpdateController extends ChangeNotifier {
   UpdateController({
     required this.process,
     required this.agent,
+    required this.mcp,
     @visibleForTesting MethodChannel? channel,
   }) : _channel = channel ?? const MethodChannel(kUpdateChannel);
 
@@ -34,6 +36,7 @@ class UpdateController extends ChangeNotifier {
 
   final ServerpodProcessController process;
   final AgentController agent;
+  final McpController mcp;
   final MethodChannel _channel;
 
   UpdateState _state = UpdateState.unavailable;
@@ -47,11 +50,13 @@ class UpdateController extends ChangeNotifier {
   static Future<UpdateController> create({
     required ServerpodProcessController process,
     required AgentController agent,
+    required McpController mcp,
     @visibleForTesting MethodChannel? channel,
   }) async {
     final controller = UpdateController(
       process: process,
       agent: agent,
+      mcp: mcp,
       channel: channel,
     );
     controller._channel.setMethodCallHandler(controller._handleCall);
@@ -151,7 +156,7 @@ class UpdateController extends ChangeNotifier {
   @visibleForTesting
   Future<void> prepareForRelaunch() async {
     try {
-      await teardownSession(process: process, agent: agent);
+      await teardownSession(process: process, agent: agent, mcp: mcp);
     } catch (e) {
       debugPrint('UpdateController: teardown before relaunch failed: $e');
     }

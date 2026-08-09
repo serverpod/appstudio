@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../agent/agent_controller.dart';
+import '../mcp/mcp_controller.dart';
 import '../process/serverpod_process.dart';
 import '../toolchain/shim_writer.dart';
 import '../toolchain/toolchain_controller.dart';
@@ -34,11 +35,13 @@ class Uninstaller {
     required this.toolchains,
     required this.process,
     required this.agent,
+    required this.mcp,
   });
 
   final ToolchainController toolchains;
   final ServerpodProcessController process;
   final AgentController agent;
+  final McpController mcp;
 
   /// Total size of the Application Support directory, or null if it cannot be
   /// measured. Used by the confirmation dialog, which takes it as a callback so
@@ -74,7 +77,7 @@ class Uninstaller {
     // Stop the world first. Deleting the toolchain out from under a running
     // serverpod or opencode would leave processes pointing at missing binaries.
     await step('shutting down the session', () async {
-      await teardownSession(process: process, agent: agent);
+      await teardownSession(process: process, agent: agent, mcp: mcp);
     });
 
     // Before deleting the directory: this edits the shell rc file, and the

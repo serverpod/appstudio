@@ -1,4 +1,5 @@
 import 'package:appstudio/agent/agent_controller.dart';
+import 'package:appstudio/mcp/mcp_controller.dart';
 import 'package:appstudio/process/serverpod_process.dart';
 import 'package:appstudio/session/project_session.dart';
 import 'package:appstudio/terminal/studio_terminal.dart';
@@ -20,6 +21,7 @@ void main() {
   late List<MethodCall> calls;
   late ServerpodProcessController process;
   late AgentController agent;
+  late McpController mcp;
 
   /// Installs a fake Swift side. [replies] is keyed by method name; a value of
   /// `_throws` makes that method fail.
@@ -50,6 +52,11 @@ void main() {
       session: session,
       process: process,
     );
+    mcp = McpController(
+      toolchains: toolchains,
+      session: session,
+      process: process,
+    );
   });
 
   tearDown(() {
@@ -58,7 +65,7 @@ void main() {
   });
 
   Future<UpdateController> create() =>
-      UpdateController.create(process: process, agent: agent);
+      UpdateController.create(process: process, agent: agent, mcp: mcp);
 
   test('create() succeeds when there is no platform side at all', () async {
     // No mock installed, so every invoke throws MissingPluginException. This is

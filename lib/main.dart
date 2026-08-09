@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 
 import 'agent/agent_controller.dart';
+import 'mcp/mcp_controller.dart';
 import 'process/dev_session_cleanup.dart';
 import 'process/serverpod_process.dart';
 import 'session/project_session.dart';
@@ -45,10 +46,19 @@ Future<void> main() async {
     session: session,
     process: process,
   );
+  final mcp = McpController(
+    toolchains: toolchains,
+    session: session,
+    process: process,
+  );
 
   // Never blocks launch: create() swallows its own failures and reports the
   // updater as unavailable.
-  final updates = await UpdateController.create(process: process, agent: agent);
+  final updates = await UpdateController.create(
+    process: process,
+    agent: agent,
+    mcp: mcp,
+  );
 
   runApp(
     AppStudioApp(
@@ -58,6 +68,7 @@ Future<void> main() async {
       terminal: terminal,
       process: process,
       agent: agent,
+      mcp: mcp,
       updates: updates,
     ),
   );
@@ -72,6 +83,7 @@ class AppStudioApp extends StatefulWidget {
     required this.terminal,
     required this.process,
     required this.agent,
+    required this.mcp,
     required this.updates,
   });
 
@@ -81,6 +93,7 @@ class AppStudioApp extends StatefulWidget {
   final StudioTerminal terminal;
   final ServerpodProcessController process;
   final AgentController agent;
+  final McpController mcp;
   final UpdateController updates;
 
   @override
@@ -193,6 +206,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
       toolchains: widget.toolchains,
       process: widget.process,
       agent: widget.agent,
+      mcp: widget.mcp,
     );
     final choice = await showUninstallConfirmDialog(
       navigatorContext,
@@ -232,9 +246,14 @@ class _AppStudioAppState extends State<AppStudioApp> {
     // Same teardown Sparkle runs before it relaunches, so the two paths cannot
     // drift apart.
     unawaited(
-      teardownSession(process: widget.process, agent: widget.agent),
+      teardownSession(
+        process: widget.process,
+        agent: widget.agent,
+        mcp: widget.mcp,
+      ),
     );
     widget.updates.dispose();
+    widget.mcp.dispose();
     widget.process.dispose();
     widget.terminal.dispose();
     widget.session.dispose();
@@ -270,6 +289,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
                 terminal: widget.terminal,
                 process: widget.process,
                 agent: widget.agent,
+                mcp: widget.mcp,
                 themeController: widget.themeController,
               ),
           },
