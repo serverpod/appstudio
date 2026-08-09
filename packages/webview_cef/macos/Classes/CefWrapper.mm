@@ -36,6 +36,10 @@ static CVReturn WebviewDisplayLinkCallback(CVDisplayLinkRef displayLink,
                                            CVOptionFlags* flagsOut,
                                            void* context) {
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (webview_cef::cefIsShutdown()) {
+            [CefWrapper stopDrivingCEF];
+            return;
+        }
         webview_cef::doMessageLoopWork();
         [CefWrapper beginFrameAllPlugins];
     });
@@ -417,7 +421,25 @@ private:
     return false;
 }
 
+// Stops everything that drives CEF from the platform side. Called once CEF has
+// been shut down: the pump timer and the display link outlive it otherwise, and
+// both call straight into a library that is no longer there.
++ (void)stopDrivingCEF {
+    if (_displayLink) {
+        CVDisplayLinkStop(_displayLink);
+        CVDisplayLinkRelease(_displayLink);
+        _displayLink = NULL;
+    }
+    _displayLinkActive = NO;
+    [_timer invalidate];
+    _timer = nil;
+}
+
 - (void)doMessageLoopWork {
+    if (webview_cef::cefIsShutdown()) {
+        [CefWrapper stopDrivingCEF];
+        return;
+    }
     webview_cef::doMessageLoopWork();
     // Fallback: if no CVDisplayLink is driving frames (e.g. headless / no
     // active display), the pump timer also requests frames so the
@@ -513,6 +535,14 @@ private:
             result(nil);
         }
     });
+    if(webview_cef::cefIsShutdown()){
+        // The call was "quit" (or arrived after one). Stop the clocks here
+        // rather than letting the next tick discover it — one more tick is one
+        // more call into a library that has already gone.
+        [CefWrapper stopDrivingCEF];
+        webview_value_unref(encodeArgs);
+        return;
+    }
     if(isCefMessageLoop == NO){
         _timer = [NSTimer timerWithTimeInterval:0.016f target:self selector:@selector(doMessageLoopWork) userInfo:nil repeats:YES];
         [[NSRunLoop mainRunLoop] addTimer: _timer forMode:NSRunLoopCommonModes];

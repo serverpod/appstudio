@@ -24,6 +24,10 @@ extern NSMapTable* webviewPlugins;
 + (void)beginFrameAllPlugins;
 - (void)tickBeginFrame;
 
+// Tear down the pump timer and the vblank clock. CefShutdown() is one-way and
+// this class outlives it, so both have to stop the moment CEF is gone.
++ (void)stopDrivingCEF;
+
 @end
 
 #endif /* CefWrapper_h */

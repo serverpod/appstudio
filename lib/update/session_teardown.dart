@@ -43,7 +43,15 @@ Future<void> teardownSession({
   // CEF goes first: its helper processes are children of ours, and quitting the
   // manager after the engine starts tearing down has been a source of hangs.
   // Awaited, because quit() reports failure through its Future.
-  await guarded('CEF quit', WebviewManager().quit);
+  //
+  // Only when it is actually up. `WebviewManager` is a singleton that only
+  // initializes CEF once a preview pane mounts, so quitting with no project
+  // open used to log a failed teardown for something that was never started —
+  // and in a release build, where `quit()`'s own assert is compiled out, it
+  // would reach `CefShutdown()` on a CEF that was never initialized.
+  if (WebviewManager().value) {
+    await guarded('CEF quit', WebviewManager().quit);
+  }
 
   await Future.wait([
     guarded('server stop', process.stop),

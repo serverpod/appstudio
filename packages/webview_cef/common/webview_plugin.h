@@ -87,6 +87,10 @@ namespace webview_cef {
     void doMessageLoopWork();
     void SwapBufferFromBgraToRgba(void* _dest, const void* _src, int width, int height);
     void stopCEF();
+    // True once stopCEF() has run. CefShutdown() is one-way and the plugin
+    // outlives it, so the platform layer must stop driving CEF — a pump timer,
+    // a vblank clock — the moment this turns true.
+    bool cefIsShutdown();
 }
 
 #endif //WEBVIEW_PLUGIN_H

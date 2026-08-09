@@ -570,6 +570,28 @@ install. Sparkle would also catch it, but later and less clearly.
   only. Setting it would start persisting the previewed app's `main.dart.js`
   across launches, which is the exact thing `reloadIgnoreCache()` exists to
   defeat. `root_cache_path` alone does not turn that on.
+- **`CefShutdown()` is one-way, and the plugin outlives it — every way back into
+  CEF is gated on `webview_cef::cefIsShutdown()`.** `teardownSession` quits CEF
+  first (its helpers are our children), and only then does Flutter tear the
+  widget tree down, so `PreviewPaneState.dispose()`'s `close` call always
+  arrives *after* the shutdown. Ungated it reached `CefBrowser::GetHost()` on a
+  dead wrapper, which is `shutdown_checker::AssertNotShutdown` — a `SIGTRAP`
+  that took the app down on quit in a debug build, and silent undefined
+  behaviour in release. The same window is what an update lands in:
+  `prepareForRelaunch` quits CEF and Sparkle then installs for several seconds
+  with the app still live, where a mouse move over the preview is enough to
+  reach in. `HandleMethodCall` answers without touching CEF once shut down; the
+  platform entry points that bypass it (the `NSEvent` key monitor, the IME
+  forwarders, the vblank tick) carry their own gate; and
+  `CefWrapper.stopDrivingCEF` kills the pump timer and the `CVDisplayLink`,
+  which otherwise call into a library that is no longer there ~60 times a
+  second.
+- **`quit` closes the browsers before it shuts CEF down.** A
+  `CefRefPtr<CefBrowser>` still held at `CefShutdown()` is a wrapper whose
+  release lands in that same dead library. The handler force-closes, drops the
+  renderers and pumps the loop a bounded number of times so the close can land
+  — nothing else drives CEF here, since macOS runs it on an external message
+  pump.
 - The fork's event getters (`onToolTip`, `onCursorChanged`, `onFocusedNodeChangeMessage`, …) carry **explicit types**; upstream leaves them inferred, which makes them `dynamic` and silences the analyzer at every call site. Annotating them surfaced a real one: `onFocusedNodeChangeMessage` was invoked unguarded while every sibling case used `?.call`, so a focus change arriving before a WebView registered its callback would throw. Keep the annotations through any rebase — they are what makes that class of bug visible.
 - **Registration codes:** `serverpod start` logs `Registration code for <email>: <code>` instead of mailing it. `ServerpodProcessController` reassembles console lines across PTY chunks (`_scanLines`) and exposes `registrationCode`; `RegistrationCodeToast` floats it over the preview until dismissed or superseded.
 - **Keyboard into CEF (macOS):** a local `NSEvent` monitor (`CefWrapper.processKeyboardEvent`) routes keys. It only forwards to `current_focused_browser_`, which is set from `setClientFocus` — never let it consume an event it can't deliver, or the webview looks dead.

@@ -15,6 +15,15 @@ namespace webview_cef {
 	CefRefPtr<WebviewApp> app;
 	CefString userAgent;
 	bool isCefInitialized = false;
+	// CefShutdown() is one-way, and the plugin outlives it: the host quits CEF
+	// first (its helpers are our children), then Flutter tears the widget tree
+	// down, so a webview's own dispose() — a "close" call — arrives afterwards.
+	// Every entry point back into CEF is gated on this, because the libcef
+	// wrapper checks it (shutdown_checker::AssertNotShutdown) and aborts the
+	// process, and the calls that are not checked are plain undefined behaviour.
+	bool isCefShutdown = false;
+
+	bool cefIsShutdown() { return isCefShutdown; }
 #ifdef OS_MAC
 	std::string g_macSubprocessPath;
 	std::string g_macFrameworkDirPath;
@@ -270,6 +279,14 @@ namespace webview_cef {
 
 
     void WebviewPlugin::HandleMethodCall(std::string name, WValue* values, std::function<void(int ,WValue*)> result) {
+		if (isCefShutdown) {
+			// Answer, never reach into CEF. "close" lands here on every quit:
+			// the host shuts CEF down first and the webviews dispose after.
+			// CEF cannot be re-initialized in the same process either, so
+			// "init" is equally dead.
+			result(0, nullptr);
+			return;
+		}
 		if (name.compare("init") == 0){
 			if(!isCefInitialized){
 				if(values != nullptr){
@@ -282,7 +299,25 @@ namespace webview_cef {
 		}
 		else if (name.compare("quit") == 0) {
 			//only call this method when you want to quit the app
-			stopCEF();
+			// Nothing to quit until "init" has run, and a host quitting with no
+			// webview ever shown is ordinary: CEF only comes up when the first
+			// one is created.
+			if (isCefInitialized) {
+				// Browsers must be gone before CefShutdown(): a
+				// CefRefPtr<CefBrowser> still held at that point is a wrapper
+				// whose release lands in a library that has already torn itself
+				// down.
+				m_handler->CloseAllBrowsers(true);
+				m_renderers.clear();
+				uninitCallback();
+				// The close is asynchronous and nothing else drives CEF here
+				// (external_message_pump), so give it a bounded chance to land
+				// before the shutdown.
+				for (int i = 0; i < 10; i++) {
+					CefDoMessageLoopWork();
+				}
+				stopCEF();
+			}
 			result(1, nullptr);
 		}
 		else if (name.compare("create") == 0) {
@@ -537,23 +572,30 @@ namespace webview_cef {
 		}
 	}
 
+	// The forwarders below are reached from the platform layer rather than the
+	// method channel — an IME client, a key monitor, a vblank clock — so each
+	// carries its own shutdown gate.
 	void WebviewPlugin::imeSetCompositionNative(const std::wstring& text, int cursor)
 	{
+		if (isCefShutdown) return;
 		m_handler->imeSetCompositionNative(text, cursor);
 	}
 
 	void WebviewPlugin::imeCommitTextNative(const std::wstring& text)
 	{
+		if (isCefShutdown) return;
 		m_handler->imeCommitTextNative(text);
 	}
 
 	void WebviewPlugin::imeFinishCompositionNative()
 	{
+		if (isCefShutdown) return;
 		m_handler->imeFinishComposition();
 	}
 
 	bool WebviewPlugin::sendKeyEvent(CefKeyEvent& ev)
 	{
+		if (isCefShutdown) return false;
 		const bool delivered = m_handler->sendKeyEvent(ev);
 		if(ev.type == KEYEVENT_RAWKEYDOWN && ev.windows_key_code == 0x7B && (ev.modifiers & EVENTFLAG_CONTROL_DOWN) != 0){
 			for(auto render : m_renderers){
@@ -567,6 +609,7 @@ namespace webview_cef {
 
 	bool WebviewPlugin::sendEditCommand(const std::string& command)
 	{
+		if (isCefShutdown) return false;
 		return m_handler->sendEditCommand(command);
 	}
 
@@ -623,6 +666,7 @@ namespace webview_cef {
 	}
 
 	void WebviewPlugin::tickBeginFrame(){
+		if (isCefShutdown) return;
 		if (m_handler) {
 			m_handler->sendExternalBeginFrame();
 		}
@@ -716,10 +760,13 @@ namespace webview_cef {
 		//cef message run in another thread on windows/linux
 		cefs.multi_threaded_message_loop = true;
 #endif
-		CefInitialize(mainArgs, cefs, app.get(), nullptr);
+		isCefInitialized = CefInitialize(mainArgs, cefs, app.get(), nullptr);
 	}
 
 	void doMessageLoopWork(){
+		if (isCefShutdown) {
+			return;
+		}
 		CefDoMessageLoopWork();
 	}
 
@@ -741,6 +788,15 @@ namespace webview_cef {
 
     void stopCEF()
     {
+		// CefShutdown() without a CefInitialize() is as undefined as calling in
+		// after one, and both are reachable: the host can quit before any
+		// webview existed, and it can quit twice.
+		if (!isCefInitialized || isCefShutdown) {
+			return;
+		}
+		// Set before, not after: CefShutdown() runs pending work, and anything
+		// that reaches back in from there must already see CEF as gone.
+		isCefShutdown = true;
 		CefShutdown();
     }
 }
