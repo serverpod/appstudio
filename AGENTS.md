@@ -622,9 +622,32 @@ install. Sparkle would also catch it, but later and less clearly.
 ## Previews
 
 ```bash
-make previews    # browser previews of every dialog, hot-reloading
+make previews    # browser previews of the toolchain install, hot-reloading
 ```
 
+- **The previews cover the first-run toolchain install and nothing else** — the
+  plan, the two install states, both failure paths and the setup screen, each
+  emitted light and dark. That is the flow that is genuinely hard to look at:
+  it needs a machine with no toolchain, a 662 MB download to reach the middle,
+  and a dead network for the failures. Everything else in the app can be
+  reached by hand in a running copy, so it does not earn a preview.
+- **`dialog_previews.dart` warms the theme from `BrightnessPreview.transform`,
+  and every preview fails without it.** Building a `ShadThemeData` reads
+  `LucideIcons.x`, which is the first touch of `lucide_icons_flutter` — one
+  generated library with ~27,900 `static const IconData` fields. DDC has to
+  link the whole thing at that moment, and on the web (the scaffold's only
+  device) that overflows the JS stack if it happens deep inside a widget build.
+  The scaffold reports it per preview as `Failed to initialize widget tree:
+  Stack Overflow` pointing into shad's theme code, which says nothing about
+  stack depth being the cause. Linking from a shallow frame is fine and happens
+  once, so the fix is to get there first: the scaffold calls `transform()` from
+  `main()`. See `warmThemes` in `preview_app.dart` before moving it.
+- **Brightness is the scaffold's, not ours.** `previewShell` leaves `ShadApp`
+  on `ThemeMode.system`, which resolves against
+  `MediaQuery.platformBrightnessOf` — exactly what the preview scaffold
+  overrides — so `brightness:` on the annotation and the scaffold's own
+  light/dark toggle both drive it. A `dark` flag of our own could only fight
+  them.
 - **The UI talks to interfaces, not controllers.** `ToolsView`
   (`ui/toolchain/tools_view.dart`) and `ProvidersView`
   (`ui/settings/providers_view.dart`) are implemented directly by
@@ -648,8 +671,8 @@ make previews    # browser previews of every dialog, hot-reloading
 - `InstallProgress` fixtures pin `startedAt` *and* `now`, so the banner's
   elapsed-time text is stable across runs.
 
-`ui/new_project_dialog.dart` is the one dialog still using `dart:io` directly,
-so it has no preview yet.
+`ui/new_project_dialog.dart` uses `dart:io` directly, so it could not be
+previewed even if the set were widened again.
 
 ## Architecture notes
 
