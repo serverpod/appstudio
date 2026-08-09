@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 
 import '../../theme/app_theme.dart';
-import '../../toolchain/install_progress.dart';
 import '../../toolchain/tool_status.dart';
 import '../../util/byte_format.dart';
 import '../../util/quit_app.dart';
@@ -156,10 +155,12 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
       canPop: false,
       child: ShadDialog.alert(
         title: const Text('Set up toolchain'),
-        description: const Text(
-          'App Studio will download these tools to Application Support. '
-          'Use the Uninstall command to remove them from your computer.',
-        ),
+        description: installing
+            ? null
+            : const Text(
+                'App Studio will download these tools to Application Support. '
+                'Use the Uninstall command to remove them from your computer.',
+              ),
         actions: installing
             ? [
                 // Only a download can be called off. Past that the tools are on
@@ -268,30 +269,7 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
                   eta: progress.eta,
                 ),
         ),
-        const SizedBox(height: 14),
-        for (final tool in progress?.tools ?? const <ToolProgress>[])
-          Padding(
-            padding: const EdgeInsets.only(bottom: 2),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    tool.id.displayName,
-                    style: theme.textTheme.muted.copyWith(fontSize: 11),
-                  ),
-                ),
-                Text(
-                  tool.error ?? tool.phase.label,
-                  style: theme.textTheme.muted.copyWith(
-                    fontSize: 11,
-                    color: tool.phase == ToolPhase.failed
-                        ? theme.colorScheme.destructive
-                        : null,
-                  ),
-                ),
-              ],
-            ),
-          ),
+        const ShadGap(4),
       ],
     );
   }
