@@ -56,10 +56,20 @@ class _ProjectStartupDialogState extends State<ProjectStartupDialog> {
     // (`style.body` over `textTheme.muted`) instead of a label style.
     return ShadDialog.alert(
       title: const Text('Starting your project'),
-      description: const Text(
-        'App Studio is compiling your server and app, then starting them up. '
-        'The first run takes a minute or two. After that your changes hot '
-        'reload instantly.',
+      description: const Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'App Studio is compiling your server and app, then starting them '
+            'up. The first run takes a minute or two.',
+          ),
+          ShadGap(1.5),
+          Text(
+            'When the app has started, open this project in your AI editor '
+            'and ask it to build your app. Edits will be reflected here in '
+            'real time.',
+          ),
+        ],
       ),
       // The row defaults to `min`/`end`, which would park the checkbox next to
       // the button; `max` is what lets `spaceBetween` push them apart.
