@@ -14,17 +14,15 @@ import 'project_settings.dart';
 
 /// How a project folder reaches an editor's macOS app.
 ///
-/// Everything goes through `open`, and that is the point: it hands the request
-/// to LaunchServices, which routes it to the copy that is *already running*.
-/// The bundled VS Code-style CLIs (`Contents/Resources/app/bin/{cursor,code}`)
-/// were tried here and are the wrong tool — invoked from a GUI process they
-/// miss the running instance's IPC socket and start a second copy of the
-/// editor.
+/// Three doors, and each app takes exactly one. Two of them go through `open`,
+/// which hands the request to LaunchServices and so routes it to the copy that
+/// is *already running*; the third is the editor's own CLI, for an app whose
+/// routing is better than what `open` can reach.
 ///
 /// Picking the wrong door is not loud: `open` exits 0 for an app that launched
 /// and dropped the path exactly as it does for one that opened it.
 class _EditorApp {
-  const _EditorApp(this.appName, {this.deepLink});
+  const _EditorApp(this.appName, {this.deepLink, this.cli});
 
   /// Bundle name under one of [_applicationDirectories]. Doubles as the
   /// installed check, which [deepLink] needs even more than the rest do:
@@ -34,6 +32,30 @@ class _EditorApp {
   /// Builds the URL for an app that takes the project as a deep link. Null
   /// means it accepts the folder as a document — `open -a <bundle> <path>`.
   final Uri Function(String projectPath)? deepLink;
+
+  /// The app's own command-line entry point, run in place of `open -a` when the
+  /// bundle really carries it. Null for every app whose `open -a` behaviour is
+  /// already right.
+  final _EditorCli? cli;
+}
+
+/// An Electron editor's CLI, addressed inside the bundle rather than through
+/// the `bin/` shell script it also ships.
+///
+/// The script is `#!/usr/bin/env bash`, so it needs a `PATH` we do not control,
+/// and it carries a branch that will `curl … | bash` an agent binary onto the
+/// machine if argument one happens to be `agent`. Both go away by spawning what
+/// the script would have spawned: the bundle's Electron binary in node mode on
+/// the CLI's entry point. `ELECTRON_RUN_AS_NODE=1` is passed through
+/// `/usr/bin/env` so this stays a plain argument vector.
+class _EditorCli {
+  const _EditorCli({required this.executable, required this.script});
+
+  /// Bundle-relative path to the Electron executable.
+  final String executable;
+
+  /// Bundle-relative path to the CLI's node entry point.
+  final String script;
 }
 
 /// The editors we know how to hand a project to, in the order the buttons
@@ -57,12 +79,44 @@ class _EditorApp {
 /// out only because no build of it has been seen to open the folder it was
 /// given.
 const _editorApps = <IdeIntegration, _EditorApp>{
-  IdeIntegration.cursor: _EditorApp('Cursor'),
+  IdeIntegration.cursor: _EditorApp('Cursor', cli: _cursorCli),
   IdeIntegration.vscode: _EditorApp('Visual Studio Code'),
   IdeIntegration.claude: _EditorApp('Claude', deepLink: _claudeDeepLink),
   IdeIntegration.codex: _EditorApp('Codex', deepLink: _codexDeepLink),
   IdeIntegration.opencode: _EditorApp('OpenCode', deepLink: _openCodeDeepLink),
 };
+
+/// Cursor's CLI, which is the only route that reaches its **Agents Window**.
+///
+/// `open -a Cursor <folder>` is not wrong so much as blind: it always opens a
+/// classic editor window on the folder and leaves the Agents Window sitting on
+/// whatever project it already had. For a user who works in that window,
+/// "Open in Cursor" appeared to point at the wrong directory.
+///
+/// Cursor routes on how the request arrived, and the branch that hands a folder
+/// to the Agents Window is gated on the *CLI* context — `VSCODE_CLI=1`, which
+/// only `cli.js` sets. `open -a` arrives as a dock open instead, and Cursor's
+/// dock branch handles a `.code-workspace` file and nothing else, so a plain
+/// folder can never reach the window from there. Through the CLI it adapts by
+/// itself: Agents Window last active gets a new agent scoped to the folder, a
+/// classic window last active gets a classic window, and a project already open
+/// is focused rather than duplicated.
+///
+/// **A deep link cannot do this**, which is worth writing down because it is the
+/// obvious thing to reach for. `cursor://file/<path>` exists and does open the
+/// folder, but it arrives as a *protocol* open — excluded from the Agents Window
+/// routing the same way the dock is — and it first raises Cursor's own
+/// "An external application wants to open … it may represent an attempted attack
+/// on your system" confirmation. A scary modal in front of a classic window is
+/// strictly worse than the classic window on its own.
+///
+/// Verified against Cursor 3.15.6, spawned with launchd's bare `PATH` to match a
+/// Finder launch: the running instance was reused every time and no second copy
+/// of the editor appeared.
+const _cursorCli = _EditorCli(
+  executable: 'Contents/MacOS/Cursor',
+  script: 'Contents/Resources/app/out/cli.js',
+);
 
 /// `claude://code/new?folder=…`, which lands the project in Claude Code.
 ///
@@ -108,9 +162,11 @@ class ExternalEditorsController extends ChangeNotifier
     required this.process,
     Future<Set<IdeIntegration>> Function(String projectPath)? readEditors,
     String? Function(String appName)? findApp,
+    bool Function(String path)? fileExists,
     Future<bool> Function(List<String> command)? launch,
   }) : _readEditors = readEditors ?? _defaultReadEditors,
        _findApp = findApp ?? _defaultFindApp,
+       _fileExists = fileExists ?? _defaultFileExists,
        _launch = launch ?? _defaultLaunch {
     session.addListener(_onSessionChanged);
     process.addListener(_onProcessChanged);
@@ -123,6 +179,7 @@ class ExternalEditorsController extends ChangeNotifier
 
   final Future<Set<IdeIntegration>> Function(String projectPath) _readEditors;
   final String? Function(String appName) _findApp;
+  final bool Function(String path) _fileExists;
   final Future<bool> Function(List<String> command) _launch;
 
   List<ExternalEditor> _editors = const [];
@@ -201,6 +258,7 @@ class ExternalEditorsController extends ChangeNotifier
         resolved[entry.key.option] = _ResolvedApp(
           app: entry.value,
           appPath: appPath,
+          cli: _resolveCli(entry.value.cli, appPath),
         );
       }
     }
@@ -211,14 +269,32 @@ class ExternalEditorsController extends ChangeNotifier
     _resolved = Map.unmodifiable(resolved);
     notifyListeners();
   }
+
+  /// The CLI's absolute paths, or null to fall back to `open -a`.
+  ///
+  /// Both files ship inside the bundle — there is nothing for the user to
+  /// install, and in particular this is *not* the `cursor` shim on `PATH` that
+  /// the editor's own "install the command" action creates. The check is here
+  /// so a future layout change downgrades the button to the old behaviour
+  /// instead of breaking it.
+  _ResolvedCli? _resolveCli(_EditorCli? cli, String appPath) {
+    if (cli == null) return null;
+    final executable = p.join(appPath, cli.executable);
+    final script = p.join(appPath, cli.script);
+    if (!_fileExists(executable) || !_fileExists(script)) return null;
+    return _ResolvedCli(executable: executable, script: script);
+  }
 }
 
 /// An editor found on this Mac, and how to hand it a folder.
 class _ResolvedApp {
-  const _ResolvedApp({required this.app, required this.appPath});
+  const _ResolvedApp({required this.app, required this.appPath, this.cli});
 
   final _EditorApp app;
   final String appPath;
+
+  /// Present only when the app declares a CLI *and* the bundle carries it.
+  final _ResolvedCli? cli;
 
   /// `[executable, ...arguments]`.
   List<String> commandFor(String projectPath) {
@@ -228,8 +304,25 @@ class _ResolvedApp {
     if (app.deepLink case final link?) {
       return ['/usr/bin/open', link(projectPath).toString()];
     }
+    if (cli case final cli?) {
+      return [
+        '/usr/bin/env',
+        'ELECTRON_RUN_AS_NODE=1',
+        cli.executable,
+        cli.script,
+        projectPath,
+      ];
+    }
     return ['/usr/bin/open', '-a', appPath, projectPath];
   }
+}
+
+/// A CLI confirmed to exist, at absolute paths.
+class _ResolvedCli {
+  const _ResolvedCli({required this.executable, required this.script});
+
+  final String executable;
+  final String script;
 }
 
 Future<Set<IdeIntegration>> _defaultReadEditors(String projectPath) async =>
@@ -243,6 +336,8 @@ List<String> _applicationDirectories() => [
   if (homeDirectory() case final home?) p.join(home, 'Applications'),
 ];
 
+bool _defaultFileExists(String path) => File(path).existsSync();
+
 String? _defaultFindApp(String appName) {
   for (final dir in _applicationDirectories()) {
     final path = p.join(dir, '$appName.app');
@@ -251,12 +346,17 @@ String? _defaultFindApp(String appName) {
   return null;
 }
 
-/// Runs `[executable, ...arguments]` — a bundled editor CLI, or `open` with
+/// Runs `[executable, ...arguments]` — an editor's own CLI, or `open` with
 /// either `-a <bundle> <path>` or a deep-link URL.
 ///
-/// The `open -a` form passes the bundle *path*, never the name: `open -a Cursor`
+/// The `open -a` form passes the bundle *path*, never the name: `open -a Code`
 /// asks LaunchServices to resolve the name, which can land on a different copy
-/// than the one we checked for, or on nothing at all.
+/// than the one we checked for, or on nothing at all. The CLI form is built onto
+/// that same found path, so it cannot drift from it either.
+///
+/// The parent environment is inherited on purpose. Launched from Finder that is
+/// launchd's, which is what the CLI route was measured against; `PATH` only has
+/// to be good enough for `/usr/bin/env`, which is addressed absolutely anyway.
 Future<bool> _defaultLaunch(List<String> command) async {
   try {
     final result = await Process.run(command.first, command.skip(1).toList());

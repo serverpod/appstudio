@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'login_shell_path.dart';
 import 'tool_status.dart';
 import 'tool_version.dart';
 import 'toolchain_manifest.dart';
@@ -211,15 +212,19 @@ class ToolProbe {
     required this.manifest,
     required this.requirements,
     ProcessRunner? runner,
-  }) : _run = runner ?? _defaultRunner;
+    LoginShellPathReader? loginShellPath,
+  })  : _run = runner ?? _defaultRunner,
+        _loginShellPath = loginShellPath ?? captureLoginShellPath;
 
   final ToolchainPaths paths;
   final ToolManifest manifest;
   final ToolchainRequirements requirements;
 
   final ProcessRunner _run;
+  final LoginShellPathReader _loginShellPath;
   String? _developerDir;
   bool _developerDirResolved = false;
+  Future<String?>? _shellPath;
 
   static Future<ProcessResult> _defaultRunner(
     String executable,
@@ -612,6 +617,13 @@ class ToolProbe {
     final pubCache = Platform.environment['PUB_CACHE'] ??
         (home == null ? null : p.join(home, '.pub-cache'));
     for (final candidate in [
+      // Where `dart install serverpod_cli` puts it, and the first thing to
+      // check: the copy in ~/.pub-cache/bin is the one that goes stale, and it
+      // was the only location this knew about — so an up-to-date CLI installed
+      // the documented way was invisible unless it also sat on PATH.
+      if (home != null)
+        p.join(home, 'Library', 'Application Support', 'Dart', 'install', 'bin',
+            'serverpod'),
       if (pubCache != null) p.join(pubCache, 'bin', 'serverpod'),
       await _which('serverpod'),
     ]) {
@@ -662,8 +674,43 @@ class ToolProbe {
     }
   }
 
-  Future<String?> _which(String command) =>
-      whichOnPath(command, Platform.environment['PATH']);
+  /// Finds [command] on the `PATH` we inherited, and failing that on the one
+  /// the user's own login shell would set up.
+  ///
+  /// The second lookup is what makes a Finder launch behave like a terminal
+  /// launch. Opened from Finder we inherit launchd's `PATH`
+  /// (`/usr/bin:/bin:/usr/sbin:/sbin`), so a host Flutter or a `dart install`ed
+  /// Serverpod CLI resolves to nothing and the user is offered a download for
+  /// tools they already have.
+  ///
+  /// It is deliberately a *fallback*: the shell costs ~80 ms, and on a launch
+  /// that already inherited a usable `PATH` — every `make start`, and every
+  /// tool found at a well-known location — it never runs at all. The result,
+  /// including a failure, is resolved once per probe.
+  Future<String?> _which(String command) async {
+    final inherited =
+        await whichOnPath(command, Platform.environment['PATH']);
+    if (inherited != null) return inherited;
+    return whichOnPath(command, await _resolveLoginShellPath());
+  }
+
+  /// Memoises the *future*, not the value it settles to.
+  ///
+  /// `inventory()` probes opencode and Serverpod concurrently, and both reach
+  /// here. A `bool _resolved` guard would be set by the first caller before its
+  /// await, so the second would sail past it and read a field that is still
+  /// null — one spawn, and only one of the two tools getting the answer.
+  Future<String?> _resolveLoginShellPath() =>
+      _shellPath ??= _readLoginShellPath();
+
+  Future<String?> _readLoginShellPath() async {
+    try {
+      return await _loginShellPath();
+    } catch (_) {
+      // Never fatal — a shell we cannot read just means no extra candidates.
+      return null;
+    }
+  }
 
   Future<String> _resolveSymlink(String path) async {
     try {

@@ -47,6 +47,7 @@ void main() {
     ProjectReadyView? process,
     List<List<String>>? launches,
     bool launchSucceeds = true,
+    bool cliIsPresent = true,
   }) {
     return ExternalEditorsController(
       session: session,
@@ -54,6 +55,7 @@ void main() {
       readEditors: (path) async => editorsByProject[path] ?? const {},
       findApp: (name) =>
           installedApps.contains(name) ? '/Applications/$name.app' : null,
+      fileExists: (_) => cliIsPresent,
       launch: (command) async {
         launches?.add(command);
         return launchSucceeds;
@@ -206,24 +208,72 @@ void main() {
     final editors = controller(
       session: session,
       editorsByProject: {
-        '/p': {IdeIntegration.cursor, IdeIntegration.vscode},
+        '/p': {IdeIntegration.vscode},
       },
       launches: launches,
     );
     addTearDown(editors.dispose);
     await pumpEventQueue();
 
-    for (final editor in editors.editors) {
-      await editors.open(editor);
-    }
-    // Everything goes through `open`, so LaunchServices routes to the copy
-    // already running — a bundled `code`/`cursor` shim launched from a GUI
-    // process starts a second instance instead. And the bundle path, never the
-    // name: `open -a Cursor` re-resolves and can land on a copy we never
-    // checked.
+    await editors.open(editors.editors.single);
+    // `open` hands the request to LaunchServices, which routes it to the copy
+    // already running. And the bundle path, never the name: `open -a Code`
+    // re-resolves and can land on a copy we never checked.
+    expect(launches, [
+      ['/usr/bin/open', '-a', '/Applications/Visual Studio Code.app', '/p'],
+    ]);
+  });
+
+  test('hands the folder to Cursor through the CLI inside its bundle', () async {
+    // `open -a` always opens a classic window and leaves the Agents Window on
+    // the project it already had, which is the whole bug. Cursor only routes a
+    // folder to that window when the request arrives as a CLI open, and only
+    // `cli.js` marks it as one.
+    final session = _FakeSession()..setPath('/p');
+    final launches = <List<String>>[];
+    final editors = controller(
+      session: session,
+      editorsByProject: {
+        '/p': {IdeIntegration.cursor},
+      },
+      launches: launches,
+    );
+    addTearDown(editors.dispose);
+    await pumpEventQueue();
+
+    await editors.open(editors.editors.single);
+    // Addressed inside the bundle, so this does not depend on the user having
+    // run Cursor's "install the `cursor` command" action.
+    expect(launches, [
+      [
+        '/usr/bin/env',
+        'ELECTRON_RUN_AS_NODE=1',
+        '/Applications/Cursor.app/Contents/MacOS/Cursor',
+        '/Applications/Cursor.app/Contents/Resources/app/out/cli.js',
+        '/p',
+      ],
+    ]);
+  });
+
+  test('falls back to opening the folder as a document with no CLI', () async {
+    // A layout change inside a future Cursor must downgrade the button to the
+    // behaviour it had before, not break it.
+    final session = _FakeSession()..setPath('/p');
+    final launches = <List<String>>[];
+    final editors = controller(
+      session: session,
+      editorsByProject: {
+        '/p': {IdeIntegration.cursor},
+      },
+      launches: launches,
+      cliIsPresent: false,
+    );
+    addTearDown(editors.dispose);
+    await pumpEventQueue();
+
+    await editors.open(editors.editors.single);
     expect(launches, [
       ['/usr/bin/open', '-a', '/Applications/Cursor.app', '/p'],
-      ['/usr/bin/open', '-a', '/Applications/Visual Studio Code.app', '/p'],
     ]);
   });
 

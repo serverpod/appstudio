@@ -156,20 +156,17 @@ restart buttons. `ui/open_in_editor_buttons.dart` draws them,
   as it does for one that opened it; a non-zero exit only means the *bundle*
   could not be launched. A button that silently does nothing is worse than an
   absent one.
-- **Everything goes through `open`, and that is the point.** It hands the
-  request to LaunchServices, which routes it to the copy that is *already
-  running*. The bundled VS Code-style CLIs
-  (`Contents/Resources/app/bin/{cursor,code}`) were tried here and reverted:
-  invoked from a GUI process they miss the running instance's IPC socket and
-  start a **second copy of the editor**. Two forms:
-  - **The folder as a document** — `open -a <bundle> <path>`, for Cursor and
-    VS Code, which both declare `public.folder` in `CFBundleDocumentTypes`.
+- **Most of it goes through `open`**, which hands the request to LaunchServices
+  and so routes it to the copy that is *already running*. Three forms:
+  - **The folder as a document** — `open -a <bundle> <path>`, for VS Code,
+    which declares `public.folder` in `CFBundleDocumentTypes`.
   - **A deep link** — `open <scheme>://…`, for Claude
     (`claude://code/new?folder=`), Codex (`codex://threads/new?path=`) and
     OpenCode (`opencode://open-project?directory=`). None of the three takes a
     folder as a document; all need the path percent-encoded. The installed
     check matters *most* here: `open <scheme>://…` exits 0 even when nothing
     claims the scheme.
+  - **The editor's own CLI**, for Cursor alone — see the next section.
 - **Claude's host is `code`, not `cowork`.** Both are real routes on `/new` and
   both take `folder`, but `cowork` lands in Cowork with the directory merely
   selected while `code` opens a Claude Code session in it — confirmed by
@@ -189,10 +186,11 @@ restart buttons. `ui/open_in_editor_buttons.dart` draws them,
   OpenCode is last deliberately: it only appears when the box was ticked, but
   App Studio already runs it in the Agent tab, so an editor it does *not* have
   is the more useful next step to feature.
-- **Launch is by bundle path, not by name.** `open -a Cursor` asks
+- **Launch is by bundle path, not by name.** `open -a "Visual Studio Code"` asks
   LaunchServices to resolve the name, which can land on a different copy than
   the one `_findApp` checked for. `/Applications` is searched before
-  `~/Applications`.
+  `~/Applications`. The CLI route joins onto that same found path, so it cannot
+  drift from it either.
 - A failed launch posts a notification with `force: true` — the user just
   clicked a button in this window, so App Studio is frontmost and
   `StudioNotifications` would otherwise suppress it.
@@ -206,6 +204,54 @@ restart buttons. `ui/open_in_editor_buttons.dart` draws them,
   `_ToolchainWarningBadge` now draws nothing unless `missingRequired` is
   non-empty. That half has to stay: a required tool we cannot supply never
   reaches the first-run setup screen, so the badge is the only place it surfaces.
+
+### Cursor goes through its CLI, because `open` cannot reach the Agents Window
+
+`open -a Cursor <folder>` always opens a **classic editor window** on the folder
+and leaves the **Agents Window** sitting on whatever project it already had. For
+a user who works in that window, “Open in Cursor” read as pointing at the wrong
+directory. The fix is to spawn what Cursor's own `bin/cursor` script spawns:
+
+```sh
+/usr/bin/env ELECTRON_RUN_AS_NODE=1 \
+  <bundle>/Contents/MacOS/Cursor <bundle>/Contents/Resources/app/out/cli.js <path>
+```
+
+- **Cursor routes on how the request arrived, and only the CLI reaches that
+  window.** In `out/main.js`, `resolveGlassCliFolderTarget` sends a folder to the
+  Agents Window (internally *glass*) as `vscode:createNewComposer`, gated on
+  `openContext === 0` — which comes from `VSCODE_CLI=1`, and **only `cli.js` sets
+  it**. `open -a` arrives as a dock open, and the dock branch
+  (`getExternalWorkspaceOpenSource` → `dockWorkspace`) requires
+  `!!urisToOpen[0].workspaceUri`, i.e. a `.code-workspace` file. A plain folder
+  can never reach the Agents Window from there.
+- **Through the CLI, Cursor adapts on its own** and we encode no policy: Agents
+  Window last active gets a new agent scoped to the folder, a classic window last
+  active gets a classic window, and a project already open is focused rather than
+  duplicated. All three measured against Cursor 3.15.6.
+- **This is not the `cursor` shim on `PATH`.** Both files ship inside every
+  bundle, so nothing has to be installed; the shim at `/usr/local/bin/cursor`
+  that Cursor's own “install the command” action creates is never consulted.
+  `_resolveCli` checks both paths exist and falls back to `open -a` if they do
+  not, so a future layout change downgrades the button instead of breaking it.
+- **Addressed inside the bundle rather than through
+  `Contents/Resources/app/bin/cursor`.** That script is `#!/usr/bin/env bash`, so
+  it needs a `PATH` we do not control, and it carries a branch that will
+  `curl … | bash` an agent binary onto the machine when argument one is `agent`.
+- **An older note here said a bundled CLI starts a second copy of the editor.
+  That does not reproduce.** Spawned with launchd's bare `PATH` — what a Finder
+  launch inherits — the running instance was reused every time, the helper-process
+  count never moved, and the call returned in ~1.2 s.
+- **A deep link cannot do this, and it is the obvious thing to try.**
+  `cursor://file/<path>` does open the folder, but it arrives as a *protocol*
+  open, which is excluded from the Agents Window routing exactly like the dock
+  is — so it still yields a classic window, fixing nothing. It also first raises
+  Cursor's own “An external application wants to open … it may represent an
+  attempted attack on your system” confirmation
+  (`security.promptForLocalFileProtocolHandling`).
+- The `cursor://` scheme's other routes are agent-shaped and take no folder:
+  `anysphere.cursor-deeplink/glass` focuses the Agents Window but cannot target a
+  project, and `/command` writes a slash-command file rather than running one.
 
 ## Child processes and teardown
 
@@ -317,7 +363,12 @@ make dist              # Developer ID + notarized zip
 - **Never probe `/usr/bin/{git,otool,install_name_tool,clang,ar,ld}`** — all confirmed CLT shims (identical 118,928-byte stub) that pop a modal installer. `codesign` at /usr/bin *is* real. Candidates come from Homebrew, `/Library/Developer/CommandLineTools`, and `$(xcode-select -p)`.
 - Flutter is version-detected from `bin/cache/flutter.version.json`, never by running `flutter --version` — that can trigger a precache download on a cold SDK.
 - **`PATH` is searched by `whichOnPath`, in Dart — never by shelling out to `/usr/bin/which`.** Every probe subprocess runs with `includeParentEnvironment: false` so a user's environment cannot sway version output, and `which` inherited that empty environment, so it had no `PATH` and returned null for *everything*. Tools were then only ever found at the hardcoded candidate paths, which silently missed a `dart install`ed Serverpod CLI (`~/Library/Application Support/Dart/install/bin`, **not** `~/.pub-cache/bin` — the stale copy there was the only one the probe saw) and any Flutter SDK outside `~/development`.
-- A GUI launch still only sees launchd's `PATH`, not the shell's, so a tool on a custom `PATH` is invisible when App Studio is opened from Finder. Nothing to fix in the probe — that is what the managed install is for — but it does mean detection differs between Finder and a terminal launch.
+- **A GUI launch only inherits launchd's `PATH`, so the probe falls back to the user's login shell** (`login_shell_path.dart`). Opened from Finder, `PATH` is `/usr/bin:/bin:/usr/sbin:/sbin` and nothing else, so a host Flutter outside the hardcoded roots and a `dart install`ed Serverpod CLI both resolved to nothing — and the app offered to download 662 MB of tools the Mac already had. The *same build* started with `make start` found them, which was the entire difference.
+  - The shell runs `-l -i -c`, and **the `-i` is the load-bearing flag**: `.zshrc` is the *interactive* rc and is where both users and installers put their `PATH` lines, while a login-only shell reads `.zprofile` and misses them. Terminal.app is login+interactive, so this reproduces what the user sees when they type `flutter` themselves.
+  - **It is a fallback, not a replacement.** `_which` tries the inherited `PATH` first and only then spawns a shell (~80 ms), so a terminal launch and a fully-managed install never pay for it at all. The result — including a failure — is memoised per `ToolProbe`.
+  - **Discovery only.** Candidates found this way are still executed by absolute path under the probe's own controlled environment, so `includeParentEnvironment: false` still holds and the user's shell cannot sway what a tool reports about itself.
+  - **Do not wait for the shell's stdout to reach EOF.** The shell's children inherit that pipe, so an rc that backgrounds anything — or a shell we had to kill, whose `sleep` outlived it — holds it open long after the answer is written. The reader completes on the closing marker instead, which is also what makes the timeout fire. `${PATH}` is braced for the same class of reason: unbraced, the trailing marker is read as part of the variable *name* and the answer comes back silently empty.
+- **Serverpod's host candidates check `~/Library/Application Support/Dart/install/bin` first**, ahead of `~/.pub-cache/bin`. That is where `dart install serverpod_cli` puts it; the pub-cache copy is the one that goes stale, and it used to be the only location the probe knew, so an up-to-date CLI installed the documented way was invisible unless it also happened to sit on `PATH`.
 - `PUB_CACHE` is deliberately **not** set: `package_config.json` stores absolute paths, so a private cache would make every switch to an external editor re-resolve the project.
 - Version rules live in `tool_version.dart`. A numeric-only suffix is a *packaging revision*, not a prerelease — dugite's `2.53.0-3` is newer than `2.53.0`, while `4.0.0-beta.1` is older than `4.0.0`.
 
