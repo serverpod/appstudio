@@ -27,7 +27,39 @@ toolchain/               # Release bundle (see README)
 
 UI reference for design patterns: `../cloudui/cloudui_flutter/`.
 
-## Agent (OpenCode)
+## Agent (OpenCode) — switched off
+
+**`kOpenCodeAgentEnabled` in `lib/feature_flags.dart` is `false`, and everything
+in this section is dormant behind it.** The code is all still here; the flag is
+the whole switch, and flipping it to `true` brings the feature back intact. Read
+the rest of this section as what happens when it is on.
+
+Off, four things step back, and each reads the flag directly:
+
+- **`ToolProbe.inventory()` does not probe `opencode`.** It is left out of the
+  inventory rather than probed and filtered — an id that is absent cannot be
+  reported missing, cannot be downloaded and gets no Settings → Tools row, so
+  one condition covers the first-run setup screen, the Tools tab and
+  `missingRequired` together. The manifest entry is untouched, so nothing has to
+  be republished to bring it back. `ShimWriter` stops writing an `opencode`
+  shim, and *deletes* one a previous build left — it would otherwise point the
+  user at a Settings → Tools row that no longer exists.
+- **`IdeIntegration.opencode.builtIn` becomes `false`**, so `serverpod create`
+  is no longer told to configure it on every new project. See the New projects
+  section: `_neverInferred` in `project_settings.dart` had to stop keying off
+  `builtIn` for this, because the projects that already carry an `opencode.json`
+  are still on disk.
+- **The left panel drops its Agent tab** and shows the server log alone, and
+  **Settings drops its Providers tab** — which configures keys for this agent
+  and nothing else, so one pane is left and the tab strip goes with it. The
+  dialog coerces a caller asking for Providers onto Tools: the App menu still
+  asks, and that pane's "waiting for the agent" spinner would never resolve.
+- **`AgentController` never listens for a project**, so no `opencode serve` is
+  ever spawned. It is still constructed, still handed to everything expecting
+  one, and still stopped by `teardownSession`.
+
+Tests that cover the switched-on behaviour are skipped, not deleted —
+`test/support/agent_flag.dart` carries `skipWhenAgentOff` / `skipWhenAgentOn`.
 
 - Agent tab hosts a Cursor-style chat driven by bundled `opencode serve` (HTTP + SSE).
 - Scoped to the open project directory; restart serve on project switch.
@@ -792,11 +824,17 @@ install. Sparkle would also catch it, but later and less clearly.
   chrome — no title, no Done button; the dialog supplies both, including the
   Tools install button, which needs `toolchains` state the pane no longer has to
   expose.
+- **With `kOpenCodeAgentEnabled` off it is one pane and no tab strip.** Providers
+  configures keys for that agent and nothing else, so a single remaining tab
+  would be a button that does nothing. `_tab` coerces a caller asking for
+  Providers onto Tools rather than trusting it: the App menu's Settings item
+  still asks for Providers, and that pane would sit on its "waiting for the
+  agent" spinner forever, since no agent is coming.
 - **The pane box is a fixed height, not a maximum.** Both panes scroll
   internally, so sizing to content made the window jump every time a tab
   changed, a provider was added or a tool finished installing. Whitespace under
   a short pane is the cheaper trade; `_kPaneHeight` is the one knob.
-- **Settings starts the agent on a scratch directory when no project is open** (`AgentController.startForSettings`, called from `StudioShell._showSettings`). Keys and the default model are configured here and both are read from the running agent, so the pane would otherwise be unusable until a project existed. `opencode serve` needs a working directory, so it gets `<appSupportRoot>/agent-scratch` — a real path it can drop its own state into. Closing Settings calls `stopIfStartedForSettings`, which **only** stops a serve it started: with a project open the whole thing is a no-op, and a live session is never torn down. Opening a project clears the flag, so a project that appears while Settings is open supersedes the scratch serve rather than being killed with it.
+- **Settings starts the agent on a scratch directory when no project is open** (`AgentController.startForSettings`, called from `StudioShell._showSettings`) — with the agent switched off this returns immediately, since there is no Providers tab for a scratch serve to answer. Keys and the default model are configured here and both are read from the running agent, so the pane would otherwise be unusable until a project existed. `opencode serve` needs a working directory, so it gets `<appSupportRoot>/agent-scratch` — a real path it can drop its own state into. Closing Settings calls `stopIfStartedForSettings`, which **only** stops a serve it started: with a project open the whole thing is a no-op, and a live session is never torn down. Opening a project clears the flag, so a project that appears while Settings is open supersedes the scratch serve rather than being killed with it.
 - **The Providers pane waits for the agent rather than rendering an empty list.** Until `ProvidersView.agentReady`, "which providers hold a key" and "which models exist" are *unknown*, not empty — showing the list anyway marks every provider disconnected and invites the user to re-enter keys they already saved. `_WaitingForAgent` stands in, and the pane reloads models on the edge into ready. Its spinner animates forever, so any test touching this pane must use fixed pumps, never `pumpAndSettle`.
 - **`ManageToolsPane` defers its deep probe to a post-frame callback.**
   `ToolchainController.refresh()` calls `notifyListeners()` *synchronously*
@@ -1024,9 +1062,9 @@ that could not work — there is no Flutter SDK to build with yet.
 - **It is a screen, not a dialog over one.** `showNewProjectScreen` pushes a route whose `NewProjectScreen` draws the form on `LandingScaffold` — the same backdrop and fixed dark theme the start page uses, so arriving here does not read as a different app. There is no barrier, so nothing to blur and nothing to click through: a stray click beside a form holding a typed name used to throw it away. Cancel pops back to wherever it was opened from, which is the start page in the common case and the shell when it came from the File menu.
 - The form itself is still a `ShadDialog.alert` (`NewProjectDialog`), which is the variant with no close X — Cancel is the way out, and mid-run there is none. It is centred *outside* its `SingleChildScrollView`: a scroll view sized to its viewport pins a short child to the top.
 - **The form is put back on the app's theme**, with a `ShadTheme` read above `LandingScaffold` and reinstalled inside it. The landing theme is fixed dark because the gradient is, which is right for chrome sitting on that backdrop and wrong for a surface with its own background — a light app would otherwise show one dark panel here. Routes raised from the start page already behave this way by landing outside the scaffold; this one is inside it and has to say so.
-- **Every `--ide` value is an `IdeIntegration`, one checkbox each**, and each one selected goes out as its own flag — it is a multi-option, and passing any value at all replaces the CLI's own defaults (claude, cursor, vscode). Unchecking everything is therefore a real choice, not a fallback to those defaults.
-- **`opencode` carries `builtIn: true`: it is passed whether or not it is selected**, because it is the agent App Studio runs itself and a project without it would open with an Agent tab that has no skills and no MCP server. The dialog does not mark it — its box is an ordinary opt-in, clear by default like the rest — so ticking or clearing OpenCode changes nothing about what gets installed. Do not "fix" the checkbox to reflect `builtIn` (checked, disabled): that was tried and deliberately reverted.
-- **Create with no external editor ticked asks first** — "No external editor selected", with Continue and Pick Editor. The check is `_hasExternalEditor`, which ignores `builtIn`: OpenCode on its own is not a choice the user made, so ticking it alone still gets the prompt. Dismissing counts as Pick Editor; only Continue proceeds, and it creates exactly what it would have without the prompt. Pick Editor is the primary button because it is the recommended answer.
+- **Every `--ide` value is an `IdeIntegration`, and exactly one is picked** — a `ShadRadioGroup` of `_IdeRadios`, three to a row. `--ide` is still a multi-option and the pick still goes out as its own flag; passing any value at all replaces the CLI's own defaults (claude, cursor, vscode), so what is picked is what is configured and nothing else.
+- **Picking one is mandatory, and Create is what says so.** `_canCreate` waits on the editor as well as the name. This replaced a set of checkboxes that could all be left clear plus a "No external editor selected" prompt (Continue / Pick Editor) raised *after* the user had committed — a control that cannot express the empty answer says the same thing up front and needs no prompt. `_hasExternalEditor` and `_confirmNoExternalEditor` are gone with it.
+- **`builtIn` still exists and nothing sets it any more.** It meant "configured whether or not it was asked for", and OpenCode was the only one, because App Studio ran it as its own agent. With `kOpenCodeAgentEnabled` off there is no Agent tab, so `IdeIntegration.opencode` takes `builtIn: kOpenCodeAgentEnabled` and a new project gets exactly what was picked. `configuredIdes()` is consequently an identity function today; it is kept because the flag can come back. Do not mark OpenCode's option specially — a checked-and-disabled box was tried and deliberately reverted.
 - Names must match `^[a-z][a-z0-9_]*$` (they become Dart package names); the input folds case and drops separators as you type.
 - After the CLI succeeds, `patchFlutterAppForPreview` adds `device: web-server` and `web-port: 9998` to the `flutter_apps` entry in `<name>_server/pubspec.yaml` — without it `serverpod start` opens a browser instead of feeding the preview pane. The project is then opened, which auto-starts it.
 - Last used location is remembered in `ProjectSession` (`new_project_directory` pref).
@@ -1058,10 +1096,15 @@ succeeds (`session/project_settings.dart`). It records which editors the user
   do nothing for any project that predates it. Each path is specific enough that
   its presence really does mean `--ide` ran: half the projects on a Mac have a
   `.vscode/`, but `.vscode/mcp.json` is ours.
-- **Inference skips the `builtIn` integrations**, so `opencode.json` is listed
-  in that map and never read. It is in *every* project App Studio has created,
-  picked or not, so it carries no signal about the choice — inferring from it
-  would reinstate the button the picked/configured split exists to keep off.
+- **Inference skips `opencode.json`**, which is listed in that map and never
+  read. It is in *every* project App Studio has created up to now, picked or
+  not, so it carries no signal about the choice — inferring from it would
+  reinstate the button the picked/configured split exists to keep off.
+- **`_neverInferred` is a list of its own, not a read of `builtIn`.** It used to
+  be the latter, which was the same set right up until `IdeIntegration.opencode`
+  stopped being built in — at which point every project already on disk would
+  have grown an "Open in OpenCode" button. The projects do not change when the
+  flag does, so neither does this.
 - **A file that parses wins even when it lists nothing.** Ticking no editor is a
   real choice, and the config the CLI left behind must not be read as one.
 - An id the running build does not know is dropped without taking the rest of

@@ -3,6 +3,7 @@ import 'package:shad/shad.dart';
 import 'package:xterm/xterm.dart';
 
 import '../agent/agent_controller.dart';
+import '../feature_flags.dart';
 import '../process/serverpod_process.dart';
 import '../terminal/studio_terminal.dart';
 import '../theme/app_theme.dart';
@@ -10,6 +11,11 @@ import '../widgets/text_segmented_control.dart';
 import 'agent/agent_pane.dart';
 
 enum _TerminalTab { agent, serverLogs }
+
+/// What this pane holds, for the toolbar's show/hide tooltip. It is named after
+/// its contents, and with the agent switched off the server log is all of them.
+const String kLeftPanelName =
+    kOpenCodeAgentEnabled ? 'Agent & logs' : 'logs';
 
 class TerminalPane extends StatefulWidget {
   const TerminalPane({
@@ -91,13 +97,27 @@ class TerminalPane extends StatefulWidget {
 }
 
 class _TerminalPaneState extends State<TerminalPane> {
-  _TerminalTab _selectedTab = _TerminalTab.agent;
+  /// With the agent switched off there is only one tab, and the server log is
+  /// it — starting on [_TerminalTab.agent] would show a pane that is no longer
+  /// reachable.
+  _TerminalTab _selectedTab =
+      kOpenCodeAgentEnabled ? _TerminalTab.agent : _TerminalTab.serverLogs;
 
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final scheme = theme.colorScheme;
     final xtermTheme = TerminalPane.terminalTheme(theme);
+    final showsAgent = kOpenCodeAgentEnabled;
+
+    final terminal = TerminalView(
+      widget.studioTerminal.terminal,
+      theme: xtermTheme,
+      textStyle: TerminalStyle(fontSize: 13, fontFamily: kMacMonoFont),
+      padding: const EdgeInsets.all(8),
+      autofocus: _selectedTab == _TerminalTab.serverLogs,
+      hardwareKeyboardOnly: true,
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -114,9 +134,14 @@ class _TerminalPaneState extends State<TerminalPane> {
             child: TextSegmentedControl<_TerminalTab>(
               value: _selectedTab,
               onChanged: (tab) => setState(() => _selectedTab = tab),
+              // One segment left, so there is nothing to switch to. Drawn the
+              // same way the preview pane draws its own header label rather
+              // than as plain text, so the two pane headers still match.
+              interactive: showsAgent,
               onMutedSurface: true,
               segments: const [
-                TextSegment(value: _TerminalTab.agent, label: 'Agent'),
+                if (kOpenCodeAgentEnabled)
+                  TextSegment(value: _TerminalTab.agent, label: 'Agent'),
                 TextSegment(
                   value: _TerminalTab.serverLogs,
                   label: 'Server logs',
@@ -128,27 +153,22 @@ class _TerminalPaneState extends State<TerminalPane> {
         Expanded(
           child: ColoredBox(
             color: scheme.background,
-            child: IndexedStack(
-              index: _selectedTab == _TerminalTab.agent ? 0 : 1,
-              sizing: StackFit.expand,
-              children: [
-                AgentPane(
-                  controller: widget.agent,
-                  process: widget.process,
-                ),
-                TerminalView(
-                  widget.studioTerminal.terminal,
-                  theme: xtermTheme,
-                  textStyle: TerminalStyle(
-                    fontSize: 13,
-                    fontFamily: kMacMonoFont,
-                  ),
-                  padding: const EdgeInsets.all(8),
-                  autofocus: _selectedTab == _TerminalTab.serverLogs,
-                  hardwareKeyboardOnly: true,
-                ),
-              ],
-            ),
+            // The stack is what keeps both alive across a switch — the agent's
+            // scroll position and the xterm buffer survive it. With nothing to
+            // switch between it is just overhead.
+            child: showsAgent
+                ? IndexedStack(
+                    index: _selectedTab == _TerminalTab.agent ? 0 : 1,
+                    sizing: StackFit.expand,
+                    children: [
+                      AgentPane(
+                        controller: widget.agent,
+                        process: widget.process,
+                      ),
+                      terminal,
+                    ],
+                  )
+                : terminal,
           ),
         ),
       ],

@@ -1,8 +1,10 @@
+import '../feature_flags.dart';
+
 /// Editors `serverpod create --ide` can configure with agent skills and MCP.
 ///
 /// `--ide` is a multi-option, so each one is passed as its own flag.
 enum IdeIntegration {
-  opencode('opencode', 'OpenCode', builtIn: true),
+  opencode('opencode', 'OpenCode', builtIn: kOpenCodeAgentEnabled),
   antigravity('antigravity', 'Antigravity'),
   claude('claude', 'Claude Code'),
   codex('codex', 'Codex'),
@@ -18,12 +20,16 @@ enum IdeIntegration {
   /// Name shown in the New Project dialog.
   final String label;
 
-  /// Configured whether or not it was asked for. OpenCode is the agent App
-  /// Studio runs itself, so a project without it would open with an Agent tab
-  /// that has no skills and no MCP server.
+  /// Configured whether or not it was asked for.
   ///
-  /// The New Project dialog does not mark these — they are offered like any
-  /// other editor, and ticking one changes nothing.
+  /// Only OpenCode is ever this, and only while App Studio runs it as its own
+  /// agent — a project without it would open with an Agent tab that has no
+  /// skills and no MCP server. With [kOpenCodeAgentEnabled] off there is no
+  /// Agent tab, so nothing is forced on a project the user did not ask for and
+  /// OpenCode is an ordinary choice like the rest.
+  ///
+  /// The New Project screen does not mark these — they are offered like any
+  /// other editor, and picking one changes nothing.
   final bool builtIn;
 }
 

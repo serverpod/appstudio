@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../feature_flags.dart';
 import 'tool_status.dart';
 import 'toolchain.dart';
 
@@ -28,6 +29,13 @@ class ShimWriter {
     'git': ToolId.git,
   };
 
+  /// Commands this build does not expose. They stay in [_commands] so
+  /// [removeAll] still sweeps them — a shim left by a build that did write one
+  /// would otherwise outlive the feature.
+  static const _skipped = <String>{
+    if (!kOpenCodeAgentEnabled) 'opencode',
+  };
+
   /// Rewrites every shim for [toolchain]. Safe to call repeatedly.
   Future<void> write(Toolchain toolchain) async {
     final dir = Directory(binDir);
@@ -35,6 +43,13 @@ class ShimWriter {
 
     for (final entry in _commands.entries) {
       final file = File(p.join(binDir, entry.key));
+      if (_skipped.contains(entry.key)) {
+        // Reaped rather than skipped. The shim a previous build wrote would
+        // otherwise sit here telling the user to install a tool that no longer
+        // appears in Settings → Tools.
+        if (await file.exists()) await file.delete();
+        continue;
+      }
       await file.writeAsString(_script(entry.key, entry.value, toolchain));
       await Process.run('/bin/chmod', ['755', file.path]);
     }

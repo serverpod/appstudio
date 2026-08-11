@@ -12,6 +12,7 @@ import 'package:appstudio/toolchain/toolchain_requirements.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../support/agent_flag.dart';
 import '../support/toolchain_support.dart';
 
 /// Settings brings the agent up on a scratch directory when no project is
@@ -19,6 +20,11 @@ import '../support/toolchain_support.dart';
 ///
 /// The failure that matters is the reverse one: closing Settings must never
 /// tear down an agent it did not start, which would kill a live session.
+///
+/// With [kOpenCodeAgentEnabled] off there is no Providers tab for a scratch
+/// serve to answer, so `startForSettings` is a no-op — the tests that pin what
+/// a real start does are skipped rather than deleted, and the ones covering
+/// "does nothing" hold in both states.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -64,7 +70,7 @@ void main() {
       Directory('${appSupport.path}/agent-scratch').existsSync(),
       isTrue,
     );
-  });
+  }, skip: skipWhenAgentOff);
 
   test('startForSettings reports failure rather than throwing', () async {
     // No opencode in this toolchain, so the start cannot succeed. Settings
@@ -73,7 +79,20 @@ void main() {
 
     expect(agent.agentReady, isFalse);
     expect(agent.connection, AgentConnectionState.error);
-  });
+  }, skip: skipWhenAgentOff);
+
+  test('startForSettings does nothing with the agent switched off', () async {
+    await agent.startForSettings();
+
+    // Not even the scratch directory: there is no Providers tab to fill in, so
+    // nothing is spawned and nothing is left behind.
+    expect(
+      Directory('${appSupport.path}/agent-scratch').existsSync(),
+      isFalse,
+    );
+    expect(agent.isServeRunning, isFalse);
+    expect(agent.connection, AgentConnectionState.idle);
+  }, skip: skipWhenAgentOn);
 
   test('stopIfStartedForSettings does nothing when it did not start', () async {
     // The guard that protects a live project session from being torn down
@@ -111,5 +130,5 @@ void main() {
 
     expect(agent.isServeRunning, isFalse);
     expect(agent.connection, AgentConnectionState.idle);
-  });
+  }, skip: skipWhenAgentOff);
 }

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../feature_flags.dart';
 import 'login_shell_path.dart';
 import 'tool_status.dart';
 import 'tool_version.dart';
@@ -264,8 +265,13 @@ class ToolProbe {
       _probeSimple(manifest[ToolId.llvmTools]!, 'otool', const ['--version'],
           parse: parseOtoolVersion, forbidCltShim: true, deep: deep,
           validate: _validateLlvmTools),
-      _probeSimple(manifest[ToolId.opencode]!, 'opencode', const ['--version'],
-          parse: parseOpencodeVersion, deep: deep),
+      // Left out entirely when the agent is switched off, rather than probed
+      // and then filtered: an id that is absent from the inventory cannot be
+      // reported missing, cannot be downloaded, and gets no Settings → Tools
+      // row, so this one condition covers all three.
+      if (kOpenCodeAgentEnabled)
+        _probeSimple(manifest[ToolId.opencode]!, 'opencode', const ['--version'],
+            parse: parseOpencodeVersion, deep: deep),
       _probeServerpod(manifest[ToolId.serverpodCli]!, dartExecutable,
           deep: deep),
     ]);

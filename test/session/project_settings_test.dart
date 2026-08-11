@@ -62,9 +62,11 @@ void main() {
       expect(settings.editors, {IdeIntegration.cursor, IdeIntegration.vscode});
     });
 
-    test('never infers a built-in integration', () async {
-      // `--ide opencode` runs whether or not the box was ticked, so every
-      // project has an `opencode.json` and it says nothing about the choice.
+    test('never infers OpenCode', () async {
+      // `--ide opencode` used to run whether or not the box was ticked, so
+      // every project App Studio created has an `opencode.json` and it says
+      // nothing about the choice. Those projects are still on disk, so this
+      // holds even now that OpenCode is an ordinary pick like the rest.
       writeProjectFile('opencode.json', '{}');
       writeProjectFile('.cursor/mcp.json', '{}');
 

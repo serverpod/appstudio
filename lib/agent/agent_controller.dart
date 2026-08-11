@@ -11,6 +11,7 @@ import '../process/serverpod_process.dart';
 import '../session/project_session.dart';
 import '../toolchain/toolchain_controller.dart';
 import 'agent_transcript.dart';
+import '../feature_flags.dart';
 import 'opencode_auth_store.dart';
 import 'opencode_client.dart';
 import 'opencode_serve.dart';
@@ -116,6 +117,11 @@ class AgentController extends ChangeNotifier implements ProvidersView {
         _serve = OpenCodeServe(toolchains: toolchains),
         _client = OpenCodeClient(),
         _sse = OpenCodeSse() {
+    // Switched off, the controller is inert: it is still constructed, still
+    // handed to everything that expects one, and still stopped by the session
+    // teardown — it simply never listens for a project and so never spawns
+    // `opencode serve`. Nothing shows what it would report anyway.
+    if (!kOpenCodeAgentEnabled) return;
     session.addListener(_onSessionOrProcessChanged);
     process.addListener(_onSessionOrProcessChanged);
     unawaited(_loadPrefs());
@@ -310,6 +316,9 @@ class AgentController extends ChangeNotifier implements ProvidersView {
   ///
   /// Does nothing once a project is open: that agent is the real one.
   Future<void> startForSettings() async {
+    // Settings has no Providers tab to fill in when the agent is off, so there
+    // is nothing for a scratch serve to answer.
+    if (!kOpenCodeAgentEnabled) return;
     if (session.hasProject ||
         _serve.isRunning ||
         _connection == AgentConnectionState.starting) {

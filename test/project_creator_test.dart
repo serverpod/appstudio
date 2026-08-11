@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:appstudio/process/project_creator.dart';
 import 'package:appstudio/session/project_settings.dart';
 
+import 'support/agent_flag.dart';
 import 'support/toolchain_support.dart';
 
 /// Tail of a pubspec written by `serverpod create` (4.0.0-beta.1).
@@ -99,22 +100,33 @@ void main() {
   });
 
   group('configuredIdes', () {
+    test('configures exactly what was picked, and nothing else', () {
+      // OpenCode was the only `builtIn`, and it was one because App Studio ran
+      // it as its own agent. With no Agent tab there is nothing to force on a
+      // project the user did not ask for.
+      expect(IdeIntegration.values.where((ide) => ide.builtIn), isEmpty);
+      expect(configuredIdes({IdeIntegration.cursor}), {IdeIntegration.cursor});
+      expect(configuredIdes({IdeIntegration.opencode}), {
+        IdeIntegration.opencode,
+      });
+    }, skip: skipWhenAgentOn);
+
     test('adds the built-in editors to whatever was picked', () {
       expect(configuredIdes({IdeIntegration.cursor}), {
         IdeIntegration.opencode,
         IdeIntegration.cursor,
       });
-    });
+    }, skip: skipWhenAgentOff);
 
     test('picking nothing still configures the built-in agent', () {
       expect(configuredIdes(const {}), {IdeIntegration.opencode});
-    });
+    }, skip: skipWhenAgentOff);
 
     test('picking a built-in editor changes nothing', () {
       expect(configuredIdes({IdeIntegration.opencode}), {
         IdeIntegration.opencode,
       });
-    });
+    }, skip: skipWhenAgentOff);
   });
 
   group('patchFlutterAppForPreview', () {

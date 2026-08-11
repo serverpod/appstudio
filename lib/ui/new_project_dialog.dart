@@ -111,7 +111,9 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
   late final _directoryController = TextEditingController(
     text: prettyPath(_directory),
   );
-  final _ides = <IdeIntegration>{};
+  /// The one editor to configure. Picking one is mandatory, so this is null
+  /// only until the user has answered — which is what holds Create disabled.
+  IdeIntegration? _ide;
 
   bool _creating = false;
   String? _status;
@@ -151,11 +153,11 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
 
   String? get _nameError => validateProjectName(_name);
 
-  bool get _canCreate => !_creating && _name.isNotEmpty && _nameError == null;
-
-  /// Whether anything the user actually chose is ticked. A `builtIn` is
-  /// installed either way, so it is not a choice and does not count as one.
-  bool get _hasExternalEditor => _ides.any((ide) => !ide.builtIn);
+  /// Create waits on the editor as well as the name. Picking one is mandatory,
+  /// and a disabled button beside an unanswered question is a clearer way to
+  /// say so than a prompt raised after the fact.
+  bool get _canCreate =>
+      !_creating && _name.isNotEmpty && _nameError == null && _ide != null;
 
   Future<void> _chooseDirectory() async {
     final path = await getDirectoryPath(
@@ -173,11 +175,8 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
 
   Future<void> _create() async {
     if (!_canCreate) return;
-    if (!_hasExternalEditor) {
-      final proceed = await _confirmNoExternalEditor(context);
-      if (!proceed || !mounted || !_canCreate) return;
-    }
     final name = _name;
+    final ide = _ide!;
     setState(() {
       _creating = true;
       _status = 'Starting Serverpod CLI…';
@@ -190,7 +189,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
       final path = await ProjectCreator(toolchains: widget.toolchains).create(
         name: name,
         parentDirectory: _directory,
-        ides: _ides,
+        ides: {ide},
         onStatus: (status) {
           if (mounted) setState(() => _status = status);
         },
@@ -339,24 +338,18 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
           ],
         ),
         const SizedBox(height: 24),
-        FieldLabel('External AI editors'),
+        FieldLabel('External AI editor'),
         const SizedBox(height: 6),
         Text(
-          'Installs agent skills and MCP servers for the editors you pick.',
+          'Installs agent skills and MCP servers for the editor you pick.',
           style: textTheme.muted.copyWith(fontSize: 11),
         ),
         const SizedBox(height: 12),
-        _IdeCheckboxes(
-          selected: _ides,
-          onChanged: (ide, value) => setState(() {
-            if (value) {
-              _ides.add(ide);
-            } else {
-              _ides.remove(ide);
-            }
-          }),
+        _IdeRadios(
+          selected: _ide,
+          onChanged: (ide) => setState(() => _ide = ide),
         ),
-        // The dialog's own gap alone leaves the last row of boxes sitting on
+        // The dialog's own gap alone leaves the last row of options sitting on
         // top of the buttons.
         const SizedBox(height: 16),
       ],
@@ -391,45 +384,19 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
   }
 }
 
-/// Asks before creating a project with no external editor configured.
+/// Editor radios, three to a row — one per line would make this section taller
+/// than the two fields above it put together.
 ///
-/// Returns whether to go ahead. Dismissing the prompt counts as Pick Editor:
-/// the whole point of it is that continuing should be the deliberate answer.
-///
-/// It is a plain dialog over the Create Project screen — the one thing the
-/// screen has that this needs is somewhere to go back to.
-Future<bool> _confirmNoExternalEditor(BuildContext context) async {
-  final proceed = await showShadDialog<bool>(
-    context: context,
-    builder: (context) => ShadDialog.alert(
-      title: const Text('No external editor selected'),
-      description: const Text(
-        "It's recommended that you use App Studio with an external editor. "
-        'Are you sure that you want to continue?',
-      ),
-      actions: [
-        ShadButton.outline(
-          onPressed: () => Navigator.of(context).pop(true),
-          child: const Text('Continue'),
-        ),
-        // The recommended answer, so it is the primary one.
-        ShadButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Pick Editor'),
-        ),
-      ],
-    ),
-  );
-  return proceed ?? false;
-}
+/// Radios rather than checkboxes because exactly one editor is configured, and
+/// picking one is required. It used to be a set of opt-ins that could all be
+/// left clear, which needed a prompt after the fact to ask whether that was
+/// really meant; a control that cannot express the empty answer says the same
+/// thing up front.
+class _IdeRadios extends StatelessWidget {
+  const _IdeRadios({required this.selected, required this.onChanged});
 
-/// Editor checkboxes, three to a row — one per line would make this section
-/// taller than the two fields above it put together.
-class _IdeCheckboxes extends StatelessWidget {
-  const _IdeCheckboxes({required this.selected, required this.onChanged});
-
-  final Set<IdeIntegration> selected;
-  final void Function(IdeIntegration ide, bool value) onChanged;
+  final IdeIntegration? selected;
+  final ValueChanged<IdeIntegration?> onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -437,19 +404,20 @@ class _IdeCheckboxes extends StatelessWidget {
     const spacing = 8.0;
     final width = (_kDialogWidth - spacing * (columns - 1)) / columns;
 
-    return Wrap(
+    return ShadRadioGroup<IdeIntegration>(
+      // Horizontal, so the group's own Wrap does the same job the checkboxes'
+      // did; the fixed width per item is what keeps the columns lined up.
+      axis: Axis.horizontal,
       spacing: spacing,
       runSpacing: spacing,
-      children: [
+      initialValue: selected,
+      onChanged: onChanged,
+      items: [
         for (final ide in IdeIntegration.values)
           SizedBox(
             width: width,
-            child: ShadCheckbox(
-              // Every box is an ordinary opt-in, including OpenCode's. What
-              // it says about OpenCode does not decide anything, though —
-              // `IdeIntegration.builtIn` is installed either way.
-              value: selected.contains(ide),
-              onChanged: (value) => onChanged(ide, value),
+            child: ShadRadio<IdeIntegration>(
+              value: ide,
               label: Text(ide.label),
             ),
           ),

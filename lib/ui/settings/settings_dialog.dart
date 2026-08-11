@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 
+import '../../feature_flags.dart';
 import '../../util/byte_format.dart';
 import '../toolchain/tools_view.dart';
 import 'providers_view.dart';
@@ -56,7 +57,13 @@ class SettingsDialog extends StatefulWidget {
 }
 
 class _SettingsDialogState extends State<SettingsDialog> {
-  late SettingsTab _tab = widget.initialTab;
+  /// Providers configures API keys for the OpenCode agent and nothing else, so
+  /// with the agent switched off there is one pane left and it is Tools. The
+  /// caller is coerced rather than trusted: the App menu's Settings item still
+  /// asks for Providers, and that pane would otherwise sit on its
+  /// "waiting for the agent" spinner forever.
+  late SettingsTab _tab =
+      kOpenCodeAgentEnabled ? widget.initialTab : SettingsTab.tools;
 
   @override
   Widget build(BuildContext context) {
@@ -86,27 +93,33 @@ class _SettingsDialogState extends State<SettingsDialog> {
       ],
       child: SizedBox(
         width: _kDialogWidth,
-        child: ShadTabs<SettingsTab>(
-          value: _tab,
-          // Shad defaults to intrinsic-width tabs; ours are a two-up
-          // segmented control that has to fill the dialog width.
-          expandTabs: true,
-          onChanged: (value) => setState(() => _tab = value),
-          tabs: [
-            ShadTab(
-              value: SettingsTab.providers,
-              content: _paneBox(ProvidersSettingsPane(agent: widget.agent)),
-              child: const Text('Providers'),
-            ),
-            ShadTab(
-              value: SettingsTab.tools,
-              content: _paneBox(
-                ManageToolsPane(toolchains: widget.toolchains),
-              ),
-              child: const Text('Tools'),
-            ),
-          ],
-        ),
+        // A tab strip with one tab in it is a button that does nothing, so with
+        // Providers gone the pane is shown on its own.
+        child: kOpenCodeAgentEnabled
+            ? ShadTabs<SettingsTab>(
+                value: _tab,
+                // Shad defaults to intrinsic-width tabs; ours are a two-up
+                // segmented control that has to fill the dialog width.
+                expandTabs: true,
+                onChanged: (value) => setState(() => _tab = value),
+                tabs: [
+                  ShadTab(
+                    value: SettingsTab.providers,
+                    content: _paneBox(
+                      ProvidersSettingsPane(agent: widget.agent),
+                    ),
+                    child: const Text('Providers'),
+                  ),
+                  ShadTab(
+                    value: SettingsTab.tools,
+                    content: _paneBox(
+                      ManageToolsPane(toolchains: widget.toolchains),
+                    ),
+                    child: const Text('Tools'),
+                  ),
+                ],
+              )
+            : _paneBox(ManageToolsPane(toolchains: widget.toolchains)),
       ),
     );
   }

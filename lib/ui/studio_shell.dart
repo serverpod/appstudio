@@ -192,8 +192,8 @@ class _Toolbar extends StatelessWidget {
           _IconAction(
             icon: LucideIcons.panelLeft,
             tooltip: leftPanelVisible
-                ? 'Hide Agent & logs panel'
-                : 'Show Agent & logs panel',
+                ? 'Hide $kLeftPanelName panel'
+                : 'Show $kLeftPanelName panel',
             onPressed: onToggleLeftPanel,
           ),
           const SizedBox(width: 12),

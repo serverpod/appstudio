@@ -148,80 +148,24 @@ void main() {
 
     for (final ide in IdeIntegration.values) {
       expect(find.text(ide.label), findsOneWidget);
-      final box = tester.widget<ShadCheckbox>(
+      final radio = tester.widget<ShadRadio<IdeIntegration>>(
         find.ancestor(
           of: find.text(ide.label),
-          matching: find.byType(ShadCheckbox),
+          matching: find.byType(ShadRadio<IdeIntegration>),
         ),
       );
-      expect(box.value, isFalse, reason: ide.label);
-      expect(box.enabled, isTrue, reason: ide.label);
+      expect(radio.value, ide, reason: ide.label);
+      expect(radio.enabled, isTrue, reason: ide.label);
     }
-    // Its box says nothing about it — OpenCode is installed either way.
-    expect(IdeIntegration.opencode.builtIn, isTrue);
+    // Radios, so the empty answer cannot be expressed. That is what makes
+    // picking one mandatory without a prompt raised after the fact.
+    expect(find.byType(ShadCheckbox), findsNothing);
   });
 
-  group('creating with no external editor', () {
-    /// A valid name, then Create. Fixed pumps throughout: once creation
-    /// starts, `ShadProgress` animates forever and `pumpAndSettle` never
-    /// returns.
-    Future<void> pressCreate(WidgetTester tester) async {
-      await tester.enterText(find.byType(ShadInput).first, 'my_app');
-      await tester.pump();
-      await tester.tap(find.widgetWithText(ShadButton, 'Create'));
-      await tester.pump(const Duration(milliseconds: 400));
-    }
-
-    testWidgets('warns, and Pick Editor goes back to the form', (tester) async {
-      await _pumpDialog(tester);
-      await pressCreate(tester);
-
-      expect(
-        find.textContaining('recommended that you use App Studio'),
-        findsOneWidget,
-      );
-
-      await tester.tap(find.widgetWithText(ShadButton, 'Pick Editor'));
-      await tester.pump(const Duration(milliseconds: 400));
-
-      expect(find.text('No external editor selected'), findsNothing);
-      // Back on the form, not creating.
-      expect(find.text('External AI editors'), findsOneWidget);
-      expect(find.text('Creating my_app'), findsNothing);
-    });
-
-    testWidgets('Continue creates anyway', (tester) async {
-      await _pumpDialog(tester);
-      await pressCreate(tester);
-
-      await tester.tap(find.widgetWithText(ShadButton, 'Continue'));
-      await tester.pump(const Duration(milliseconds: 400));
-
-      expect(find.text('No external editor selected'), findsNothing);
-      expect(find.text('Creating my_app'), findsOneWidget);
-    });
-
-    testWidgets('OpenCode alone does not count as one', (tester) async {
-      await _pumpDialog(tester);
-      await tester.tap(find.text('OpenCode'));
-      await tester.pump();
-      await pressCreate(tester);
-
-      expect(find.text('No external editor selected'), findsOneWidget);
-    });
-
-    testWidgets('picking one skips the warning', (tester) async {
-      await _pumpDialog(tester);
-      await tester.tap(find.text('Cursor'));
-      await tester.pump();
-      await pressCreate(tester);
-
-      expect(find.text('No external editor selected'), findsNothing);
-      expect(find.text('Creating my_app'), findsOneWidget);
-    });
-  });
-
-  testWidgets('create is disabled until the name is valid', (tester) async {
+  testWidgets('create waits for a name *and* an editor', (tester) async {
+    // Picking an editor is mandatory. A disabled Create beside an unanswered
+    // question replaced the "No external editor selected" prompt, which could
+    // only be raised after the user had already committed.
     await _pumpDialog(tester);
 
     ShadButton createButton() => tester.widget<ShadButton>(
@@ -233,12 +177,36 @@ void main() {
 
     expect(createButton().enabled, isFalse);
 
+    // A valid name is not enough on its own.
     await tester.enterText(find.byType(ShadInput).first, 'my_app');
+    await tester.pump();
+    expect(createButton().enabled, isFalse);
+
+    await tester.tap(find.text('Cursor'));
     await tester.pump();
     expect(createButton().enabled, isTrue);
 
+    // And the name still has to hold up.
     await tester.enterText(find.byType(ShadInput).first, '2app');
     await tester.pump();
     expect(createButton().enabled, isFalse);
+  });
+
+  testWidgets('a name and an editor creates, with nothing to confirm', (
+    tester,
+  ) async {
+    await _pumpDialog(tester);
+
+    await tester.enterText(find.byType(ShadInput).first, 'my_app');
+    await tester.tap(find.text('Cursor'));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(ShadButton, 'Create'));
+    // Fixed pumps, not pumpAndSettle: once creation starts `ShadProgress`
+    // animates forever and settling never completes.
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('Creating my_app'), findsOneWidget);
+    // Nothing can reach the empty answer now, so there is nothing left to ask.
+    expect(find.text('No external editor selected'), findsNothing);
   });
 }

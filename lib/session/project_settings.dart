@@ -103,14 +103,21 @@ const _ideConfigFiles = <IdeIntegration, String>{
   IdeIntegration.vscode: '.vscode/mcp.json',
 };
 
+/// Integrations whose config file says nothing about what the user chose.
+///
+/// `opencode.json` is in *every* project App Studio has ever created: it went
+/// out as a `builtIn` whether or not the box was ticked. Those projects are
+/// still on disk, so this holds even now that OpenCode is an ordinary choice
+/// like the rest — which is why it is a list of its own rather than a read of
+/// [IdeIntegration.builtIn], which now answers `false`. Inferring from that
+/// file would put an "Open in OpenCode" button on all of them, and keeping it
+/// off is the whole point of the picked/configured split.
+const _neverInferred = <IdeIntegration>{IdeIntegration.opencode};
+
 Future<Set<IdeIntegration>> _inferFromIdeConfig(String projectPath) async {
   final found = <IdeIntegration>{};
   for (final entry in _ideConfigFiles.entries) {
-    // A built-in integration is configured whether or not it was picked, so its
-    // config file says nothing about what the user chose — `opencode.json` is
-    // in *every* project App Studio has ever created. Inferring from it would
-    // reinstate the button this whole distinction exists to keep off.
-    if (entry.key.builtIn) continue;
+    if (_neverInferred.contains(entry.key)) continue;
     if (await File(p.join(projectPath, entry.value)).exists()) {
       found.add(entry.key);
     }
