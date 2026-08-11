@@ -491,9 +491,18 @@ void WebviewHandler::reload(int browserId) {
 
 void WebviewHandler::reloadIgnoreCache(int browserId) {
     auto it = browser_map_.find(browserId);
-    if (it != browser_map_.end()) {
-        it->second.browser->GetMainFrame()->GetBrowser()->ReloadIgnoreCache();
+    if (it == browser_map_.end()) {
+        return;
     }
+    CefRefPtr<CefBrowser> browser = it->second.browser;
+    // ReloadIgnoreCache() only bypasses the cache for the requests this
+    // navigation makes — the stored entries survive it, so the next plain
+    // navigation serves the previous build again. Empty the cache outright so
+    // nothing can. CEF exposes no API for it; the DevTools protocol is the
+    // route, and commands issued on one session are executed in order.
+    browser->GetHost()->ExecuteDevToolsMethod(
+            0, "Network.clearBrowserCache", nullptr);
+    browser->ReloadIgnoreCache();
 }
 
 void WebviewHandler::openDevTools(int browserId) {

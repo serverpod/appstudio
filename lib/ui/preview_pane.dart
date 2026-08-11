@@ -5,6 +5,7 @@ import 'package:shad/shad.dart';
 import 'package:webview_cef/webview_cef.dart';
 
 import '../preview/preview_bootstrap.dart';
+import '../preview/preview_cache_purge.dart';
 import '../preview/preview_device.dart';
 import '../preview/preview_hero_gradient.dart';
 import '../preview/preview_status_overlay.dart';
@@ -58,8 +59,12 @@ class PreviewPaneState extends State<PreviewPane> {
     }
     final revealGeneration = ++_revealGeneration;
     try {
-      // Hard reload: a plain navigation re-serves the cached main.dart.js, so
-      // a rebuilt app would look unchanged.
+      // Hard reload, and it has to be hard on both sides: a service worker or a
+      // Cache Storage entry outlives the navigation and would answer the new
+      // document out of the previous build, and a plain navigation re-serves
+      // the cached `main.dart.js` — so a rebuilt app would look unchanged.
+      await _purgePageCaches(controller);
+      if (!mounted || revealGeneration != _revealGeneration) return;
       await controller.reloadIgnoreCache();
       await _waitForFlutterMain(
         controller,
@@ -254,6 +259,33 @@ class PreviewPaneState extends State<PreviewPane> {
     if (!mounted || revealGeneration != _revealGeneration) return;
     widget.process.markPreviewLive();
     if (mounted) setState(() {});
+  }
+
+  /// Drops the caches that live inside the page, so the reload cannot be
+  /// answered out of the previous build.
+  ///
+  /// Bounded and best-effort: the purge is asynchronous and there is no way to
+  /// await it from here, so a page that never raises the flag costs a second
+  /// and reloads anyway. Not reloading is the worse failure.
+  Future<void> _purgePageCaches(WebViewController controller) async {
+    const maxAttempts = 5;
+    const delay = Duration(milliseconds: 200);
+    try {
+      await controller.executeJavaScript(previewCachePurgeScript);
+    } catch (_) {
+      return;
+    }
+    for (var i = 0; i < maxAttempts; i++) {
+      try {
+        final done = await controller.evaluateJavascript(
+          previewCachesPurgedFlag,
+        );
+        if (done == true || done == 'true') return;
+      } catch (_) {
+        return;
+      }
+      await Future<void>.delayed(delay);
+    }
   }
 
   /// Keeps the overlay up until Flutter web has actually started (or we time out).
