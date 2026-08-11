@@ -4,7 +4,9 @@
 #   make deps              Pub get + CEF/pods
 #   make clean             Drop build output and dist artifacts
 #   make clean_all         Also drop CEF, Pods and the dev toolchain
-#   make dev_toolchain     Build a local toolchain/ tree (optional)
+#   make dev_toolchain     Build every toolchain/ tree (for publishing)
+#   make update_flutter    Re-download + strip the Flutter/Dart SDK
+#   make update_serverpod  Copy the Serverpod CLI from this Mac's dart install
 #   make publish_toolchain Upload tools to GCS and refresh the manifest
 #   make previews          Browser previews of every dialog (hot reload)
 #   make set_version V=…   Set the version and bump the build counter
@@ -20,6 +22,7 @@ ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 CEF_STAMP := $(ROOT)/packages/webview_cef/macos/third/cef/version.txt
 
 .PHONY: help start deps ensure_deps clean clean_all dev_toolchain \
+        update_flutter update_serverpod \
         publish_toolchain publish_dist publish_appcast dist dist_debug \
         set_version release previews
 
@@ -29,7 +32,11 @@ help:
 	@echo "  make deps              flutter pub get + CEF/pods"
 	@echo "  make clean             Remove build/ and dist/ (keeps CEF + toolchain)"
 	@echo "  make clean_all         Also remove CEF, Pods and <repo>/toolchain"
-	@echo "  make dev_toolchain     Build <repo>/toolchain for offline dev (optional)"
+	@echo "  make dev_toolchain     Build every <repo>/toolchain tree"
+	@echo "  make update_flutter [V=3.44.2]"
+	@echo "                         Re-download + strip the Flutter/Dart SDK"
+	@echo "  make update_serverpod [V=4.0.0-beta.2]"
+	@echo "                         Copy the Serverpod CLI from the local dart install"
 	@echo "  make publish_toolchain Dry-run the toolchain publish"
 	@echo "  make previews          Browser previews of every dialog (hot reload)"
 	@echo "  make set_version V=1.2.3   Set the version (or V=patch|minor|major|build)"
@@ -41,7 +48,8 @@ help:
 	@echo "  make dist_debug        Local unsigned zip, never uploaded"
 	@echo ""
 	@echo "The app downloads its own tools on first run, so no toolchain is"
-	@echo "needed to build or ship it. dev_toolchain is only for working offline."
+	@echo "needed to build or ship it. The toolchain targets are for publishing"
+	@echo "new tool versions to the bucket."
 
 # CEF is the one thing that must exist before the app can build at all.
 ensure_deps:
@@ -85,10 +93,39 @@ clean_all: clean
 	       "$(ROOT)/toolchain/opencode" "$(ROOT)/toolchain/llvm-tools"
 	@echo "    kept toolchain/{active.json,pins,bin,serverpod_cli} — tracked in git"
 
-# Optional: build <repo>/toolchain. The app prefers that tree over anything it
-# would download, which is handy offline — but it is no longer required.
+# Builds the <repo>/toolchain trees that publish_toolchain.sh uploads.
+#
+# The app itself never reads this tree — it resolves each tool as managed (its
+# own Application Support directory) then host, and nothing else — so this is a
+# packaging step for a release, not a way to run App Studio against local tools.
 dev_toolchain:
 	cd "$(ROOT)" && ./tool/bundle_toolchain.sh
+
+# Update one tool in the tree, then publish. Both take an optional V=; without
+# one they use the version pinned in tool/bundle_toolchain.sh. Tools not named
+# keep whatever toolchain/active.json already pins, so a partial run cannot
+# quietly move a pin for a tree it never rebuilt.
+#
+# Flutter carries the Dart SDK (bin/cache/dart-sdk), so this is how Dart moves
+# too — there is no separate dart tool in the toolchain.
+update_flutter:
+	cd "$(ROOT)" && ./tool/bundle_toolchain.sh --only=flutter --force \
+		$(if $(V),--flutter=$(V))
+	@echo ""
+	@echo "Flutter updated. Publish it with:"
+	@echo "  ./tool/publish_toolchain.sh --only=flutter --dry-run"
+	@echo "  ./tool/publish_toolchain.sh --only=flutter"
+
+# `dart install serverpod_cli <version>` first — pub publishes no macOS archive,
+# so the tree is copied from the bundle that command unpacks.
+update_serverpod:
+	cd "$(ROOT)" && ./tool/bundle_toolchain.sh --only=serverpod_cli --force \
+		$(if $(V),--serverpod=$(V))
+	@echo ""
+	@echo "Serverpod CLI updated. Raise hostAccepts in"
+	@echo "assets/toolchain_manifest.json if this is a new minimum, then:"
+	@echo "  ./tool/publish_toolchain.sh --only=serverpod_cli --dry-run"
+	@echo "  ./tool/publish_toolchain.sh --only=serverpod_cli"
 
 # Release engineers only. Uploads are immutable and cannot be undone with the
 # publisher role, so this target only ever dry-runs.

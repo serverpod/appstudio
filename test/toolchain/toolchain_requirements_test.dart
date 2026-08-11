@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 ToolVersion v(String s) => ToolVersion.tryParse(s)!;
 
-/// The real Serverpod spec: >=4.0.0-beta.1 <4.1.0.
+/// The real Serverpod spec: >=4.0.0-beta.2 <4.1.0.
 late ToolSpec serverpod;
 
 void main() {
@@ -25,8 +25,8 @@ void main() {
   group('defaults', () {
     test('falls back to the manifest range when nothing is overridden', () {
       const req = ToolchainRequirements.empty;
-      expect(req.effectiveMinimum(serverpod).toString(), '4.0.0-beta.1');
-      expect(req.accepts(serverpod, v('4.0.0-beta.1')), isTrue);
+      expect(req.effectiveMinimum(serverpod).toString(), '4.0.0-beta.2');
+      expect(req.accepts(serverpod, v('4.0.0-beta.2')), isTrue);
       expect(req.accepts(serverpod, v('4.0.0')), isTrue);
       expect(req.accepts(serverpod, v('3.5.0-beta.7')), isFalse);
       expect(req.accepts(serverpod, null), isFalse);
@@ -39,7 +39,7 @@ void main() {
           .withMinimum(ToolId.serverpodCli, v('4.0.0-beta.5'));
       expect(req.effectiveMinimum(serverpod).toString(), '4.0.0-beta.5');
       expect(req.accepts(serverpod, v('4.0.0-beta.5')), isTrue);
-      expect(req.accepts(serverpod, v('4.0.0-beta.1')), isFalse);
+      expect(req.accepts(serverpod, v('4.0.0-beta.2')), isFalse);
     });
 
     test('a lower minimum cannot weaken the manifest floor', () {
@@ -47,7 +47,7 @@ void main() {
       // admit an untested CLI and produce unexplainable failures.
       final req = ToolchainRequirements.empty
           .withMinimum(ToolId.serverpodCli, v('3.0.0'));
-      expect(req.effectiveMinimum(serverpod).toString(), '4.0.0-beta.1');
+      expect(req.effectiveMinimum(serverpod).toString(), '4.0.0-beta.2');
       expect(req.accepts(serverpod, v('3.5.0-beta.7')), isFalse);
     });
 
@@ -62,13 +62,13 @@ void main() {
           .withMinimum(ToolId.serverpodCli, v('4.0.0-beta.5'))
           .withMinimum(ToolId.serverpodCli, null);
       expect(req.userMinimumFor(ToolId.serverpodCli), isNull);
-      expect(req.effectiveMinimum(serverpod).toString(), '4.0.0-beta.1');
+      expect(req.effectiveMinimum(serverpod).toString(), '4.0.0-beta.2');
     });
 
     test('describe shows the raised floor', () {
       expect(
         ToolchainRequirements.empty.describe(serverpod),
-        '>=4.0.0-beta.1 <4.1.0',
+        '>=4.0.0-beta.2 <4.1.0',
       );
       expect(
         ToolchainRequirements.empty

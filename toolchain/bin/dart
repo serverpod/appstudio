@@ -3,6 +3,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FLUTTER_VER="$(tr -d '[:space:]' < "$ROOT/pins/flutter")"
 GIT_VER="$(tr -d '[:space:]' < "$ROOT/pins/git" 2>/dev/null || true)"
+LLVM_VER="$(tr -d '[:space:]' < "$ROOT/pins/llvm_tools" 2>/dev/null || true)"
 export FLUTTER_ROOT="$ROOT/flutter/$FLUTTER_VER"
 ENGINE_VERSION_FILE="$FLUTTER_ROOT/bin/internal/engine.version"
 if [[ -f "$ENGINE_VERSION_FILE" ]]; then
@@ -20,8 +21,10 @@ if [[ -n "$GIT_VER" && -x "$ROOT/git/$GIT_VER/bin/git" ]]; then
   fi
   export PATH="$GIT_HOME/bin:$PATH"
 fi
-# Real otool / install_name_tool ahead of /usr/bin CLT stubs.
-if [[ -x "$ROOT/cctools/bin/otool" ]]; then
-  export PATH="$ROOT/cctools/bin:$PATH"
+# Real otool / install_name_tool ahead of /usr/bin CLT stubs. Read from the pin
+# at runtime like flutter and git — this heredoc is quoted, so a generation-time
+# variable would land in the wrapper unexpanded and die under `set -u`.
+if [[ -n "$LLVM_VER" && -x "$ROOT/llvm-tools/$LLVM_VER/bin/otool" ]]; then
+  export PATH="$ROOT/llvm-tools/$LLVM_VER/bin:$PATH"
 fi
 exec "$FLUTTER_ROOT/bin/dart" "$@"

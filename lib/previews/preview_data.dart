@@ -63,7 +63,7 @@ final previewManifest = ToolManifest(
   tools: {
     ToolId.flutter: _spec(ToolId.flutter, 'Flutter SDK', '3.44.2', sizeMb: 662),
     ToolId.serverpodCli:
-        _spec(ToolId.serverpodCli, 'Serverpod CLI', '4.0.0-beta.1', sizeMb: 11),
+        _spec(ToolId.serverpodCli, 'Serverpod CLI', '4.0.0-beta.2', sizeMb: 11),
     ToolId.opencode:
         _spec(ToolId.opencode, 'OpenCode', '1.18.4', required: false, sizeMb: 43),
     ToolId.git: _spec(ToolId.git, 'Git', '2.53.0-3', sizeMb: 57),
@@ -108,7 +108,7 @@ ToolchainInventory _inventory(Map<ToolId, List<ToolCandidate>> byTool) =>
 final completeInventory = _inventory({
   ToolId.flutter: [_found(ToolId.flutter, ToolSource.managed, '3.44.2')],
   ToolId.serverpodCli: [
-    _found(ToolId.serverpodCli, ToolSource.managed, '4.0.0-beta.1'),
+    _found(ToolId.serverpodCli, ToolSource.managed, '4.0.0-beta.2'),
   ],
   ToolId.opencode: [_found(ToolId.opencode, ToolSource.host, '1.18.4')],
   ToolId.git: [_found(ToolId.git, ToolSource.managed, '2.53.0-3')],
@@ -135,7 +135,7 @@ final mixedInventory = _inventory({
 final allNativeInventory = _inventory({
   ToolId.flutter: [_found(ToolId.flutter, ToolSource.host, '3.44.2')],
   ToolId.serverpodCli: [
-    _found(ToolId.serverpodCli, ToolSource.host, '4.0.0-beta.1'),
+    _found(ToolId.serverpodCli, ToolSource.host, '4.0.0-beta.2'),
   ],
   ToolId.opencode: [_found(ToolId.opencode, ToolSource.managed, '1.18.4')],
   ToolId.git: [_found(ToolId.git, ToolSource.host, '2.53.0-3')],
@@ -147,7 +147,7 @@ final allNativeInventory = _inventory({
 final outdatedInventory = _inventory({
   ToolId.flutter: [_found(ToolId.flutter, ToolSource.managed, '3.44.0')],
   ToolId.serverpodCli: [
-    _found(ToolId.serverpodCli, ToolSource.managed, '4.0.0-beta.1'),
+    _found(ToolId.serverpodCli, ToolSource.managed, '4.0.0-beta.2'),
   ],
   ToolId.opencode: [_found(ToolId.opencode, ToolSource.host, '1.18.4')],
   // A host copy behind the pin stays put: we did not install it, so it is not

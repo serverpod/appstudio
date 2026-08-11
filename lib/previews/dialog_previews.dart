@@ -79,7 +79,7 @@ Widget toolchainSetupPlan() => previewShell(
 );
 
 /// The awkward middle: a host Git we can reuse, a Serverpod CLI too old to use
-/// (so the row reads `4.0.0-beta.0 → 4.0.0-beta.1`), and a missing OpenCode.
+/// (so the row reads `4.0.0-beta.0 → 4.0.0-beta.2`), and a missing OpenCode.
 /// This is the only state that shows the "Installed" badge and the replacing
 /// form of the version badge at the same time.
 @BrightnessPreview(name: 'Plan — partly satisfied')

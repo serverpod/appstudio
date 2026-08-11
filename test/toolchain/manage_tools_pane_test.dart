@@ -146,7 +146,7 @@ void main() {
     // The version that is there, then the one that would land — otherwise a
     // working `serverpod` command beside a plain "Missing" reads as a failed
     // detection rather than an upgrade.
-    expect(find.text('3.5.0-beta.7 → 4.0.0-beta.1'), findsOneWidget);
+    expect(find.text('3.5.0-beta.7 → 4.0.0-beta.2'), findsOneWidget);
     expect(find.text('Missing'), findsOneWidget);
   });
 

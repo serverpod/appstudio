@@ -334,7 +334,7 @@ notifying on every poll tick.
 ### Prerequisites (dev machine)
 
 - **Flutter 3.44+** / **Dart 3.12+** (host SDK for building App Studio itself)
-- **Serverpod CLI 4.0.0-beta.1** — `dart install serverpod_cli 4.0.0-beta.1` (used when no bundled toolchain)
+- **Serverpod CLI 4.0.0-beta.2** — `dart install serverpod_cli 4.0.0-beta.2` (used when no bundled toolchain)
 - **CEF / webview_cef:** `brew install cmake ninja`; then `cd macos && pod install`  
   (CEF binaries download into `packages/webview_cef/macos/third/cef/` — gitignored)
 
@@ -375,23 +375,62 @@ make dist              # Developer ID + notarized zip
 ### Publishing tools (release engineer)
 
 ```bash
-./tool/bundle_toolchain.sh                    # build the trees (unchanged)
-./tool/publish_toolchain.sh --dry-run         # sizes, no upload
+make update_serverpod V=4.0.0-beta.2          # copy from the local dart install
+make update_flutter   V=3.44.2                # download + strip; carries Dart
+./tool/bundle_toolchain.sh                    # or: build every tree at once
+./tool/publish_toolchain.sh --dry-run         # sizes and targets, no upload
 ./tool/publish_toolchain.sh --only=git        # publish a subset
 ./tool/publish_toolchain.sh                   # publish everything
 ```
 
+- **There is no download for the Serverpod CLI** — pub publishes no macOS
+  archive — so `make update_serverpod` copies the bundle `dart install
+  serverpod_cli <version>` unpacked into
+  `~/Library/Application Support/Dart/install/app-bundles/`. Install it first.
+  The copy is `ditto`, to carry the signature and exec bits, and the staged
+  binary is then asked its own `--version`: the install path claims a version,
+  but only the binary knows one, and a mismatch would publish an archive whose
+  name, pin and manifest entry all disagree with its contents.
+- **`--only=` leaves the other pins alone.** A partial run reads the untouched
+  versions back out of `active.json` rather than falling back to the script's
+  own defaults, which would otherwise reset a pin to whatever the file was last
+  written with — and point the "already present?" checks at a tree that was
+  never built.
 - Bucket `gs://serverpod-appstudio-toolchain`, served from
-  `https://storage.googleapis.com/serverpod-appstudio-toolchain/`. Public read. Immutability is
-  enforced by **`--if-generation-match=0` in the publish scripts**, not by IAM: the release
-  account holds `roles/owner` on the project and *can* overwrite or delete
-  one, so immutability is enforced by IAM. **A mistaken publish cannot be undone with the
-  publisher role: always `--dry-run` first.**
+  `https://storage.googleapis.com/serverpod-appstudio-toolchain/`. Public read.
+  Immutability is enforced by **`--if-generation-match=0` in the publish
+  scripts**, not by IAM — the release account holds `roles/owner` and *can*
+  overwrite or delete an object. **A mistaken publish cannot be undone by the
+  account that made it: always `--dry-run` first.**
 - Object names embed the build counter as a path segment
   (`tools/<id>/<version>/b<build>/<id>-macos-arm64.tar.gz`), so repacking the same upstream
   version is a new URL. There is no mutable `latest.json`.
-- The script hashes the **exact bytes uploaded**, re-downloads to re-verify, then rewrites
-  `assets/toolchain_manifest.json`. Commit that file with the release.
+- **The build number is chosen per tool, not passed in.** The script walks
+  `b1`, `b2`, … and takes the first path that is either free or already holds
+  these exact bytes. `--build=N` sets where that walk starts, not where it ends.
+  That is what makes a full `./tool/publish_toolchain.sh` safe to run when only
+  one tool moved: the other four resolve to what is already published instead of
+  colliding with it and failing the run.
+- **Identity is proved by a `.sha256` sidecar published next to each archive**,
+  written after the archive so it can never advertise bytes that failed to
+  upload. Both probes are plain HTTPS, not `gcloud`, so `--dry-run` reports the
+  same decision a real run would take without needing credentials.
+- **Archives are packed with `gzip -n`, not tar's `-z`.** gzip stamps the
+  current time into its header otherwise, so two packs of one untouched tree
+  differ and the reuse check above can never recognise its own work.
+  `ensure_flutter_tools_cache.sh` is conditional for the same reason — an
+  unconditional `touch` there re-published the whole 673 MB SDK every run.
+- The script hashes the **exact bytes uploaded**, re-downloads to re-verify —
+  reused objects included, since the sidecar is only a claim about the bytes —
+  then rewrites `assets/toolchain_manifest.json`. Commit that file with the
+  release.
+- **It writes `version`, `build`, `installDir` and the platform entry; it never
+  writes `hostAccepts`.** The first four are packaging facts derived from
+  `active.json`, exactly like the object path, and leaving them to be hand-edited
+  is how a manifest ends up naming one version and downloading another. The
+  floor is policy and stays manual — but publishing a version the floor does not
+  mention prints a warning, because that failure is otherwise silent: the app
+  goes on accepting the older CLI it was supposed to stop accepting.
 - Do **not** put a service-account key in a `.env`. Write access here is effectively
   code-signing authority over every install. Use `--impersonate-service-account` (no key
   exists) or Workload Identity Federation in CI.
@@ -444,9 +483,28 @@ make publish_dist         # upload an already-built zip
 make dist_debug           # unsigned, local only, never uploaded
 ```
 
-Defaults: bundle id `dev.serverpod.appstudio`,
+Defaults, all overridable from the environment: bundle id
+`dev.serverpod.appstudio`, team Serverpod AB (`WK2NRY4GS4`),
 `SIGN_IDENTITY="Developer ID Application: Serverpod AB (WK2NRY4GS4)"`,
-`NOTARY_PROFILE=appstudio`. The zip lands in `dist/macos/`.
+`NOTARY_PROFILE=appstudio`, `NOTARIZE=0` (the make targets set it to `1`). The
+zip lands in `dist/macos/`.
+
+**Notarizing needs a one-time credential**, stored in the Keychain under the
+profile name the scripts look for — an App Store Connect API key, not an Apple
+ID password:
+
+```bash
+xcrun notarytool store-credentials "appstudio" \
+  --key ~/private_keys/AuthKey_XXXXXXXXXX.p8 \
+  --key-id "XXXXXXXXXX" \
+  --issuer "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+```
+
+**An unsigned build (`SIGN_IDENTITY="" ./tool/distribute_macos.sh`) reads as
+corrupt once it has been copied to another Mac** — Gatekeeper says “App Studio
+is damaged and can't be opened”, which is quarantine rather than actual damage.
+`xattr -cr "/Applications/App Studio.app"` clears it. Prefer shipping a notarized
+build; this is for a build that never leaves the machine.
 
 **Artifact is a `.zip`, not a DMG.** Built with `ditto -c -k --keepParent` —
 plain `zip` mangles symlinks and the CEF framework is full of them. The app is

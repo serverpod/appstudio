@@ -1,19 +1,25 @@
 #!/usr/bin/env bash
-# Download a web-focused Flutter SDK into the project toolchain/.
-# Expects a prebuilt Serverpod CLI bundle already at:
+# Builds the toolchain/ trees that publish_toolchain.sh uploads.
+#
+# Downloads a web-focused Flutter SDK (which carries the Dart SDK) into:
+#   toolchain/flutter/<version>/
+# Copies the Serverpod CLI from this Mac's `dart install` bundle into:
 #   toolchain/serverpod_cli/<version>/{bin,lib}
 # Downloads OpenCode CLI (darwin-arm64 only) into:
 #   toolchain/opencode/<version>/opencode
 # Downloads portable Git (dugite-native) into:
 #   toolchain/git/<version>/{bin,libexec,...}
-# Copies real otool + install_name_tool from the build Mac's Xcode into:
+# Installs otool + install_name_tool from an official LLVM release into:
 #   toolchain/llvm-tools/<version>/bin
+#
+# --only= builds a subset. Tools left out keep whatever active.json already
+# pins, so a partial run cannot rewrite a pin for a tree it never touched.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_DIR="${OUT_DIR:-$ROOT_DIR/toolchain}"
 FLUTTER_VERSION="${FLUTTER_VERSION:-3.44.2}"
-SERVERPOD_CLI_VERSION="${SERVERPOD_CLI_VERSION:-4.0.0-beta.1}"
+SERVERPOD_CLI_VERSION="${SERVERPOD_CLI_VERSION:-4.0.0-beta.2}"
 OPENCODE_VERSION="${OPENCODE_VERSION:-1.18.4}"
 # dugite-native release tag without leading "v" (GitHub Desktop portable Git).
 GIT_VERSION="${GIT_VERSION:-2.53.0-3}"
@@ -21,21 +27,61 @@ GIT_VERSION="${GIT_VERSION:-2.53.0-3}"
 # Apache-2.0 WITH LLVM-exception, so redistribution is unambiguous.
 LLVM_VERSION="${LLVM_VERSION:-20.1.8}"
 FORCE="${FORCE:-0}"
+ONLY="${ONLY:-}"
+
+usage() {
+  echo "Usage: $0 [--force] [--only=IDS] [--flutter=VERSION]" >&2
+  echo "          [--serverpod=VERSION] [--opencode=VERSION] [--git=VERSION]" >&2
+  echo "  --only= comma-separated: flutter,serverpod_cli,opencode,git,llvm-tools" >&2
+}
 
 for arg in "$@"; do
   case "$arg" in
     --force) FORCE=1 ;;
+    --only=*) ONLY="${arg#*=}" ;;
     --flutter=*) FLUTTER_VERSION="${arg#*=}" ;;
     --serverpod=*) SERVERPOD_CLI_VERSION="${arg#*=}" ;;
     --opencode=*) OPENCODE_VERSION="${arg#*=}" ;;
     --git=*) GIT_VERSION="${arg#*=}" ;;
+    --llvm=*) LLVM_VERSION="${arg#*=}" ;;
     *)
       echo "Unknown argument: $arg" >&2
-      echo "Usage: $0 [--force] [--flutter=VERSION] [--serverpod=VERSION] [--opencode=VERSION] [--git=VERSION]" >&2
+      usage
       exit 1
       ;;
   esac
 done
+
+wants() {
+  [[ -z "$ONLY" ]] && return 0
+  [[ ",$ONLY," == *",$1,"* ]]
+}
+
+for id in ${ONLY//,/ }; do
+  case "$id" in
+    flutter|serverpod_cli|opencode|git|llvm-tools) ;;
+    *) echo "Unknown tool in --only: $id" >&2; usage; exit 1 ;;
+  esac
+done
+
+# A tool left out of --only keeps the version active.json already pins. Falling
+# back to this script's defaults instead would silently reset a pin to whatever
+# the file happened to be written with, and point the directory checks below at
+# a tree that was never built.
+pinned() {
+  local key="$1"
+  [[ -f "$OUT_DIR/active.json" ]] || return 1
+  python3 -c "import json;print(json.load(open('$OUT_DIR/active.json')).get('$1',''))" \
+    2>/dev/null | grep . || return 1
+}
+
+if [[ -n "$ONLY" ]]; then
+  wants flutter      || FLUTTER_VERSION="$(pinned flutter || echo "$FLUTTER_VERSION")"
+  wants serverpod_cli || SERVERPOD_CLI_VERSION="$(pinned serverpod_cli || echo "$SERVERPOD_CLI_VERSION")"
+  wants opencode     || OPENCODE_VERSION="$(pinned opencode || echo "$OPENCODE_VERSION")"
+  wants git          || GIT_VERSION="$(pinned git || echo "$GIT_VERSION")"
+  wants llvm-tools   || LLVM_VERSION="$(pinned llvm_tools || echo "$LLVM_VERSION")"
+fi
 
 HOST_ARCH="$(uname -m)"
 case "$HOST_ARCH" in
@@ -75,21 +121,56 @@ echo "    llvm-tools $LLVM_VERSION — otool + install_name_tool (no CLT stubs, 
 
 mkdir -p "$OUT_DIR"
 
-if [[ ! -x "$SERVERPOD_DIR/bin/serverpod" ]]; then
-  echo "Missing Serverpod CLI bundle at:" >&2
-  echo "  $SERVERPOD_DIR/bin/serverpod" >&2
-  echo "Copy the full dart-install bundle into toolchain/serverpod_cli/<version>/:" >&2
-  echo "  bin/serverpod" >&2
-  echo "  lib/   (sqlite dylibs, etc.)" >&2
-  exit 1
-fi
-if [[ ! -d "$SERVERPOD_DIR/lib" ]]; then
-  echo "Missing Serverpod CLI lib/ directory (sqlite dylibs) at:" >&2
-  echo "  $SERVERPOD_DIR/lib" >&2
-  exit 1
+# There is no download for the Serverpod CLI — pub does not publish a macOS
+# archive — so the toolchain copy is taken from what `dart install` unpacked on
+# this Mac. That is the same bundle the release engineer already runs.
+DART_APP_BUNDLES="$HOME/Library/Application Support/Dart/install/app-bundles"
+
+stage_serverpod_from_local_install() {
+  local src="$DART_APP_BUNDLES/serverpod_cli/hosted/$SERVERPOD_CLI_VERSION/bundle"
+  if [[ ! -x "$src/bin/serverpod" || ! -d "$src/lib" ]]; then
+    echo "No local Serverpod CLI $SERVERPOD_CLI_VERSION to copy from." >&2
+    echo "  expected: $src/{bin,lib}" >&2
+    echo "Install it first, then re-run:" >&2
+    echo "  dart install serverpod_cli $SERVERPOD_CLI_VERSION" >&2
+    exit 1
+  fi
+
+  echo "==> Copying Serverpod CLI $SERVERPOD_CLI_VERSION from the local install"
+  echo "    $src"
+  rm -rf "$SERVERPOD_DIR"
+  mkdir -p "$SERVERPOD_DIR"
+  # ditto, not cp -R: it carries the code signature and the exec bits across
+  # intact, and the published archive is signature-verified on the far end.
+  ditto "$src/bin" "$SERVERPOD_DIR/bin"
+  ditto "$src/lib" "$SERVERPOD_DIR/lib"
+  # The version directory is tracked in git even though its contents are not,
+  # so the tree exists in a fresh clone.
+  : > "$SERVERPOD_DIR/.gitkeep"
+
+  # The install path carries a version but the binary is the authority. Without
+  # this check a mistyped --serverpod publishes an archive whose name, pin and
+  # manifest entry all disagree with what is inside it.
+  local reported
+  reported="$("$SERVERPOD_DIR/bin/serverpod" --version 2>/dev/null | head -1 || true)"
+  if [[ "$reported" != *"$SERVERPOD_CLI_VERSION"* ]]; then
+    echo "Copied CLI reports '$reported', expected $SERVERPOD_CLI_VERSION" >&2
+    exit 1
+  fi
+  echo "    $reported"
+}
+
+if wants serverpod_cli; then
+  if [[ -x "$SERVERPOD_DIR/bin/serverpod" && -d "$SERVERPOD_DIR/lib" && "$FORCE" != "1" ]]; then
+    echo "==> Serverpod CLI $SERVERPOD_CLI_VERSION already present (pass --force to recopy)"
+  else
+    stage_serverpod_from_local_install
+  fi
 fi
 
-if [[ -x "$FLUTTER_DIR/bin/flutter" && "$FORCE" != "1" ]]; then
+if ! wants flutter; then
+  echo "==> Skipping Flutter (not selected); keeping pinned $FLUTTER_VERSION"
+elif [[ -x "$FLUTTER_DIR/bin/flutter" && "$FORCE" != "1" ]]; then
   echo "==> Flutter $FLUTTER_VERSION already present (pass --force to redownload)"
 else
   TMP_DIR="$(mktemp -d)"
@@ -110,12 +191,14 @@ fi
 export FLUTTER_ROOT="$FLUTTER_DIR"
 export PATH="$FLUTTER_DIR/bin:$PATH"
 
-echo "==> Precaching web artifacts"
-(
-  cd "$FLUTTER_DIR"
-  # Do not run `flutter config --no-enable-*` — those write global user settings.
-  flutter precache --web
-)
+precache_flutter_web() {
+  echo "==> Precaching web artifacts"
+  (
+    cd "$FLUTTER_DIR"
+    # Do not run `flutter config --no-enable-*` — those write global user settings.
+    flutter precache --web
+  )
+}
 
 strip_flutter_for_web() {
   local flutter_dir="$1"
@@ -157,13 +240,17 @@ strip_flutter_for_web() {
   fi
 }
 
-strip_flutter_for_web "$FLUTTER_DIR"
-
-echo "==> Ensuring flutter_tools snapshot stays valid on other Macs"
-bash "$ROOT_DIR/tool/ensure_flutter_tools_cache.sh" "$FLUTTER_DIR"
+if wants flutter; then
+  precache_flutter_web
+  strip_flutter_for_web "$FLUTTER_DIR"
+  echo "==> Ensuring flutter_tools snapshot stays valid on other Macs"
+  bash "$ROOT_DIR/tool/ensure_flutter_tools_cache.sh" "$FLUTTER_DIR"
+fi
 
 # Portable Git (avoids Apple's /usr/bin/git CLT stub on target Macs)
-if [[ -x "$GIT_DIR/bin/git" && "$FORCE" != "1" ]]; then
+if ! wants git; then
+  echo "==> Skipping Git (not selected); keeping pinned $GIT_VERSION"
+elif [[ -x "$GIT_DIR/bin/git" && "$FORCE" != "1" ]]; then
   echo "==> Git $GIT_VERSION already present (pass --force to redownload)"
 else
   TMP_DIR="$(mktemp -d)"
@@ -202,7 +289,9 @@ PY
 fi
 
 # OpenCode: darwin-arm64 only
-if [[ "$HOST_ARCH" != "arm64" ]]; then
+if ! wants opencode; then
+  echo "==> Skipping OpenCode (not selected); keeping pinned $OPENCODE_VERSION"
+elif [[ "$HOST_ARCH" != "arm64" ]]; then
   echo "==> Skipping OpenCode download (arm64 hosts only)"
 elif [[ -x "$OPENCODE_DIR/opencode" && "$FORCE" != "1" ]]; then
   echo "==> OpenCode $OPENCODE_VERSION already present (pass --force to redownload)"
@@ -238,7 +327,9 @@ fi
 #
 # Both are argv[0]-dispatching aliases, so they are installed under the Apple
 # names and behave accordingly.
-if [[ -x "$LLVM_DIR/bin/otool" && -x "$LLVM_DIR/bin/install_name_tool" && "$FORCE" != "1" ]]; then
+if ! wants llvm-tools; then
+  echo "==> Skipping llvm-tools (not selected); keeping pinned $LLVM_VERSION"
+elif [[ -x "$LLVM_DIR/bin/otool" && -x "$LLVM_DIR/bin/install_name_tool" && "$FORCE" != "1" ]]; then
   echo "==> llvm-tools already present (pass --force to re-download)"
 else
   echo "==> Downloading LLVM $LLVM_VERSION (~1.4 GB, for two binaries)"
@@ -284,6 +375,7 @@ read -r -d '' WRAPPER_ENV <<'EOF' || true
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FLUTTER_VER="$(tr -d '[:space:]' < "$ROOT/pins/flutter")"
 GIT_VER="$(tr -d '[:space:]' < "$ROOT/pins/git" 2>/dev/null || true)"
+LLVM_VER="$(tr -d '[:space:]' < "$ROOT/pins/llvm_tools" 2>/dev/null || true)"
 export FLUTTER_ROOT="$ROOT/flutter/$FLUTTER_VER"
 ENGINE_VERSION_FILE="$FLUTTER_ROOT/bin/internal/engine.version"
 if [[ -f "$ENGINE_VERSION_FILE" ]]; then
@@ -301,9 +393,11 @@ if [[ -n "$GIT_VER" && -x "$ROOT/git/$GIT_VER/bin/git" ]]; then
   fi
   export PATH="$GIT_HOME/bin:$PATH"
 fi
-# Real otool / install_name_tool ahead of /usr/bin CLT stubs.
-if [[ -x "$ROOT/llvm-tools/$LLVM_VERSION/bin/otool" ]]; then
-  export PATH="$ROOT/llvm-tools/$LLVM_VERSION/bin:$PATH"
+# Real otool / install_name_tool ahead of /usr/bin CLT stubs. Read from the pin
+# at runtime like flutter and git — this heredoc is quoted, so a generation-time
+# variable would land in the wrapper unexpanded and die under `set -u`.
+if [[ -n "$LLVM_VER" && -x "$ROOT/llvm-tools/$LLVM_VER/bin/otool" ]]; then
+  export PATH="$ROOT/llvm-tools/$LLVM_VER/bin:$PATH"
 fi
 EOF
 
@@ -335,8 +429,8 @@ export PATH="\$CLI_HOME/bin:\$PATH"
 if [[ -n "\${GIT_HOME:-}" ]]; then
   export PATH="\$GIT_HOME/bin:\$PATH"
 fi
-if [[ -x "\$ROOT/llvm-tools/$LLVM_VERSION/bin/otool" ]]; then
-  export PATH="\$ROOT/llvm-tools/\$LLVM_PIN/bin:\$PATH"
+if [[ -n "\${LLVM_VER:-}" && -x "\$ROOT/llvm-tools/\$LLVM_VER/bin/otool" ]]; then
+  export PATH="\$ROOT/llvm-tools/\$LLVM_VER/bin:\$PATH"
 fi
 exec "\$SERVERPOD" "\$@"
 EOF
@@ -372,20 +466,43 @@ EOF
 
 chmod +x "$BIN_DIR/flutter" "$BIN_DIR/dart" "$BIN_DIR/serverpod" "$BIN_DIR/opencode" "$BIN_DIR/git"
 
+# Every check is guarded: a --only run leaves the other trees untouched, and
+# they may legitimately not be here at all.
+#
+# Output is captured before it is trimmed, never piped straight into `head`.
+# `head` closes the pipe on its Nth line, and `flutter --version` prints more
+# than that — the SIGPIPE surfaces as a Dart stack trace and, under `pipefail`,
+# as a failed run of an otherwise perfectly good toolchain.
+show() {
+  local lines="$1"; shift
+  local out
+  out="$("$@" 2>/dev/null || true)"
+  [[ -n "$out" ]] && printf '%s\n' "$out" | head -"$lines"
+  return 0
+}
+
+# Only what this run actually built is exercised. Running a tool writes to its
+# own tree — `flutter --version` alone rewrites several files under bin/cache —
+# and publish_toolchain.sh recognises an unchanged archive by its hash, so
+# verifying an untouched Flutter here would cost it a fresh build number and a
+# 673 MB upload on the next publish, for nothing.
 echo "==> Verifying"
-"$BIN_DIR/serverpod" --version | head -3
-if [[ -x "$BIN_DIR/git" ]]; then
-  "$BIN_DIR/git" --version | head -1
+if wants serverpod_cli && [[ -x "$SERVERPOD_DIR/bin/serverpod" ]]; then
+  show 3 "$BIN_DIR/serverpod" --version
 fi
-if [[ -x "$LLVM_DIR/bin/otool" ]]; then
-  PATH="$LLVM_DIR/bin:/usr/bin:/bin" "$LLVM_DIR/bin/otool" -D \
-    "$SERVERPOD_DIR/lib/libsqlite3_connection_pool.dylib" | head -2
+if wants git && [[ -x "$GIT_DIR/bin/git" ]]; then
+  show 1 "$BIN_DIR/git" --version
 fi
-if [[ -x "$BIN_DIR/flutter" && -x "$FLUTTER_DIR/bin/flutter" ]]; then
-  "$BIN_DIR/flutter" --version | head -3
+if wants llvm-tools && [[ -x "$LLVM_DIR/bin/otool" ]] \
+    && [[ -f "$SERVERPOD_DIR/lib/libsqlite3_connection_pool.dylib" ]]; then
+  show 2 env PATH="$LLVM_DIR/bin:/usr/bin:/bin" "$LLVM_DIR/bin/otool" -D \
+    "$SERVERPOD_DIR/lib/libsqlite3_connection_pool.dylib"
 fi
-if [[ -x "$BIN_DIR/opencode" ]]; then
-  "$BIN_DIR/opencode" --version | head -3
+if wants flutter && [[ -x "$BIN_DIR/flutter" && -x "$FLUTTER_DIR/bin/flutter" ]]; then
+  show 3 "$BIN_DIR/flutter" --version
+fi
+if wants opencode && [[ -x "$OPENCODE_DIR/opencode" ]]; then
+  show 3 "$BIN_DIR/opencode" --version
 fi
 
 echo "==> Done"

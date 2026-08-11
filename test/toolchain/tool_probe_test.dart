@@ -195,13 +195,13 @@ void main() {
         );
 
     test('accepts the pinned Serverpod', () {
-      expect(run(detected: '4.0.0-beta.1').fitness, ToolFitness.satisfied);
+      expect(run(detected: '4.0.0-beta.2').fitness, ToolFitness.satisfied);
     });
 
     test('rejects the host Serverpod that is actually installed here', () {
       final verdict = run(detected: '3.5.0-beta.7');
       expect(verdict.fitness, ToolFitness.wrongVersion);
-      expect(verdict.reason, '3.5.0-beta.7 (needs >=4.0.0-beta.1 <4.1.0)');
+      expect(verdict.reason, '3.5.0-beta.7 (needs >=4.0.0-beta.2 <4.1.0)');
     });
 
     test('a CLT shim is flagged, never run', () {
@@ -212,7 +212,7 @@ void main() {
 
     test('missing native libraries read as incomplete', () {
       final verdict = run(
-        detected: '4.0.0-beta.1',
+        detected: '4.0.0-beta.2',
         incompleteReason: 'native libraries (lib/) are missing',
       );
       expect(verdict.fitness, ToolFitness.incomplete);

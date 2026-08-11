@@ -10,9 +10,22 @@
 # overwriting. This also means a mistaken publish cannot be undone with the
 # publisher role alone — check --dry-run output first.
 #
+# Running it twice in a row is safe. Archives are packed reproducibly and each
+# one is published alongside a .sha256 sidecar, so a rerun can tell "already
+# published, byte for byte" from "same version, different bytes":
+#
+#   free path        -> upload there
+#   taken, same sha  -> reuse it, upload nothing
+#   taken, other sha -> try the next build number
+#
+# so the full run always converges on a manifest that describes exactly what is
+# in the bucket, whether or not anything actually changed.
+#
 # Usage:
 #   tool/publish_toolchain.sh [--dry-run] [--only=flutter,git] [--build=N]
 #                             [--bucket=NAME] [--impersonate-service-account=SA]
+#
+# --build=N sets the lowest build number to consider, not a fixed one.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -115,6 +128,34 @@ for entry in "${COLLECTED[@]}"; do
   fi
 done
 
+# Both probes read the bucket over plain HTTPS rather than through gcloud, so a
+# --dry-run reports the same decision an authenticated run would take.
+object_exists() {
+  curl -fsI -o /dev/null "$BASE_URL$1"
+}
+
+published_sha() {
+  curl -fsSL "$BASE_URL$1.sha256" 2>/dev/null | awk '{print $1}'
+}
+
+# Finds where this archive belongs. Sets RESOLVED_{PATH,BUILD,ACTION}.
+resolve_target() {
+  local id="$1" version="$2" archive_name="$3" sha="$4"
+  local n="$BUILD" path
+  while (( n <= 99 )); do
+    path="tools/$id/$version/b$n/$archive_name"
+    if ! object_exists "$path"; then
+      RESOLVED_PATH="$path"; RESOLVED_BUILD="$n"; RESOLVED_ACTION="upload"; return 0
+    fi
+    if [[ -n "$sha" && "$(published_sha "$path")" == "$sha" ]]; then
+      RESOLVED_PATH="$path"; RESOLVED_BUILD="$n"; RESOLVED_ACTION="reuse"; return 0
+    fi
+    n=$(( n + 1 ))
+  done
+  echo "No free build number for $id $version between b$BUILD and b99" >&2
+  exit 1
+}
+
 echo
 echo "==> Packing"
 ENTRIES_JSON="$STAGING/entries.json"
@@ -125,26 +166,33 @@ for entry in "${COLLECTED[@]}"; do
 
   archive_name="$id-$PLATFORM.tar.gz"
   archive="$STAGING/$archive_name"
-  object_path="tools/$id/$version/b$BUILD/$archive_name"
 
   parent="$(dirname "$source_dir")"
   base="$(basename "$source_dir")"
 
   # --no-mac-metadata keeps ._* AppleDouble entries out. Mach-O signatures live
   # inside the file and survive the round trip; the smoke test below proves it.
-  tar --no-mac-metadata -czf "$archive" -C "$parent" "$base"
+  #
+  # `gzip -n`, not tar's own -z: gzip stamps the current time into its header
+  # unless told not to, which makes two packs of one untouched tree differ and
+  # leaves the reuse check below unable to recognise its own work.
+  tar --no-mac-metadata -cf - -C "$parent" "$base" | gzip -n >"$archive"
 
   download_bytes="$(stat -f %z "$archive")"
   installed_kb="$(du -sk "$source_dir" | awk '{print $1}')"
   installed_bytes=$((installed_kb * 1024))
   sha="$(shasum -a 256 "$archive" | awk '{print $1}')"
 
-  printf '%s|%s|%s|%s|%s|%s|%s\n' \
-    "$id" "$version" "$object_path" "$sha" "$download_bytes" "$installed_bytes" "$base" \
+  resolve_target "$id" "$version" "$archive_name" "$sha"
+
+  printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
+    "$id" "$version" "$RESOLVED_PATH" "$sha" "$download_bytes" "$installed_bytes" \
+    "$base" "$RESOLVED_BUILD" "$RESOLVED_ACTION" \
     >>"$ENTRIES_JSON"
 
-  printf '  %-14s %-14s %10s  ->  %s\n' \
-    "$id" "$version" "$(du -h "$archive" | awk '{print $1}')" "$object_path"
+  printf '  %-14s %-14s %10s  %-7s ->  %s\n' \
+    "$id" "$version" "$(du -h "$archive" | awk '{print $1}')" \
+    "$RESOLVED_ACTION" "$RESOLVED_PATH"
 done
 
 echo
@@ -154,19 +202,33 @@ if [[ "$DRY_RUN" == "1" ]]; then
 fi
 
 echo "==> Uploading to gs://$BUCKET"
-while IFS='|' read -r id version object_path sha download_bytes installed_bytes base; do
+while IFS='|' read -r id version object_path sha download_bytes installed_bytes base build action; do
+  if [[ "$action" == "reuse" ]]; then
+    echo "  unchanged $object_path (already published)"
+    continue
+  fi
   archive="$STAGING/$id-$PLATFORM.tar.gz"
   # --if-generation-match=0 means "only if this object does not exist".
   gcloud_storage cp "$archive" "gs://$BUCKET/$object_path" \
     --if-generation-match=0 \
     --cache-control="public, max-age=31536000, immutable" \
     --content-type="application/gzip"
+  # The sidecar is what makes a rerun idempotent, and it is written after the
+  # archive so it can never advertise bytes that failed to upload.
+  printf '%s  %s\n' "$sha" "$(basename "$object_path")" >"$STAGING/$id.sha256"
+  gcloud_storage cp "$STAGING/$id.sha256" "gs://$BUCKET/$object_path.sha256" \
+    --if-generation-match=0 \
+    --cache-control="public, max-age=31536000, immutable" \
+    --content-type="text/plain"
   echo "  uploaded $object_path"
 done <"$ENTRIES_JSON"
 
 echo
-echo "==> Verifying uploads (re-download and re-hash)"
-while IFS='|' read -r id version object_path sha download_bytes installed_bytes base; do
+echo "==> Verifying (re-download and re-hash)"
+# Reused objects are re-verified too. The sidecar is only a claim about the
+# bytes; this is the check that the bytes themselves are what the manifest is
+# about to promise.
+while IFS='|' read -r id version object_path sha download_bytes installed_bytes base build action; do
   check="$STAGING/verify-$id.tar.gz"
   curl -fsSL "$BASE_URL$object_path" -o "$check"
   actual="$(shasum -a 256 "$check" | awk '{print $1}')"
@@ -174,16 +236,16 @@ while IFS='|' read -r id version object_path sha download_bytes installed_bytes 
     echo "  MISMATCH for $object_path: expected $sha, got $actual" >&2
     exit 1
   fi
-  echo "  ok $id"
+  echo "  ok $id ($action)"
   rm -f "$check"
 done <"$ENTRIES_JSON"
 
 echo
 echo "==> Writing $MANIFEST_FILE"
-python3 - "$MANIFEST_FILE" "$ENTRIES_JSON" "$PLATFORM" "$BUILD" "$BASE_URL" <<'PYTHON'
+python3 - "$MANIFEST_FILE" "$ENTRIES_JSON" "$PLATFORM" "$BASE_URL" <<'PYTHON'
 import json, sys, datetime
 
-manifest_path, entries_path, platform, build, base_url = sys.argv[1:6]
+manifest_path, entries_path, platform, base_url = sys.argv[1:5]
 
 with open(manifest_path) as f:
     manifest = json.load(f)
@@ -194,33 +256,54 @@ with open(entries_path) as f:
         line = line.strip()
         if not line:
             continue
-        tool_id, version, path, sha, download, installed, base = line.split('|')
+        tool_id, version, path, sha, download, installed, base, build, action = line.split('|')
         by_id[tool_id] = {
-            'path': path,
-            'sha256': sha,
-            'downloadBytes': int(download),
-            'installedBytes': int(installed),
-            'format': 'tar.gz',
-            # One top-level directory in the archive.
-            'stripComponents': 1,
+            'version': version,
+            'build': int(build),
+            'platform': {
+                'path': path,
+                'sha256': sha,
+                'downloadBytes': int(download),
+                'installedBytes': int(installed),
+                'format': 'tar.gz',
+                'stripComponents': 1,
+            },
         }
 
 manifest['baseUrl'] = base_url
 manifest['manifestId'] = datetime.datetime.now(datetime.UTC).strftime('%Y.%m.%d.%H%M')
 
+floors = []
 for tool in manifest['tools']:
     entry = by_id.get(tool['id'])
     if entry is None:
         continue
-    tool['build'] = int(build)
-    tool.setdefault('platforms', {})[platform] = entry
+    # version and installDir are packaging facts, derived from active.json
+    # exactly like the object path. Leaving them to be hand-edited is how a
+    # manifest ends up naming one version and downloading another.
+    tool['version'] = entry['version']
+    tool['build'] = entry['build']
+    tool['installDir'] = f"{tool['id']}/{entry['version']}"
+    tool.setdefault('platforms', {})[platform] = entry['platform']
+
+    floors.append((tool['id'], entry['version'], tool.get('hostAccepts', '')))
 
 manifest.pop('_note', None)
 with open(manifest_path, 'w') as f:
     json.dump(manifest, f, indent=2)
     f.write('\n')
 
-print(f'  {len(by_id)} tool(s) published for {platform}')
+print(f'  {len(by_id)} tool(s) written for {platform}')
+
+# hostAccepts is policy, not packaging, so it is never rewritten here. Whether a
+# floor is stale is a judgement call — a loose range is deliberate for Flutter,
+# Git and OpenCode, and only sometimes wrong for the Serverpod CLI — so this
+# prints the two side by side and leaves the call to the engineer. A rule that
+# guessed would either cry wolf on every publish or need its own copy of the
+# prerelease version algebra in tool_version.dart, free to disagree with it.
+print('  version floors (hostAccepts is never rewritten — raise it by hand):')
+for tool_id, version, accepts in floors:
+    print(f'    {tool_id:<14} publishing {version:<14} floor {accepts}')
 PYTHON
 
 echo

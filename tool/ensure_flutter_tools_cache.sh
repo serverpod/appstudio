@@ -33,14 +33,22 @@ if [[ ! -d "$FLUTTER_DIR/.git" ]]; then
   exit 1
 fi
 
+# Every write below is conditional, so a second run over an already-correct tree
+# changes nothing at all — not even an mtime. publish_toolchain.sh runs this
+# immediately before packing and recognises an unchanged archive by its hash, so
+# an unconditional `touch` here would re-publish the whole 673 MB SDK on every
+# run purely because this script had been over it again.
+
 # Prefer bundled git if the caller put it on PATH; otherwise system git.
 REVISION="$(git -C "$FLUTTER_DIR" rev-parse HEAD)"
 # Match shared.sh compilekey when FLUTTER_TOOL_ARGS is unset.
-printf '%s:\n' "$REVISION" > "$STAMP"
+if [[ ! -f "$STAMP" || "$(cat "$STAMP")" != "$REVISION:" ]]; then
+  printf '%s:\n' "$REVISION" > "$STAMP"
+fi
 
 # Ensure lock is newer than yaml so the -nt rebuild check stays false after
 # archive extract (DMG/ditto often scramble relative mtimes).
-if [[ -f "$TOOLS/pubspec.lock" ]]; then
+if [[ -f "$TOOLS/pubspec.lock" && "$TOOLS/pubspec.yaml" -nt "$TOOLS/pubspec.lock" ]]; then
   touch "$TOOLS/pubspec.lock"
 fi
 
