@@ -883,16 +883,19 @@ button — now an expand icon — is the way back.
   geometry application clamps the scale so the whole window fits the visible
   screen.
 - **Move and resize are tracked natively, not with Dart deltas** — Dart
-  gestures would measure against a window that is moving under them. Edge
-  handles call `startDrag`, which hands `NSApp.currentEvent` to
-  `performDrag(with:)`; corner handles call `startResize`, a local
-  `NSEvent` monitor that anchors the opposite corner and swallows the drag
-  events until mouse-up. Corner names cross the channel in UI (top-left
-  origin) terms; the Swift side flips them for screen coordinates. **The new
-  width is start width + mouse travel, never mouse-to-anchor distance** — the
-  grab lands tens of points inside the corner handle, and anchor-distance
-  sizing snapped the window smaller by exactly that inset on the first drag
-  event.
+  gestures would measure against a window that is moving under them. Both run
+  a local `NSEvent` monitor that swallows the drag events until mouse-up.
+  **Not `performDrag(with:)`** — that hands the move to the window server,
+  which enforces the stop-at-the-menu-bar rule itself and never consults
+  `constrainFrameRect`, so the transparent top margin kept the bezel from ever
+  reaching the top of the screen; the monitor's `setFrameOrigin` is
+  unconstrained and the only clamp is ours (bezel to the visible top of the
+  display under the mouse, margin past it). Corner names cross the channel in
+  UI (top-left origin) terms; the Swift side flips them for screen
+  coordinates. **The new width is start width + mouse travel, never
+  mouse-to-anchor distance** — the grab lands tens of points inside the corner
+  handle, and anchor-distance sizing snapped the window smaller by exactly
+  that inset on the first drag event.
 - **The corners' diagonal resize cursor is AppKit's, not Flutter's.** The
   macOS engine maps no diagonal `SystemMouseCursors` (they fall back to the
   arrow), so corner hover asks the native side for
@@ -917,6 +920,21 @@ button — now an expand icon — is the way back.
   before the project notices, so closing or switching projects always comes
   back to the full window. Native calls are fire-and-forget with a logged
   catch — a window that failed to go transparent is cosmetic, not fatal.
+- **Any route pushed over the compact window expands it first**
+  (`CompactDialogYield`, a `NavigatorObserver` on `ShadApp`). Dialogs are
+  sized for the full shell — they overflow the phone-sized window, some
+  breaking its layout — and their blurred barrier has nothing to blur on a
+  transparent window. The menu bar stays fully live in compact mode, so this
+  cannot be prevented at the sources; the navigator is the one funnel. The
+  expand is deferred a microtask (observers run inside the navigator's
+  mutation) and still lands before the route's first frame. Deliberately
+  one-way: re-minimizing on close collides with everything else that pops
+  routes (project switches clear the stack), and one click re-minimizes.
+- **`constrainFrameRect` is overridden while compact** to allow exactly the
+  transparent margin past the visible top. AppKit stops a dragged window's top
+  at the menu bar, and the compact window's top `kCompactFrameMargin` is
+  shadow room — without the override the visible bezel stopped that far short
+  of the top of the screen.
 - `test/preview/preview_mode_controller_test.dart` pins the mode transitions
   against `FakeCompactWindow` (`test/support/fake_compact_window.dart`),
   including the two subtle ones: compact → desktop restores the window but

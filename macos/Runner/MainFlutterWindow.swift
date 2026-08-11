@@ -64,12 +64,33 @@ class MainFlutterWindow: NSWindow {
   private var compactSaved: CompactSavedState?
   private var compactGeometry: CompactGeometry?
   private var compactResizeMonitor: Any?
+  private var compactDragMonitor: Any?
 
   /// Borderless windows refuse key/main status by default, which would leave
   /// the compact preview unable to take keyboard input. Always-true is what a
   /// titled window answers anyway.
   override var canBecomeKey: Bool { true }
   override var canBecomeMain: Bool { true }
+
+  /// AppKit stops a dragged window's top at the menu bar — but the compact
+  /// window's top `kCompactFrameMargin` is transparent shadow room, so the
+  /// *visible* frame stopped that far short of the top of the screen. While
+  /// compact, allow exactly that margin past the visible top: the frame's
+  /// bezel can reach the screen edge, and no further.
+  override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+    guard compactSaved != nil, let geometry = compactGeometry else {
+      return super.constrainFrameRect(frameRect, to: screen)
+    }
+    var rect = frameRect
+    let margin = geometry.chromeWidth / 2
+    if let visible = (screen ?? self.screen)?.visibleFrame {
+      let maxTop = visible.maxY + margin
+      if rect.maxY > maxTop {
+        rect.origin.y = maxTop - rect.height
+      }
+    }
+    return rect
+  }
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -234,6 +255,7 @@ class MainFlutterWindow: NSWindow {
 
   private func exitCompact() {
     endCompactResizeTracking()
+    endCompactDragTracking()
     guard let saved = compactSaved else { return }
     compactSaved = nil
     compactGeometry = nil
@@ -248,12 +270,58 @@ class MainFlutterWindow: NSWindow {
     makeKeyAndOrderFront(nil)
   }
 
-  /// Hands the in-flight mouse-down/drag to AppKit, which then moves the
-  /// window itself — Dart-side deltas would be measured against a window that
-  /// is moving underneath them.
+  /// Moves the window with a local event monitor, mirroring the resize.
+  ///
+  /// Not `performDrag(with:)`: that hands the move to the window server,
+  /// which enforces the stop-at-the-menu-bar rule itself and never consults
+  /// `constrainFrameRect` — so the transparent top margin kept the bezel from
+  /// ever reaching the top of the screen, override or not. Tracking the move
+  /// here, `setFrameOrigin` is unconstrained and the only clamp is our own:
+  /// the bezel may touch the visible top, and the margin alone goes past it.
   private func startCompactDrag() {
-    guard let event = NSApp.currentEvent else { return }
-    performDrag(with: event)
+    guard let geometry = compactGeometry else { return }
+    endCompactDragTracking()
+
+    let startOrigin = frame.origin
+    let startMouse = NSEvent.mouseLocation
+    let windowHeight = frame.height
+    let margin = geometry.chromeWidth / 2
+
+    compactDragMonitor = NSEvent.addLocalMonitorForEvents(
+      matching: [.leftMouseDragged, .leftMouseUp]
+    ) { [weak self] event in
+      guard let self else { return event }
+      if event.type == .leftMouseUp {
+        self.endCompactDragTracking()
+        return event
+      }
+      let mouse = NSEvent.mouseLocation
+      var origin = NSPoint(
+        x: startOrigin.x + (mouse.x - startMouse.x),
+        y: startOrigin.y + (mouse.y - startMouse.y)
+      )
+      // Clamp against the display the mouse is on, so a drag onto a second
+      // screen honours that screen's top.
+      let screenUnderMouse = NSScreen.screens.first {
+        NSMouseInRect(mouse, $0.frame, false)
+      }
+      if let visible = (screenUnderMouse ?? self.screen)?.visibleFrame {
+        let maxTop = visible.maxY + margin
+        if origin.y + windowHeight > maxTop {
+          origin.y = maxTop - windowHeight
+        }
+      }
+      self.setFrameOrigin(origin)
+      // Swallow the drag: Flutter already handed this gesture over.
+      return nil
+    }
+  }
+
+  private func endCompactDragTracking() {
+    if let monitor = compactDragMonitor {
+      NSEvent.removeMonitor(monitor)
+      compactDragMonitor = nil
+    }
   }
 
   /// Aspect-locked resize from one corner, tracked with a local event monitor

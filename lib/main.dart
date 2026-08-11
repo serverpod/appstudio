@@ -7,6 +7,7 @@ import 'package:shad/shad.dart';
 import 'agent/agent_controller.dart';
 import 'mcp/mcp_controller.dart';
 import 'platform/compact_window.dart';
+import 'preview/compact_dialog_yield.dart';
 import 'preview/preview_mode_controller.dart';
 import 'process/dev_session_cleanup.dart';
 import 'process/serverpod_process.dart';
@@ -117,6 +118,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
   /// The menu bar lives above [ShadApp], so dialogs it opens need the app's
   /// own navigator context.
   final _navigatorKey = GlobalKey<NavigatorState>();
+  late final _compactDialogYield = CompactDialogYield(widget.previewMode);
   MacAppMenu? _macMenu;
 
   /// Non-null once the uninstall has run; the UI never comes back.
@@ -416,6 +418,10 @@ class _AppStudioAppState extends State<AppStudioApp> {
       builder: (context, _) {
         return ShadApp(
           navigatorKey: _navigatorKey,
+          // Any dialog pushed over the compact preview expands it first —
+          // dialogs are sized for the full shell and their barrier blur has
+          // nothing to blur on a transparent window.
+          navigatorObservers: [_compactDialogYield],
           title: 'App Studio',
           debugShowCheckedModeBanner: false,
           theme: buildLightTheme(),
