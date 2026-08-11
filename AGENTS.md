@@ -840,6 +840,88 @@ install. Sparkle would also catch it, but later and less clearly.
 - **Clipboard:** off-screen browsers are not in the responder chain, so Chromium never turns ⌘X/C/V/A/Z into editing commands. They are translated to `CefFrame::Cut/Copy/Paste/…` (`WebviewHandler::sendEditCommand`). Every other ⌘ chord is left uncaptured so the app's menu bar wins.
 - **IME:** while a web input is focused, text keys go to the OS input method and come back as `imeCommitText`/`imeSetComposition`; only navigation/control keys are sent raw. Don't reattach the text input client while it is already active — that kills a live composition.
 
+### Minimized preview — the compact window
+
+The header's minimize button (a `SegmentedIconButton` beside the view/theme
+controls) strips the shell down to the preview. **Minimized means two different
+things by view mode**, and `PreviewModeController.compactWindow` is the one
+place that policy lives: in a phone mode the window itself becomes the phone
+frame — borderless, transparent, moved by dragging the frame's edges and
+resized aspect-locked from its corners, with a floating control bar (view mode,
+app theme, expand) below the frame; in desktop mode the toolbar *and* the
+server-log panel are hidden and the window is untouched — minimized is
+preview-only in every view mode, and the user's own log toggle is preserved for
+the way back. The preview header stays in desktop-minimized, so the same
+button — now an expand icon — is the way back.
+
+- **View mode, preview brightness and minimized are lifted out of
+  `PreviewPaneState`** into `PreviewModeController`
+  (`preview/preview_mode_controller.dart`), created in `main.dart`. Minimizing
+  reshapes things that live *above* the pane: `StudioShell` drops its toolbar,
+  `ShadApp` drops its opaque background, and the native window goes borderless.
+  The pane listens and reacts exactly as its old local setters did (surface
+  sync on view-mode change, theme shim on brightness change).
+- **Transparency has three layers, and all three must clear.** The native
+  window (`isOpaque = false`, clear background), the Flutter surface
+  (`FlutterViewController.backgroundColor = .clear` — the recipe is documented
+  in FlutterViewController.h), and `ShadApp`, which paints an opaque
+  `ColoredBox` behind every route — its `backgroundColor:` is set to
+  transparent while `compactWindow`, from the same `main.dart` listener. The
+  CEF surface stays backed by the preview backdrop inside the frame, so the
+  page itself never goes see-through.
+- **The compact window keeps the *frame's* aspect, not the window's.** The
+  chrome — `kCompactFrameMargin` around the frame (room for its drop shadow,
+  which would otherwise clip at the window edge — and the shadow scales with
+  the frame, so the margin carries slack beyond the ~33px resting extent) plus
+  the gap and control bar — is fixed-size, so the contract is `height =
+  chromeHeight + (width − chromeWidth) · aspectH/aspectW`.
+  `CompactWindowGeometry` carries it over the `dev.serverpod.appstudio/window`
+  channel; `MainFlutterWindow.swift` stores it and applies it on corner resizes
+  and orientation flips. **A flip carries the frame's *scale* over, never the
+  window height** — carrying the height turned a tall portrait window into a
+  landscape one wider than the screen, with its resize corners off it. Every
+  geometry application clamps the scale so the whole window fits the visible
+  screen.
+- **Move and resize are tracked natively, not with Dart deltas** — Dart
+  gestures would measure against a window that is moving under them. Edge
+  handles call `startDrag`, which hands `NSApp.currentEvent` to
+  `performDrag(with:)`; corner handles call `startResize`, a local
+  `NSEvent` monitor that anchors the opposite corner and swallows the drag
+  events until mouse-up. Corner names cross the channel in UI (top-left
+  origin) terms; the Swift side flips them for screen coordinates. **The new
+  width is start width + mouse travel, never mouse-to-anchor distance** — the
+  grab lands tens of points inside the corner handle, and anchor-distance
+  sizing snapped the window smaller by exactly that inset on the first drag
+  event.
+- **The corners' diagonal resize cursor is AppKit's, not Flutter's.** The
+  macOS engine maps no diagonal `SystemMouseCursors` (they fall back to the
+  arrow), so corner hover asks the native side for
+  `NSCursor.frameResize(position:directions:)` (macOS 15+; crosshair before).
+  The call is deferred a microtask so it lands *after* the framework's own
+  `activateSystemCursor` for that pointer update, which would otherwise paint
+  the arrow over it — and nothing resets it: the framework's next cursor
+  change is the reset.
+- **Entering compact saves the window state (`CompactSavedState`) and exiting
+  restores it** — frame, style mask, min size, opacity, shadow, both background
+  colors. `canBecomeKey`/`canBecomeMain` are overridden to `true` on
+  `MainFlutterWindow`: a borderless window otherwise refuses key status and the
+  preview would stop taking keyboard input. The window's own shadow is off in
+  compact — the frame paints its own, and AppKit would hug a second one around
+  whatever pixels happen to be opaque.
+- **The pane keeps its `GlobalKey` across the re-parent**, so the CEF webview
+  survives the layout swap instead of reloading. The compact tree builds
+  *nothing but* the pane — anything else in the shell would paint onto the
+  transparent window.
+- **A compact window never outlives its preview**: `main.dart`'s
+  `_onSessionChanged` calls `previewMode.expand()` (a no-op when not minimized)
+  before the project notices, so closing or switching projects always comes
+  back to the full window. Native calls are fire-and-forget with a logged
+  catch — a window that failed to go transparent is cosmetic, not fatal.
+- `test/preview/preview_mode_controller_test.dart` pins the mode transitions
+  against `FakeCompactWindow` (`test/support/fake_compact_window.dart`),
+  including the two subtle ones: compact → desktop restores the window but
+  stays minimized, and desktop-minimized → phone re-enters compact.
+
 ## Settings & uninstall
 
 - **One dialog, two tabs** (`ui/settings/settings_dialog.dart`): Providers and

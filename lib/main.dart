@@ -6,6 +6,8 @@ import 'package:shad/shad.dart';
 
 import 'agent/agent_controller.dart';
 import 'mcp/mcp_controller.dart';
+import 'platform/compact_window.dart';
+import 'preview/preview_mode_controller.dart';
 import 'process/dev_session_cleanup.dart';
 import 'process/serverpod_process.dart';
 import 'session/external_editors.dart';
@@ -55,6 +57,7 @@ Future<void> main() async {
     process: process,
   );
   final editors = ExternalEditorsController(session: session, process: process);
+  final previewMode = PreviewModeController(window: CompactWindowChannel());
 
   // Never blocks launch: create() swallows its own failures and reports the
   // updater as unavailable.
@@ -75,6 +78,7 @@ Future<void> main() async {
       mcp: mcp,
       editors: editors,
       updates: updates,
+      previewMode: previewMode,
     ),
   );
 }
@@ -91,6 +95,7 @@ class AppStudioApp extends StatefulWidget {
     required this.mcp,
     required this.editors,
     required this.updates,
+    required this.previewMode,
   });
 
   final ThemeController themeController;
@@ -102,6 +107,7 @@ class AppStudioApp extends StatefulWidget {
   final McpController mcp;
   final ExternalEditorsController editors;
   final UpdateController updates;
+  final PreviewModeController previewMode;
 
   @override
   State<AppStudioApp> createState() => _AppStudioAppState();
@@ -233,6 +239,10 @@ class _AppStudioAppState extends State<AppStudioApp> {
     final path = widget.session.projectPath;
     if (path == _noticedProjectPath) return;
     _noticedProjectPath = path;
+    // A compact window must not outlive the preview it was framing: closing or
+    // switching projects goes back to the full window before anything else. A
+    // no-op when not minimized.
+    widget.previewMode.expand();
     // The session can notify mid-build (closing a project rebuilds the shell),
     // and pushing a route from inside a build is illegal.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -391,13 +401,18 @@ class _AppStudioAppState extends State<AppStudioApp> {
     widget.terminal.dispose();
     widget.session.dispose();
     widget.themeController.dispose();
+    widget.previewMode.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: Listenable.merge([widget.themeController, widget.toolchains]),
+      listenable: Listenable.merge([
+        widget.themeController,
+        widget.toolchains,
+        widget.previewMode,
+      ]),
       builder: (context, _) {
         return ShadApp(
           navigatorKey: _navigatorKey,
@@ -406,6 +421,11 @@ class _AppStudioAppState extends State<AppStudioApp> {
           theme: buildLightTheme(),
           darkTheme: buildDarkTheme(),
           themeMode: widget.themeController.mode,
+          // ShadApp paints an opaque ColoredBox behind every route; in the
+          // compact preview the native window is transparent and that box is
+          // the one thing left that would hide the desktop behind the frame.
+          backgroundColor:
+              widget.previewMode.compactWindow ? Colors.transparent : null,
           home: switch (_uninstalled) {
             final result? => UninstalledScreen(result: result),
             // The teardown stops the server and the agent, which takes a
@@ -426,6 +446,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
               mcp: widget.mcp,
               editors: widget.editors,
               themeController: widget.themeController,
+              previewMode: widget.previewMode,
             ),
           },
         );

@@ -1,3 +1,4 @@
+import 'package:appstudio/preview/preview_mode_controller.dart';
 import 'package:appstudio/preview/preview_theme.dart';
 import 'package:appstudio/process/serverpod_process.dart';
 import 'package:appstudio/session/project_session.dart';
@@ -7,6 +8,7 @@ import 'package:appstudio/ui/preview_pane.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/fake_compact_window.dart';
 import 'support/toolchain_support.dart';
 import 'package:shad/shad.dart';
 
@@ -45,6 +47,7 @@ void main() {
           body: PreviewPane(
             previewUrl: Uri.parse('http://localhost:9998'),
             process: process,
+            mode: PreviewModeController(window: FakeCompactWindow()),
           ),
         ),
       ),

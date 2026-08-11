@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 import 'package:webview_cef/webview_cef.dart';
 
+import '../platform/compact_window.dart';
 import '../preview/preview_bootstrap.dart';
 import '../preview/preview_cache_purge.dart';
 import '../preview/preview_device.dart';
 import '../preview/preview_hero_gradient.dart';
+import '../preview/preview_mode_controller.dart';
 import '../preview/preview_status_overlay.dart';
 import '../preview/registration_code_toast.dart';
 import '../preview/preview_surface_sync.dart';
@@ -19,16 +21,52 @@ import '../widgets/text_segmented_control.dart';
 
 enum _PreviewHeaderLabel { preview }
 
+/// One list, used by the header bar and the compact control bar — two controls
+/// drawing the same choice differently is how they drift.
+const _viewModeSegments = [
+  IconSegment(
+    value: PreviewViewMode.phonePortrait,
+    tooltip: 'Phone preview',
+    icon: LucideIcons.smartphone,
+  ),
+  IconSegment(
+    value: PreviewViewMode.phoneLandscape,
+    tooltip: 'Phone preview (landscape)',
+    icon: LucideIcons.smartphone,
+    iconRotation: 1.5707963267948966,
+  ),
+  IconSegment(
+    value: PreviewViewMode.desktop,
+    tooltip: 'Desktop preview',
+    icon: LucideIcons.monitor,
+  ),
+];
+
+const _brightnessSegments = [
+  IconSegment(
+    value: Brightness.light,
+    tooltip: 'App theme: Light',
+    icon: LucideIcons.sun,
+  ),
+  IconSegment(
+    value: Brightness.dark,
+    tooltip: 'App theme: Dark',
+    icon: LucideIcons.moon,
+  ),
+];
+
 class PreviewPane extends StatefulWidget {
   const PreviewPane({
     super.key,
     required this.previewUrl,
     required this.process,
+    required this.mode,
     this.gradientAnimating = false,
   });
 
   final Uri previewUrl;
   final ServerpodProcessController process;
+  final PreviewModeController mode;
   final bool gradientAnimating;
 
   @override
@@ -43,8 +81,8 @@ class PreviewPaneState extends State<PreviewPane> {
   int _lastReloadToken = 0;
   Brightness? _appliedBrightness;
 
-  Brightness _previewBrightness = Brightness.light;
-  PreviewViewMode _viewMode = PreviewViewMode.phonePortrait;
+  late PreviewViewMode _lastViewMode;
+  late Brightness _lastModeBrightness;
   int _surfaceSyncGeneration = 0;
   int _revealGeneration = 0;
 
@@ -77,7 +115,7 @@ class PreviewPaneState extends State<PreviewPane> {
       // The theme shim is injected at load start with the brightness captured
       // when the webview was created, so a reload resets it — re-apply.
       _appliedBrightness = null;
-      await _applyPreviewTheme(_previewBrightness);
+      await _applyPreviewTheme(widget.mode.previewBrightness);
       if (!mounted || revealGeneration != _revealGeneration) return;
       widget.process.markPreviewLive();
       if (mounted) setState(() {});
@@ -90,6 +128,9 @@ class PreviewPaneState extends State<PreviewPane> {
   void initState() {
     super.initState();
     widget.process.addListener(_onProcessChanged);
+    _lastViewMode = widget.mode.viewMode;
+    _lastModeBrightness = widget.mode.previewBrightness;
+    widget.mode.addListener(_onModeChanged);
     if (_shouldLoad) {
       unawaited(_ensureWebView());
     }
@@ -101,6 +142,11 @@ class PreviewPaneState extends State<PreviewPane> {
     if (oldWidget.process != widget.process) {
       oldWidget.process.removeListener(_onProcessChanged);
       widget.process.addListener(_onProcessChanged);
+    }
+    if (oldWidget.mode != widget.mode) {
+      oldWidget.mode.removeListener(_onModeChanged);
+      widget.mode.addListener(_onModeChanged);
+      _onModeChanged();
     }
   }
 
@@ -130,16 +176,20 @@ class PreviewPaneState extends State<PreviewPane> {
     setState(() {});
   }
 
-  void _setPreviewTheme(Brightness brightness) {
-    if (_previewBrightness == brightness) return;
-    setState(() => _previewBrightness = brightness);
-    unawaited(_applyPreviewTheme(brightness));
-  }
-
-  void _setViewMode(PreviewViewMode mode) {
-    if (_viewMode == mode) return;
-    setState(() => _viewMode = mode);
-    _requestSurfaceSync();
+  /// View mode and brightness live in the controller now; this reacts to them
+  /// exactly the way the old local setters did.
+  void _onModeChanged() {
+    if (!mounted) return;
+    final mode = widget.mode;
+    if (mode.viewMode != _lastViewMode) {
+      _lastViewMode = mode.viewMode;
+      _requestSurfaceSync();
+    }
+    if (mode.previewBrightness != _lastModeBrightness) {
+      _lastModeBrightness = mode.previewBrightness;
+      unawaited(_applyPreviewTheme(mode.previewBrightness));
+    }
+    setState(() {});
   }
 
   void _requestSurfaceSync() {
@@ -153,8 +203,9 @@ class PreviewPaneState extends State<PreviewPane> {
     _surfaceSyncGeneration++;
     final generation = _surfaceSyncGeneration;
 
-    final phoneViewport = _viewMode.displayMode == PreviewDisplayMode.phone
-        ? previewPhoneViewport(_viewMode.orientation)
+    final viewMode = widget.mode.viewMode;
+    final phoneViewport = viewMode.displayMode == PreviewDisplayMode.phone
+        ? previewPhoneViewport(viewMode.orientation)
         : null;
 
     await burstSyncPreviewSurface(
@@ -182,7 +233,7 @@ class PreviewPaneState extends State<PreviewPane> {
       await _disposeController();
       _appliedBrightness = null;
 
-      final isDark = _previewBrightness == Brightness.dark;
+      final isDark = widget.mode.previewBrightness == Brightness.dark;
       final scripts = InjectUserScripts()
         ..add(
           UserScript(
@@ -201,7 +252,7 @@ class PreviewPaneState extends State<PreviewPane> {
       _controller = controller;
       controller.addListener(_onWebViewReadyChanged);
       await controller.initialize(widget.previewUrl.toString());
-      _appliedBrightness = _previewBrightness;
+      _appliedBrightness = widget.mode.previewBrightness;
       _lastReloadToken = widget.process.previewReloadToken;
       _onWebViewReadyChanged();
     } catch (e) {
@@ -322,23 +373,34 @@ class PreviewPaneState extends State<PreviewPane> {
   @override
   void dispose() {
     widget.process.removeListener(_onProcessChanged);
+    widget.mode.removeListener(_onModeChanged);
     unawaited(_disposeController());
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final viewport = previewPhoneViewport(_viewMode.orientation);
+    final mode = widget.mode;
+    final viewport = previewPhoneViewport(mode.viewMode.orientation);
     final registrationCode = widget.process.registrationCode;
+
+    if (mode.compactWindow) {
+      return _buildCompactWindow(
+        viewport: viewport,
+        registrationCode: registrationCode,
+      );
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _PreviewHeaderBar(
-          previewBrightness: _previewBrightness,
-          viewMode: _viewMode,
-          onPreviewThemeChanged: _setPreviewTheme,
-          onViewModeChanged: _setViewMode,
+          previewBrightness: mode.previewBrightness,
+          viewMode: mode.viewMode,
+          minimized: mode.minimized,
+          onPreviewThemeChanged: mode.setPreviewBrightness,
+          onViewModeChanged: mode.setViewMode,
+          onToggleMinimized: mode.toggleMinimized,
         ),
         Expanded(
           child: Stack(
@@ -369,7 +431,74 @@ class PreviewPaneState extends State<PreviewPane> {
     );
   }
 
+  /// The bare frame plus a floating control bar, on a transparent window.
+  ///
+  /// No header, no gradient: everything painted here shows on the user's
+  /// desktop. The frame is the window — its edges move it, its corners resize
+  /// it — so the handles ride on the frame's own aspect box, where they line
+  /// up with the drawn bezel at every window size.
+  Widget _buildCompactWindow({
+    required Size viewport,
+    String? registrationCode,
+  }) {
+    final mode = widget.mode;
+    return Padding(
+      padding: const EdgeInsets.all(kCompactFrameMargin),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: _PhonePreviewViewport(
+              viewport: viewport,
+              padding: EdgeInsets.zero,
+              overlay: Stack(
+                children: [
+                  _CompactWindowHandles(mode: mode),
+                  if (registrationCode != null)
+                    Positioned(
+                      top: 32,
+                      left: 12,
+                      right: 12,
+                      child: Align(
+                        alignment: Alignment.topCenter,
+                        child: RegistrationCodeToast(
+                          code: registrationCode,
+                          onDismiss: widget.process.dismissRegistrationCode,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              child: _buildSurfaceStack(viewport: viewport),
+            ),
+          ),
+          const SizedBox(height: kCompactBarGap),
+          _CompactControlBar(
+            viewMode: mode.viewMode,
+            previewBrightness: mode.previewBrightness,
+            onViewModeChanged: mode.setViewMode,
+            onPreviewThemeChanged: mode.setPreviewBrightness,
+            onExpand: mode.expand,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBody({required Size viewport}) {
+    final framed = _buildSurfaceStack(viewport: viewport);
+
+    if (widget.mode.viewMode.displayMode == PreviewDisplayMode.desktop) {
+      return framed;
+    }
+
+    return _PhonePreviewViewport(
+      viewport: viewport,
+      child: framed,
+    );
+  }
+
+  Widget _buildSurfaceStack({required Size viewport}) {
     final controller = _controller;
     final phase = widget.process.phase;
     final processError = widget.process.error;
@@ -387,8 +516,9 @@ class PreviewPaneState extends State<PreviewPane> {
           if (!ready) {
             return const ColoredBox(color: Color(0xFF12122A));
           }
+          final viewMode = widget.mode.viewMode;
           final phoneViewport =
-              _viewMode.displayMode == PreviewDisplayMode.phone
+              viewMode.displayMode == PreviewDisplayMode.phone
                   ? viewport
                   : null;
           return PreviewSurfaceSync(
@@ -402,7 +532,7 @@ class PreviewPaneState extends State<PreviewPane> {
       surface = const ColoredBox(color: Color(0xFF12122A));
     }
 
-    final framed = Stack(
+    return Stack(
       fit: StackFit.expand,
       children: [
         // CEF composites with an alpha channel, so anything the page leaves
@@ -410,7 +540,7 @@ class PreviewPaneState extends State<PreviewPane> {
         // app's own light/dark, not App Studio's.
         ColoredBox(
           key: const ValueKey('preview-backdrop'),
-          color: previewBackdropColor(_previewBrightness),
+          color: previewBackdropColor(widget.mode.previewBrightness),
         ),
         surface,
         PreviewStatusOverlay(
@@ -420,15 +550,6 @@ class PreviewPaneState extends State<PreviewPane> {
         ),
       ],
     );
-
-    if (_viewMode.displayMode == PreviewDisplayMode.desktop) {
-      return framed;
-    }
-
-    return _PhonePreviewViewport(
-      viewport: viewport,
-      child: framed,
-    );
   }
 }
 
@@ -436,14 +557,18 @@ class _PreviewHeaderBar extends StatelessWidget {
   const _PreviewHeaderBar({
     required this.previewBrightness,
     required this.viewMode,
+    required this.minimized,
     required this.onPreviewThemeChanged,
     required this.onViewModeChanged,
+    required this.onToggleMinimized,
   });
 
   final Brightness previewBrightness;
   final PreviewViewMode viewMode;
+  final bool minimized;
   final ValueChanged<Brightness> onPreviewThemeChanged;
   final ValueChanged<PreviewViewMode> onViewModeChanged;
+  final VoidCallback onToggleMinimized;
 
   @override
   Widget build(BuildContext context) {
@@ -476,44 +601,182 @@ class _PreviewHeaderBar extends StatelessWidget {
             value: viewMode,
             onChanged: onViewModeChanged,
             onMutedSurface: true,
-            segments: const [
-              IconSegment(
-                value: PreviewViewMode.phonePortrait,
-                tooltip: 'Phone preview',
-                icon: LucideIcons.smartphone,
-              ),
-              IconSegment(
-                value: PreviewViewMode.phoneLandscape,
-                tooltip: 'Phone preview (landscape)',
-                icon: LucideIcons.smartphone,
-                iconRotation: 1.5707963267948966,
-              ),
-              IconSegment(
-                value: PreviewViewMode.desktop,
-                tooltip: 'Desktop preview',
-                icon: LucideIcons.monitor,
-              ),
-            ],
+            segments: _viewModeSegments,
           ),
           const SizedBox(width: 8),
           IconSegmentedControl<Brightness>(
             value: previewBrightness,
             onChanged: onPreviewThemeChanged,
             onMutedSurface: true,
-            segments: const [
-              IconSegment(
-                value: Brightness.light,
-                tooltip: 'App theme: Light',
-                icon: LucideIcons.sun,
+            segments: _brightnessSegments,
+          ),
+          const SizedBox(width: 8),
+          // In desktop view, minimizing only hides the shell's toolbar and this
+          // header stays — so the same spot has to offer the way back.
+          SegmentedIconButton(
+            icon: minimized ? LucideIcons.maximize : LucideIcons.minimize,
+            tooltip: minimized ? 'Expand preview' : 'Minimize preview',
+            onPressed: onToggleMinimized,
+            onMutedSurface: true,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The floating control row under the frame in the compact window: view mode,
+/// app theme, and the way back out.
+class _CompactControlBar extends StatelessWidget {
+  const _CompactControlBar({
+    required this.viewMode,
+    required this.previewBrightness,
+    required this.onViewModeChanged,
+    required this.onPreviewThemeChanged,
+    required this.onExpand,
+  });
+
+  final PreviewViewMode viewMode;
+  final Brightness previewBrightness;
+  final ValueChanged<PreviewViewMode> onViewModeChanged;
+  final ValueChanged<Brightness> onPreviewThemeChanged;
+  final VoidCallback onExpand;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    final scheme = theme.colorScheme;
+
+    return SizedBox(
+      height: kCompactBarHeight,
+      child: Center(
+        // The window behind is transparent, so the bar carries its own opaque
+        // surface — the desktop wallpaper is not a background anything can
+        // count on being legible against.
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          decoration: BoxDecoration(
+            color: scheme.background,
+            borderRadius: theme.radii.lg,
+            border: Border.all(color: scheme.border),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconSegmentedControl<PreviewViewMode>(
+                value: viewMode,
+                onChanged: onViewModeChanged,
+                segments: _viewModeSegments,
               ),
-              IconSegment(
-                value: Brightness.dark,
-                tooltip: 'App theme: Dark',
-                icon: LucideIcons.moon,
+              const SizedBox(width: 8),
+              IconSegmentedControl<Brightness>(
+                value: previewBrightness,
+                onChanged: onPreviewThemeChanged,
+                segments: _brightnessSegments,
+              ),
+              const SizedBox(width: 8),
+              SegmentedIconButton(
+                icon: LucideIcons.maximize,
+                tooltip: 'Expand preview',
+                onPressed: onExpand,
               ),
             ],
           ),
-        ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Move/resize hit areas riding on the phone frame's bezel.
+///
+/// Edges move the window, corners resize it; both hand the drag to the native
+/// side on the first pan event, which then tracks the mouse itself — Dart
+/// deltas would be measured against a window that is moving under them.
+class _CompactWindowHandles extends StatelessWidget {
+  const _CompactWindowHandles({required this.mode});
+
+  final PreviewModeController mode;
+
+  /// Covers the 10px bezel with a little slop inward.
+  static const _edgeThickness = 14.0;
+  static const _cornerSize = 26.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        Positioned(
+          top: 0,
+          left: _cornerSize,
+          right: _cornerSize,
+          height: _edgeThickness,
+          child: _moveHandle(),
+        ),
+        Positioned(
+          bottom: 0,
+          left: _cornerSize,
+          right: _cornerSize,
+          height: _edgeThickness,
+          child: _moveHandle(),
+        ),
+        Positioned(
+          left: 0,
+          top: _cornerSize,
+          bottom: _cornerSize,
+          width: _edgeThickness,
+          child: _moveHandle(),
+        ),
+        Positioned(
+          right: 0,
+          top: _cornerSize,
+          bottom: _cornerSize,
+          width: _edgeThickness,
+          child: _moveHandle(),
+        ),
+        _corner(top: 0, left: 0, corner: CompactResizeCorner.topLeft),
+        _corner(top: 0, right: 0, corner: CompactResizeCorner.topRight),
+        _corner(bottom: 0, left: 0, corner: CompactResizeCorner.bottomLeft),
+        _corner(bottom: 0, right: 0, corner: CompactResizeCorner.bottomRight),
+      ],
+    );
+  }
+
+  Widget _moveHandle() {
+    return MouseRegion(
+      cursor: SystemMouseCursors.grab,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onPanStart: (_) => mode.startWindowDrag(),
+      ),
+    );
+  }
+
+  Widget _corner({
+    double? top,
+    double? bottom,
+    double? left,
+    double? right,
+    required CompactResizeCorner corner,
+  }) {
+    return Positioned(
+      top: top,
+      bottom: bottom,
+      left: left,
+      right: right,
+      width: _cornerSize,
+      height: _cornerSize,
+      // The diagonal resize cursor comes from AppKit via the controller — the
+      // macOS engine maps no diagonal SystemMouseCursors (they fall back to
+      // the arrow). `basic` here keeps the framework from re-asserting a grab
+      // cursor while the pointer sits on the corner.
+      child: MouseRegion(
+        cursor: SystemMouseCursors.basic,
+        onEnter: (_) => mode.showResizeCursor(corner),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onPanStart: (_) => mode.startWindowResize(corner),
+        ),
       ),
     );
   }
@@ -523,10 +786,17 @@ class _PhonePreviewViewport extends StatelessWidget {
   const _PhonePreviewViewport({
     required this.viewport,
     required this.child,
+    this.padding = const EdgeInsets.all(previewPhonePreviewPadding),
+    this.overlay,
   });
 
   final Size viewport;
   final Widget child;
+  final EdgeInsets padding;
+
+  /// Drawn over the frame, in the aspect box's own coordinates — which match
+  /// the frame exactly, since the [FittedBox] fills the box edge to edge.
+  final Widget? overlay;
 
   @override
   Widget build(BuildContext context) {
@@ -536,26 +806,34 @@ class _PhonePreviewViewport extends StatelessWidget {
           : PreviewOrientation.portrait,
     );
 
+    Widget content = FittedBox(
+      fit: BoxFit.contain,
+      child: SizedBox(
+        width: frameSize.width,
+        height: frameSize.height,
+        child: _PhoneDeviceFrame(
+          viewport: viewport,
+          child: SizedBox(
+            width: viewport.width,
+            height: viewport.height,
+            child: child,
+          ),
+        ),
+      ),
+    );
+    if (overlay != null) {
+      content = Stack(
+        fit: StackFit.expand,
+        children: [content, overlay!],
+      );
+    }
+
     return Padding(
-      padding: const EdgeInsets.all(previewPhonePreviewPadding),
+      padding: padding,
       child: Center(
         child: AspectRatio(
           aspectRatio: frameSize.width / frameSize.height,
-          child: FittedBox(
-            fit: BoxFit.contain,
-            child: SizedBox(
-              width: frameSize.width,
-              height: frameSize.height,
-              child: _PhoneDeviceFrame(
-                viewport: viewport,
-                child: SizedBox(
-                  width: viewport.width,
-                  height: viewport.height,
-                  child: child,
-                ),
-              ),
-            ),
-          ),
+          child: content,
         ),
       ),
     );

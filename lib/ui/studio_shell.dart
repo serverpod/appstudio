@@ -5,6 +5,7 @@ import 'package:shad/shad.dart';
 
 import '../agent/agent_controller.dart';
 import '../mcp/mcp_controller.dart';
+import '../preview/preview_mode_controller.dart';
 import '../preview/preview_phase.dart';
 import '../process/serverpod_process.dart';
 import '../session/external_editors_view.dart';
@@ -33,6 +34,7 @@ class StudioShell extends StatefulWidget {
     required this.mcp,
     required this.editors,
     required this.themeController,
+    required this.previewMode,
   });
 
   final ToolchainController toolchains;
@@ -43,6 +45,7 @@ class StudioShell extends StatefulWidget {
   final McpController mcp;
   final ExternalEditorsView editors;
   final ThemeController themeController;
+  final PreviewModeController previewMode;
 
   @override
   State<StudioShell> createState() => _StudioShellState();
@@ -103,6 +106,7 @@ class _StudioShellState extends State<StudioShell> {
         widget.process,
         widget.themeController,
         widget.agent,
+        widget.previewMode,
       ]),
       builder: (context, _) {
         final hasProject = widget.session.hasProject;
@@ -110,26 +114,46 @@ class _StudioShellState extends State<StudioShell> {
           return StartPage(session: widget.session, onNewProject: _newProject);
         }
 
+        // Minimized phone preview: the window is the frame. Nothing but the
+        // preview pane may build here — everything else would paint onto a
+        // transparent window. The pane keeps its GlobalKey, so the CEF webview
+        // survives the re-parent instead of reloading.
+        if (widget.previewMode.compactWindow) {
+          return PreviewPane(
+            key: _previewKey,
+            previewUrl: ProjectSession.previewUri,
+            process: widget.process,
+            mode: widget.previewMode,
+          );
+        }
+
         return Column(
           children: [
-            _Toolbar(
-              toolchains: widget.toolchains,
-              onManageTools: _openManageTools,
-              session: widget.session,
-              process: widget.process,
-              mcp: widget.mcp,
-              editors: widget.editors,
-              leftPanelVisible: _leftPanelVisible,
-              onToggleLeftPanel: () {
-                setState(() {
-                  _leftPanelVisible = !_leftPanelVisible;
-                });
-              },
-            ),
+            // Minimized desktop preview keeps the whole workspace and only
+            // drops the toolbar.
+            if (!widget.previewMode.minimized)
+              _Toolbar(
+                toolchains: widget.toolchains,
+                onManageTools: _openManageTools,
+                session: widget.session,
+                process: widget.process,
+                mcp: widget.mcp,
+                editors: widget.editors,
+                leftPanelVisible: _leftPanelVisible,
+                onToggleLeftPanel: () {
+                  setState(() {
+                    _leftPanelVisible = !_leftPanelVisible;
+                  });
+                },
+              ),
             Expanded(
               child: _Workspace(
                 splitRatio: _splitRatio,
-                leftPanelVisible: _leftPanelVisible,
+                // Minimized is preview-only in every view mode: desktop keeps
+                // the workspace but the server log goes with the toolbar. The
+                // user's own toggle is preserved for the way back.
+                leftPanelVisible:
+                    _leftPanelVisible && !widget.previewMode.minimized,
                 onSplitChanged: (value) {
                   setState(() {
                     _splitRatio = value.clamp(
@@ -143,6 +167,7 @@ class _StudioShellState extends State<StudioShell> {
                 previewKey: _previewKey,
                 previewUrl: ProjectSession.previewUri,
                 process: widget.process,
+                previewMode: widget.previewMode,
                 gradientAnimating: widget.process.phase.showsLoadingOverlay,
               ),
             ),
@@ -242,6 +267,7 @@ class _Workspace extends StatelessWidget {
     required this.previewKey,
     required this.previewUrl,
     required this.process,
+    required this.previewMode,
     required this.gradientAnimating,
   });
 
@@ -253,6 +279,7 @@ class _Workspace extends StatelessWidget {
   final GlobalKey<PreviewPaneState> previewKey;
   final Uri previewUrl;
   final ServerpodProcessController process;
+  final PreviewModeController previewMode;
   final bool gradientAnimating;
 
   @override
@@ -283,6 +310,7 @@ class _Workspace extends StatelessWidget {
                     key: previewKey,
                     previewUrl: previewUrl,
                     process: process,
+                    mode: previewMode,
                     gradientAnimating: gradientAnimating,
                   ),
                 ),
