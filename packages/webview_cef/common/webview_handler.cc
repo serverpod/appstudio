@@ -37,8 +37,16 @@ namespace stringpatch
 #include "webview_js_handler.h"
 
 namespace {
-// The only browser that currently get focused
-CefRefPtr<CefBrowser> current_focused_browser_ = nullptr;
+// The only browser that currently get focused.
+//
+// Deliberately never destroyed. Releasing a CefRefPtr<CefBrowser> after
+// CefShutdown() lands in shutdown_checker::AssertNotShutdown(), which is a
+// LOG(FATAL) — and a namespace-scope one is released from an atexit handler,
+// i.e. always after. The close paths below drop it while CEF is still alive,
+// which is what makes this hold nothing by the time the process exits; the
+// leaked holder is the guarantee that a path which forgets to cannot take the
+// process down on quit.
+CefRefPtr<CefBrowser>& current_focused_browser_ = *new CefRefPtr<CefBrowser>();
 
 // Returns a data: URI with the specified contents.
 std::string GetDataURI(const std::string& data, const std::string& mime_type) {
@@ -235,10 +243,18 @@ void WebviewHandler::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame
 }
 
 void WebviewHandler::CloseAllBrowsers(bool force_close) {
+    // Drop the focused browser here, not at exit, and ahead of the early return
+    // below: this is the last moment CEF is guaranteed to still be up. The host
+    // calls this immediately before CefShutdown(), so a reference left behind
+    // would be released from an atexit handler into a library that is no longer
+    // there. A popup gets focus without ever entering browser_map_, so an empty
+    // map does not mean there is nothing to drop.
+    current_focused_browser_ = nullptr;
+
     if (browser_map_.empty()){
         return;
     }
-    
+
     for (auto& it : browser_map_){
         it.second.browser->GetHost()->CloseBrowser(force_close);
         it.second.browser = nullptr;
@@ -250,6 +266,10 @@ void WebviewHandler::closeBrowser(int browserId)
 {
     auto it = browser_map_.find(browserId);
     if(it != browser_map_.end()){
+        if (current_focused_browser_.get() &&
+            current_focused_browser_->IsSame(it->second.browser)) {
+            current_focused_browser_ = nullptr;
+        }
         it->second.browser->GetHost()->CloseBrowser(true);
         it->second.browser = nullptr;
         browser_map_.erase(it);

@@ -768,6 +768,15 @@ install. Sparkle would also catch it, but later and less clearly.
   renderers and pumps the loop a bounded number of times so the close can land
   — nothing else drives CEF here, since macOS runs it on an external message
   pump.
+- **`browser_map_` was not the only reference — `current_focused_browser_` is a
+  file-scope one, and it crashed every ⌘Q.** Nothing cleared it, so its atexit
+  destructor released a `CefBrowser` from `__cxa_finalize_ranges`, which is by
+  definition after `CefShutdown()`: `AssertNotShutdown` again, this time with no
+  Dart or plugin frame anywhere in the stack to point at the cause.
+  `CloseAllBrowsers` now drops it *before* its own empty-map early return (a
+  popup takes focus without ever entering the map), and `closeBrowser` drops it
+  when the browser going away is the focused one. It is also allocated once and
+  never destroyed, so no exit-time release exists to get this wrong again.
 - The fork's event getters (`onToolTip`, `onCursorChanged`, `onFocusedNodeChangeMessage`, …) carry **explicit types**; upstream leaves them inferred, which makes them `dynamic` and silences the analyzer at every call site. Annotating them surfaced a real one: `onFocusedNodeChangeMessage` was invoked unguarded while every sibling case used `?.call`, so a focus change arriving before a WebView registered its callback would throw. Keep the annotations through any rebase — they are what makes that class of bug visible.
 - **Registration codes:** `serverpod start` logs `Registration code for <email>: <code>` instead of mailing it. `ServerpodProcessController` reassembles console lines across PTY chunks (`_scanLines`) and exposes `registrationCode`; `RegistrationCodeToast` floats it over the preview until dismissed or superseded.
 - **Keyboard into CEF (macOS):** a local `NSEvent` monitor (`CefWrapper.processKeyboardEvent`) routes keys. It only forwards to `current_focused_browser_`, which is set from `setClientFocus` — never let it consume an event it can't deliver, or the webview looks dead.
