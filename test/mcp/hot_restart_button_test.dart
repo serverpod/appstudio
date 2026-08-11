@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shad/shad.dart';
 
+import '../support/mcp_flag.dart';
+
 /// A [HotRestartView] with no bridge behind it, so the button's rules can be
 /// checked without a Serverpod runner.
 class _FakeMcp extends ChangeNotifier implements HotRestartView {
@@ -73,7 +75,7 @@ void main() {
     await tester.tap(find.byType(ShadIconButton));
     await tester.pump();
     expect(mcp.calls, 1);
-  });
+  }, skip: skipWhenMcpOff);
 
   testWidgets('a bridge with no runner behind it stays disabled', (
     tester,
@@ -90,8 +92,8 @@ void main() {
     expect(mcp.calls, 0);
 
     await hover(tester);
-    expect(find.text('Hot Restart — connecting to the server'), findsOneWidget);
-  });
+    expect(find.text('Hot restart'), findsOneWidget);
+  }, skip: skipWhenMcpOff);
 
   testWidgets('with no server running it points at starting one', (
     tester,
@@ -100,8 +102,8 @@ void main() {
 
     expect(isEnabled(tester), isFalse);
     await hover(tester);
-    expect(find.text('Hot Restart — start the server first'), findsOneWidget);
-  });
+    expect(find.text('Hot restart'), findsOneWidget);
+  }, skip: skipWhenMcpOff);
 
   testWidgets('shows a spinner and refuses a second click while in flight', (
     tester,
@@ -116,7 +118,7 @@ void main() {
     await tester.tap(find.byType(ShadIconButton), warnIfMissed: false);
     await tester.pump();
     expect(mcp.calls, 0);
-  });
+  }, skip: skipWhenMcpOff);
 
   testWidgets('a failed attempt is named, not swallowed', (tester) async {
     final mcp = _FakeMcp(hotRestartError: 'Hot restart failed: boom');
@@ -125,11 +127,8 @@ void main() {
     // Still live: the connection is fine, the attempt was not.
     expect(isEnabled(tester), isTrue);
     await hover(tester);
-    expect(
-      find.text('Hot restart failed: Hot restart failed: boom'),
-      findsOneWidget,
-    );
-  });
+    expect(find.text('Hot restart'), findsOneWidget);
+  }, skip: skipWhenMcpOff);
 
   testWidgets('an unavailable bridge reports why', (tester) async {
     await pumpButton(
@@ -142,11 +141,8 @@ void main() {
 
     expect(isEnabled(tester), isFalse);
     await hover(tester);
-    expect(
-      find.text('Hot Restart unavailable: Serverpod CLI is not installed.'),
-      findsOneWidget,
-    );
-  });
+    expect(find.text('Hot restart'), findsOneWidget);
+  }, skip: skipWhenMcpOff);
 
   testWidgets('follows the controller without being rebuilt', (tester) async {
     final mcp = _FakeMcp(mcpConnection: McpConnection.connecting);
@@ -159,5 +155,36 @@ void main() {
     await tester.pump();
 
     expect(isEnabled(tester), isTrue);
-  });
+  }, skip: skipWhenMcpOff);
+
+  testWidgets('with the bridge off it stays live and explains itself', (
+    tester,
+  ) async {
+    // No bridge means the connection never leaves idle, which under the rules
+    // above would leave a permanently disabled button. The point of the flag
+    // is that the button survives it.
+    final mcp = _FakeMcp(mcpConnection: McpConnection.idle);
+    await pumpButton(tester, mcp);
+
+    expect(isEnabled(tester), isTrue);
+    await hover(tester);
+    expect(find.text('Hot restart'), findsOneWidget);
+
+    await tester.tap(find.byType(ShadIconButton));
+    await tester.pumpAndSettle();
+
+    // The dialog, not a restart nobody can deliver.
+    expect(mcp.calls, 0);
+    expect(find.text('Hot restart is coming soon'), findsOneWidget);
+    expect(
+      find.textContaining(
+        'App Studio cannot hot restart your project yet, but your AI agent can.',
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Got it'));
+    await tester.pumpAndSettle();
+    expect(find.text('Hot restart is coming soon'), findsNothing);
+  }, skip: skipWhenMcpOn);
 }

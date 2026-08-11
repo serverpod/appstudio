@@ -191,9 +191,6 @@ class _Toolbar extends StatelessWidget {
         children: [
           _IconAction(
             icon: LucideIcons.panelLeft,
-            tooltip: leftPanelVisible
-                ? 'Hide $kLeftPanelName panel'
-                : 'Show $kLeftPanelName panel',
             onPressed: onToggleLeftPanel,
           ),
           const SizedBox(width: 12),
@@ -325,27 +322,22 @@ class _Workspace extends StatelessWidget {
 class _IconAction extends StatelessWidget {
   const _IconAction({
     required this.icon,
-    required this.tooltip,
     required this.onPressed,
   });
 
   final IconData icon;
-  final String tooltip;
   final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
-    return ShadTooltip(
-      builder: (context) => Text(tooltip),
-      child: ShadIconButton.ghost(
-        icon: Icon(icon, size: 16),
-        // A null handler alone leaves the button inert but undimmed, which
-        // reads as a broken click rather than an unavailable action.
-        enabled: onPressed != null,
-        onPressed: onPressed,
-        width: kToolbarIconButtonSize,
-        height: kToolbarIconButtonSize,
-      ),
+    return ShadIconButton.ghost(
+      icon: Icon(icon, size: 16),
+      // A null handler alone leaves the button inert but undimmed, which
+      // reads as a broken click rather than an unavailable action.
+      enabled: onPressed != null,
+      onPressed: onPressed,
+      width: kToolbarIconButtonSize,
+      height: kToolbarIconButtonSize,
     );
   }
 }

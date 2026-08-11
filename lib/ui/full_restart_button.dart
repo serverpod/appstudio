@@ -31,12 +31,7 @@ class FullRestartButton extends StatelessWidget {
           label: 'Full Restart',
           icon: LucideIcons.rotateCcw,
           busy: busy,
-          tooltip: busy
-              ? 'Restarting the server…'
-              : process.isStopped
-                  ? 'Full Restart — start the server'
-                  : 'Full Restart — stop and start the server, '
-                      'takes a minute or two',
+          tooltip: busy ? 'Restarting the server…' : 'Full restart',
           onPressed: process.canRestart
               ? () => unawaited(process.restart())
               : null,

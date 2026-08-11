@@ -75,7 +75,30 @@ Tests that cover the switched-on behaviour are skipped, not deleted —
   the card is attached next to that tool part and the raw row is hidden.
 - Ground truth for events/endpoints is the running server: `curl <base>/doc`.
 
-## Hot Restart (Serverpod MCP)
+## Hot Restart (Serverpod MCP) — switched off
+
+**`kServerpodMcpEnabled` in `lib/feature_flags.dart` is `false`, and everything
+in this section is dormant behind it.** The bridge cannot yet deliver a hot
+restart to the runner App Studio starts; the code is all still here, and
+flipping the flag to `true` brings it back intact. Read the rest of this section
+as what happens when it is on.
+
+Off, two things step back:
+
+- **`McpController` registers no listeners**, so no project and no running
+  server ever spawns a `serverpod mcp-server`, nothing is probed, the connection
+  stays `idle` and `hotRestart()` finds no bridge. It is still constructed,
+  still handed to `UpdateController` and the uninstaller, and `teardownSession`
+  still awaits its `stop()`.
+- **The toolbar keeps its Hot Restart button**, always enabled, opening
+  `HotRestartComingSoonDialog` rather than restarting. The connection never
+  leaves `idle`, so the rules below would otherwise leave it permanently
+  disabled reading "start the server first" for a server that is running. The
+  dialog points the user at their own AI agent, which reaches the same Serverpod
+  MCP tool today, and at Full Restart next to it.
+
+Tests covering the switched-on behaviour are skipped, not deleted —
+`test/support/mcp_flag.dart` carries `skipWhenMcpOff` / `skipWhenMcpOn`.
 
 The toolbar's **Hot Restart** button recompiles and reboots the running server,
 then hot-restarts the Flutter app and force-reloads the preview. It goes through

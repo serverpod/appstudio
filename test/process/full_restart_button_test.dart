@@ -88,7 +88,7 @@ void main() {
     expect(process.calls, 1);
 
     await hover(tester);
-    expect(find.text('Full Restart — start the server'), findsOneWidget);
+    expect(find.text('Full restart'), findsOneWidget);
   });
 
   testWidgets('spins and refuses a second click while in flight', (

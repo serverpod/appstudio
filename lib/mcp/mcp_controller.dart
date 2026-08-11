@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../feature_flags.dart';
 import '../process/serverpod_process.dart';
 import '../session/project_session.dart';
 import '../toolchain/tool_status.dart';
@@ -16,12 +17,21 @@ import 'serverpod_mcp_bridge.dart';
 /// `serverpod start` runner that opens the socket it forwards to. It is kept up
 /// for as long as that runner is, and reports whether a runner is actually
 /// attached — which is what gates the toolbar button.
+///
+/// All of that is dormant behind [kServerpodMcpEnabled]: with it off this
+/// controller listens to nothing, so no bridge is ever started, the connection
+/// stays [McpConnection.idle] and [hotRestart] finds nothing to talk to.
 class McpController extends ChangeNotifier implements HotRestartView {
   McpController({
     required this.toolchains,
     required this.session,
     required this.process,
   }) {
+    // The whole switch. Registering no listeners is what keeps a
+    // `serverpod mcp-server` from ever being spawned — every start goes
+    // through `_onSessionOrProcessChanged`, and nothing else calls it.
+    // TODO(appstudio): Drop this once the bridge can deliver a hot restart.
+    if (!kServerpodMcpEnabled) return;
     session.addListener(_onSessionOrProcessChanged);
     process.addListener(_onSessionOrProcessChanged);
     _onSessionOrProcessChanged();

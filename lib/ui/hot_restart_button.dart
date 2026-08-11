@@ -1,8 +1,9 @@
 import 'dart:async';
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 
+import '../feature_flags.dart';
 import '../mcp/hot_restart_view.dart';
 import '../widgets/toolbar_action_button.dart';
 
@@ -18,6 +19,10 @@ import '../widgets/toolbar_action_button.dart';
 /// else — no project, a server still starting, a bridge that would not run —
 /// leaves it disabled and says why in the tooltip, because the alternative is a
 /// button that accepts a click and silently does nothing.
+///
+/// With [kServerpodMcpEnabled] off none of that applies: there is no bridge to
+/// be connected to, so the button is always live and always opens
+/// [HotRestartComingSoonDialog] instead.
 class HotRestartButton extends StatelessWidget {
   const HotRestartButton({super.key, required this.mcp});
 
@@ -25,6 +30,18 @@ class HotRestartButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Nothing to listen to: with no bridge the connection never leaves idle,
+    // which would otherwise leave a permanently disabled button reading "start
+    // the server first" for a server that is already running.
+    if (!kServerpodMcpEnabled) {
+      return ToolbarActionButton(
+        label: 'Hot Restart',
+        icon: LucideIcons.zap,
+        tooltip: 'Hot restart',
+        onPressed: () => unawaited(showHotRestartComingSoonDialog(context)),
+      );
+    }
+
     return ListenableBuilder(
       listenable: mcp,
       builder: (context, _) {
@@ -41,22 +58,61 @@ class HotRestartButton extends StatelessWidget {
           // came up: worth colouring, since the button otherwise looks like the
           // click did nothing.
           failed: error != null && connection == McpConnection.connected,
-          tooltip: _tooltip(connection, restarting, error),
+          tooltip: _tooltip(restarting),
           onPressed: enabled ? () => unawaited(mcp.hotRestart()) : null,
         );
       },
     );
   }
 
-  String _tooltip(McpConnection connection, bool restarting, String? error) {
+  String _tooltip(bool restarting) {
     if (restarting) return 'Hot restarting…';
-    return switch (connection) {
-      McpConnection.connected when error != null => 'Hot restart failed: $error',
-      McpConnection.connected => 'Hot Restart — recompile the server and app',
-      McpConnection.idle => 'Hot Restart — start the server first',
-      McpConnection.connecting => 'Hot Restart — connecting to the server',
-      McpConnection.unavailable =>
-        'Hot Restart unavailable${error == null ? '' : ': $error'}',
-    };
+    return 'Hot restart';
+  }
+}
+
+/// Raises [HotRestartComingSoonDialog]. Dismissible every way — it reports
+/// something rather than asking for a decision, so there is nothing to lose to
+/// a stray click on the barrier.
+Future<void> showHotRestartComingSoonDialog(BuildContext context) =>
+    showShadDialog<void>(
+      context: context,
+      builder: (context) => const HotRestartComingSoonDialog(),
+    );
+
+/// What the Hot Restart button does while [kServerpodMcpEnabled] is off: says
+/// App Studio cannot do this yet, and points at the one thing that can do it
+/// today — the user's own AI agent, which reaches the same Serverpod MCP tool
+/// App Studio will eventually drive itself.
+///
+/// `ShadDialog.alert` is the variant with no close X, which is right for a
+/// notice acknowledged rather than dismissed; the body copy rides in
+/// `description` so it lands on `textTheme.muted` rather than the cramped
+/// label role.
+class HotRestartComingSoonDialog extends StatelessWidget {
+  const HotRestartComingSoonDialog({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ShadDialog.alert(
+      title: const Text('Hot restart is coming soon'),
+      description: const Text(
+        'App Studio cannot hot restart your project yet, but your AI agent '
+        'can. Ask it to do a hot restart for you.',
+      ),
+      actions: [
+        ShadButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Got it'),
+        ),
+      ],
+      child: const ShadAlert(
+        icon: Icon(LucideIcons.lightbulb),
+        description: Text(
+          'Full Restart, next to this button, restarts the server and reloads '
+          'the preview from scratch.',
+        ),
+      ),
+    );
   }
 }
