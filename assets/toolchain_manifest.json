@@ -1,23 +1,23 @@
 {
   "schemaVersion": 1,
-  "manifestId": "2026.08.11.1017",
+  "manifestId": "2026.08.16.1817",
   "baseUrl": "https://storage.googleapis.com/serverpod-appstudio-toolchain/",
   "tools": [
     {
       "id": "flutter",
       "displayName": "Flutter SDK",
       "description": "Builds and serves the Flutter web app shown in the preview pane.",
-      "version": "3.44.2",
+      "version": "3.47.0",
       "build": 1,
-      "hostAccepts": ">=3.44.0 <3.45.0",
+      "hostAccepts": ">=3.47.0 <3.48.0",
       "required": true,
-      "installDir": "flutter/3.44.2",
+      "installDir": "flutter/3.47.0",
       "platforms": {
         "macos-arm64": {
-          "path": "tools/flutter/3.44.2/b1/flutter-macos-arm64.tar.gz",
-          "sha256": "87f20adfafb50eb978a022260bcc59ed90bb1f58861ee47e5f36345331382a21",
-          "downloadBytes": 694147880,
-          "installedBytes": 1579876352,
+          "path": "tools/flutter/3.47.0/b1/flutter-macos-arm64.tar.gz",
+          "sha256": "5c24ae92313c5509890fc10ed5b667133444c7b6e95922de10b1bd5275ab0e9a",
+          "downloadBytes": 2030399555,
+          "installedBytes": 4201148416,
           "format": "tar.gz",
           "stripComponents": 1
         }

@@ -8,7 +8,7 @@ else. This is a packaging area, not a way to run the app against local tools.
 ```
 toolchain/
   active.json                         # pins active versions
-  flutter/<flutter_version>/          # web-capable Flutter + Dart (via bundle script)
+  flutter/<flutter_version>/          # full Flutter + Dart SDK, precached for web
   serverpod_cli/<cli_version>/        # full prebuilt Serverpod CLI bundle
     bin/serverpod
     lib/                              # sqlite (and other) native libs — required
@@ -34,12 +34,13 @@ wrapper unexpanded and die under `set -u`.
 
 ```bash
 make update_serverpod V=4.0.0-beta.2   # copy from this Mac's dart install
-make update_flutter   V=3.44.2         # download + strip; carries the Dart SDK
+make update_flutter   V=3.44.2         # download full SDK; carries the Dart SDK
 ```
 
-Both are `bundle_toolchain.sh --only=<id> --force`. Tools left out keep whatever
-`active.json` already pins, so a partial run cannot move a pin for a tree it
-never rebuilt.
+Both are `bundle_toolchain.sh --only=<id> --force`. `V=` becomes the new pin in
+`active.json`; without it the currently pinned version is rebuilt. Tools left
+out keep whatever `active.json` already pins, so a partial run cannot move a pin
+for a tree it never rebuilt.
 
 ## Serverpod CLI
 
@@ -56,7 +57,7 @@ versions can coexist; `active.json` selects which one is used. The staged binary
 is asked its own `--version` before the run is allowed to succeed: the install
 path claims a version, but only the binary knows one.
 
-## Flutter (web) + OpenCode + Git + llvm-tools
+## Flutter + OpenCode + Git + llvm-tools
 
 ```bash
 ./tool/bundle_toolchain.sh
@@ -64,7 +65,8 @@ path claims a version, but only the binary knows one.
 ./tool/bundle_toolchain.sh --flutter=3.44.2 --serverpod=4.0.0-beta.2 --opencode=1.18.4 --git=2.53.0-3
 ```
 
-Downloads and strips a web-only Flutter SDK into `toolchain/flutter/<version>/`.
+Downloads the full Flutter SDK (not stripped) into `toolchain/flutter/<version>/`
+and runs `flutter precache --web`.
 Downloads the **darwin-arm64** OpenCode binary into `toolchain/opencode/<version>/`.
 Downloads portable **Git** ([dugite-native](https://github.com/desktop/dugite-native)) into
 `toolchain/git/<version>/` so target Macs do not need Xcode / Command Line Tools

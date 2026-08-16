@@ -329,8 +329,13 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
 
   /// Keeps the shims pointing at what is actually installed.
   Future<void> _refreshShimsIfEnabled() async {
-    if (_shellPathState != ShellPathState.present) return;
     try {
+      // Read the rc file rather than trusting `_shellPathState`: at startup
+      // nothing has populated it yet, so a launch-time refresh would skip the
+      // rewrite and strand shims written while a tool was still unresolved —
+      // a `flutter` shim that answers "not installed" after the tool arrived.
+      _shellPathState = await shellPath.state();
+      if (_shellPathState != ShellPathState.present) return;
       await ShimWriter(binDir: paths.shimBinDir).write(_current);
     } catch (e) {
       debugPrint('ToolchainController: could not refresh shims: $e');

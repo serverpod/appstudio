@@ -16,6 +16,10 @@ import '../support/toolchain_support.dart';
 
 late ToolManifest manifest;
 
+/// The version the live manifest pins for Flutter, so "current" fixtures track
+/// a Flutter bump instead of silently turning into behind-the-pin ones.
+String flutterPin() => manifest[ToolId.flutter]!.version.toString();
+
 ToolCandidate satisfied(ToolId id, ToolSource source, String version) =>
     ToolCandidate(
       id: id,
@@ -100,7 +104,7 @@ void main() {
       tester,
       controllerWith({
         ToolId.flutter: [
-          satisfied(ToolId.flutter, ToolSource.managed, '3.44.2'),
+          satisfied(ToolId.flutter, ToolSource.managed, flutterPin()),
         ],
         ToolId.git: [satisfied(ToolId.git, ToolSource.host, '2.53.0')],
       }),
@@ -108,7 +112,7 @@ void main() {
 
     expect(find.byType(SettingsTable), findsOneWidget);
     expect(find.text('Flutter SDK'), findsOneWidget);
-    expect(find.text('3.44.2'), findsOneWidget);
+    expect(find.text(flutterPin()), findsOneWidget);
     expect(find.text('2.53.0'), findsOneWidget);
     // A host copy reads as "Native" now — "On your Mac" was a sentence where a
     // badge belongs.
@@ -156,7 +160,7 @@ void main() {
       tester,
       controllerWith({
         ToolId.flutter: [
-          satisfied(ToolId.flutter, ToolSource.managed, '3.44.2'),
+          satisfied(ToolId.flutter, ToolSource.managed, flutterPin()),
         ],
       }),
     );
@@ -189,7 +193,7 @@ void main() {
     expect(button.onPressed, isNotNull);
     expect(button.enabled, isTrue);
     // The row states the move rather than just the installed version.
-    expect(find.text('3.44.0 → 3.44.2'), findsOneWidget);
+    expect(find.text('3.44.0 → ${flutterPin()}'), findsOneWidget);
   });
 
   testWidgets('a host copy behind our pin is not ours to update',
@@ -215,7 +219,7 @@ void main() {
       tester,
       controllerWith({
         ToolId.flutter: [
-          satisfied(ToolId.flutter, ToolSource.managed, '3.44.2'),
+          satisfied(ToolId.flutter, ToolSource.managed, flutterPin()),
         ],
       }),
     );
@@ -258,7 +262,7 @@ void main() {
       tester,
       controllerWith({
         ToolId.flutter: [
-          satisfied(ToolId.flutter, ToolSource.managed, '3.44.2'),
+          satisfied(ToolId.flutter, ToolSource.managed, flutterPin()),
         ],
         ToolId.git: [satisfied(ToolId.git, ToolSource.host, '2.53.0')],
       }),
@@ -290,7 +294,7 @@ void main() {
       tester,
       controllerWith({
         ToolId.flutter: [
-          satisfied(ToolId.flutter, ToolSource.managed, '3.44.2'),
+          satisfied(ToolId.flutter, ToolSource.managed, flutterPin()),
         ],
       }),
     );
@@ -319,7 +323,7 @@ void main() {
       tester,
       controllerWith({
         ToolId.flutter: [
-          satisfied(ToolId.flutter, ToolSource.managed, '3.44.2'),
+          satisfied(ToolId.flutter, ToolSource.managed, flutterPin()),
         ],
       }),
     );

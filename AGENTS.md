@@ -431,7 +431,7 @@ make dist              # Developer ID + notarized zip
 
 ```bash
 make update_serverpod V=4.0.0-beta.2          # copy from the local dart install
-make update_flutter   V=3.44.2                # download + strip; carries Dart
+make update_flutter   V=3.44.2                # download full SDK + set pin; carries Dart
 ./tool/bundle_toolchain.sh                    # or: build every tree at once
 ./tool/publish_toolchain.sh --dry-run         # sizes and targets, no upload
 ./tool/publish_toolchain.sh --only=git        # publish a subset
@@ -514,7 +514,7 @@ Serverpod's per-start native-assets step runs exactly three commands on prebuilt
 ```
 toolchain/
   active.json                          # pins versions (flutter, serverpod_cli, opencode, git)
-  flutter/<version>/                   # stripped macOS + web engine only
+  flutter/<version>/                   # full SDK, precached for web
   serverpod_cli/<version>/{bin,lib}/   # full CLI bundle — lib/ has sqlite dylibs (required)
   opencode/<version>/opencode          # darwin-arm64 CLI binary
   git/<version>/{bin,libexec}/         # portable Git (dugite-native) — avoids Xcode CLT stub
@@ -522,7 +522,7 @@ toolchain/
   bin/{flutter,dart,serverpod,opencode,git}
 ```
 
-- **`./tool/bundle_toolchain.sh`** — downloads Flutter, runs `flutter precache --web`, strips iOS/Android/other engine artifacts; downloads OpenCode + portable Git; downloads an official LLVM release and installs `llvm-objdump`/`llvm-objcopy` as `otool`/`install_name_tool`. Does **not** download Serverpod; copy the full CLI bundle into `toolchain/serverpod_cli/<version>/` first. Flags: `--force`, `--flutter=VERSION`, `--serverpod=VERSION`, `--opencode=VERSION`, `--git=VERSION`.
+- **`./tool/bundle_toolchain.sh`** — downloads the full Flutter SDK (not stripped) and runs `flutter precache --web`; downloads OpenCode + portable Git; downloads an official LLVM release and installs `llvm-objdump`/`llvm-objcopy` as `otool`/`install_name_tool`. Does **not** download Serverpod; copy the full CLI bundle into `toolchain/serverpod_cli/<version>/` first. A version flag both selects what to fetch and becomes the new pin in `active.json`; a tool run without its flag rebuilds whatever `active.json` already pins. Flags: `--force`, `--flutter=VERSION`, `--serverpod=VERSION`, `--opencode=VERSION`, `--git=VERSION`.
 - `Toolchain.resolve()` prepends portable `git` + `cctools` to `PATH` and sets `FLUTTER_PREBUILT_ENGINE_VERSION` so target Macs don't need Xcode / CLT for web preview.
 - Nothing is embedded in the `.app` at build time — `tool/embed_toolchain.sh` is dead and referenced by neither the Makefile nor the Xcode project. `distribute_macos.sh` still asserts no `Contents/Resources/toolchain` survives, which now catches a stale build tree rather than a live feature.
 

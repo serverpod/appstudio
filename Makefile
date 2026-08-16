@@ -5,7 +5,7 @@
 #   make clean             Drop build output and dist artifacts
 #   make clean_all         Also drop CEF, Pods and the dev toolchain
 #   make dev_toolchain     Build every toolchain/ tree (for publishing)
-#   make update_flutter    Re-download + strip the Flutter/Dart SDK
+#   make update_flutter    Download the full Flutter/Dart SDK; V=… sets the pin
 #   make update_serverpod  Copy the Serverpod CLI from this Mac's dart install
 #   make publish_toolchain Upload tools to GCS and refresh the manifest
 #   make previews          Browser previews of every dialog (hot reload)
@@ -34,7 +34,8 @@ help:
 	@echo "  make clean_all         Also remove CEF, Pods and <repo>/toolchain"
 	@echo "  make dev_toolchain     Build every <repo>/toolchain tree"
 	@echo "  make update_flutter [V=3.44.2]"
-	@echo "                         Re-download + strip the Flutter/Dart SDK"
+	@echo "                         Download the full Flutter/Dart SDK and pin V"
+	@echo "                         (no V: rebuild the currently pinned version)"
 	@echo "  make update_serverpod [V=4.0.0-beta.2]"
 	@echo "                         Copy the Serverpod CLI from the local dart install"
 	@echo "  make publish_toolchain Dry-run the toolchain publish"
@@ -101,10 +102,10 @@ clean_all: clean
 dev_toolchain:
 	cd "$(ROOT)" && ./tool/bundle_toolchain.sh
 
-# Update one tool in the tree, then publish. Both take an optional V=; without
-# one they use the version pinned in tool/bundle_toolchain.sh. Tools not named
-# keep whatever toolchain/active.json already pins, so a partial run cannot
-# quietly move a pin for a tree it never rebuilt.
+# Update one tool in the tree, then publish. Both take an optional V=, which
+# becomes the new pin in toolchain/active.json; without one they rebuild the
+# version that file already pins. Tools not named keep their pins too, so a
+# partial run cannot quietly move a pin for a tree it never rebuilt.
 #
 # Flutter carries the Dart SDK (bin/cache/dart-sdk), so this is how Dart moves
 # too — there is no separate dart tool in the toolchain.

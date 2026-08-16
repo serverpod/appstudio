@@ -85,13 +85,16 @@ void main() {
   });
 
   group('qualifyFlutter', () {
-    FlutterObservation good({String channel = 'stable', String version = '3.44.2'}) =>
+    // In-range means whatever the live manifest pins, so a Flutter bump does
+    // not silently turn every fixture here into a wrongVersion.
+    String pinned() => manifest[ToolId.flutter]!.version.toString();
+    FlutterObservation good({String channel = 'stable', String? version}) =>
         FlutterObservation(
           hasFlutterExecutable: true,
           hasDartExecutable: true,
           hasWebSdk: true,
           info: FlutterInfo(
-            frameworkVersion: v(version),
+            frameworkVersion: v(version ?? pinned()),
             channel: channel,
           ),
         );
@@ -127,7 +130,10 @@ void main() {
     test('rejects a version outside the range with a readable reason', () {
       final verdict = run(good(version: '3.38.1'));
       expect(verdict.fitness, ToolFitness.wrongVersion);
-      expect(verdict.reason, '3.38.1 (needs >=3.44.0 <3.45.0)');
+      expect(
+        verdict.reason,
+        '3.38.1 (needs ${manifest[ToolId.flutter]!.hostAccepts})',
+      );
     });
 
     test('rejects an SDK that never precached the web artifacts', () {
@@ -136,7 +142,7 @@ void main() {
           hasFlutterExecutable: true,
           hasDartExecutable: true,
           hasWebSdk: false,
-          info: FlutterInfo(frameworkVersion: v('3.44.2'), channel: 'stable'),
+          info: FlutterInfo(frameworkVersion: v(pinned()), channel: 'stable'),
         ),
       );
       expect(verdict.fitness, ToolFitness.incomplete);

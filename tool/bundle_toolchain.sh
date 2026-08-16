@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds the toolchain/ trees that publish_toolchain.sh uploads.
 #
-# Downloads a web-focused Flutter SDK (which carries the Dart SDK) into:
+# Downloads the full Flutter SDK (which carries the Dart SDK), precached for
+# web, into:
 #   toolchain/flutter/<version>/
 # Copies the Serverpod CLI from this Mac's `dart install` bundle into:
 #   toolchain/serverpod_cli/<version>/{bin,lib}
@@ -35,15 +36,16 @@ usage() {
   echo "  --only= comma-separated: flutter,serverpod_cli,opencode,git,llvm-tools" >&2
 }
 
+EXPLICIT=""
 for arg in "$@"; do
   case "$arg" in
     --force) FORCE=1 ;;
     --only=*) ONLY="${arg#*=}" ;;
-    --flutter=*) FLUTTER_VERSION="${arg#*=}" ;;
-    --serverpod=*) SERVERPOD_CLI_VERSION="${arg#*=}" ;;
-    --opencode=*) OPENCODE_VERSION="${arg#*=}" ;;
-    --git=*) GIT_VERSION="${arg#*=}" ;;
-    --llvm=*) LLVM_VERSION="${arg#*=}" ;;
+    --flutter=*) FLUTTER_VERSION="${arg#*=}"; EXPLICIT+=",flutter" ;;
+    --serverpod=*) SERVERPOD_CLI_VERSION="${arg#*=}"; EXPLICIT+=",serverpod_cli" ;;
+    --opencode=*) OPENCODE_VERSION="${arg#*=}"; EXPLICIT+=",opencode" ;;
+    --git=*) GIT_VERSION="${arg#*=}"; EXPLICIT+=",git" ;;
+    --llvm=*) LLVM_VERSION="${arg#*=}"; EXPLICIT+=",llvm-tools" ;;
     *)
       echo "Unknown argument: $arg" >&2
       usage
@@ -64,10 +66,12 @@ for id in ${ONLY//,/ }; do
   esac
 done
 
-# A tool left out of --only keeps the version active.json already pins. Falling
-# back to this script's defaults instead would silently reset a pin to whatever
-# the file happened to be written with, and point the directory checks below at
-# a tree that was never built.
+# A version not given on the command line falls back to what active.json
+# already pins, then to this script's default for a tree that was never built.
+# That covers tools left out of --only — a partial run cannot rewrite a pin for
+# a tree it never touched — and equally a selected tool run without its version
+# flag: `--only=flutter --force` rebuilds the *pinned* Flutter rather than
+# silently re-pinning whatever default this script was last written with.
 pinned() {
   local key="$1"
   [[ -f "$OUT_DIR/active.json" ]] || return 1
@@ -75,13 +79,13 @@ pinned() {
     2>/dev/null | grep . || return 1
 }
 
-if [[ -n "$ONLY" ]]; then
-  wants flutter      || FLUTTER_VERSION="$(pinned flutter || echo "$FLUTTER_VERSION")"
-  wants serverpod_cli || SERVERPOD_CLI_VERSION="$(pinned serverpod_cli || echo "$SERVERPOD_CLI_VERSION")"
-  wants opencode     || OPENCODE_VERSION="$(pinned opencode || echo "$OPENCODE_VERSION")"
-  wants git          || GIT_VERSION="$(pinned git || echo "$GIT_VERSION")"
-  wants llvm-tools   || LLVM_VERSION="$(pinned llvm_tools || echo "$LLVM_VERSION")"
-fi
+given() { [[ ",$EXPLICIT," == *",$1,"* ]]; }
+
+given flutter       || FLUTTER_VERSION="$(pinned flutter || echo "$FLUTTER_VERSION")"
+given serverpod_cli || SERVERPOD_CLI_VERSION="$(pinned serverpod_cli || echo "$SERVERPOD_CLI_VERSION")"
+given opencode      || OPENCODE_VERSION="$(pinned opencode || echo "$OPENCODE_VERSION")"
+given git           || GIT_VERSION="$(pinned git || echo "$GIT_VERSION")"
+given llvm-tools    || LLVM_VERSION="$(pinned llvm_tools || echo "$LLVM_VERSION")"
 
 HOST_ARCH="$(uname -m)"
 case "$HOST_ARCH" in
@@ -113,7 +117,7 @@ LLVM_DIR="$OUT_DIR/llvm-tools/$LLVM_VERSION"
 LLVM_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/LLVM-${LLVM_VERSION}-macOS-ARM64.tar.xz"
 
 echo "==> Bundling toolchain into $OUT_DIR"
-echo "    Flutter $FLUTTER_VERSION ($HOST_ARCH) — strip other platforms only"
+echo "    Flutter $FLUTTER_VERSION ($HOST_ARCH) — full SDK, precached for web"
 echo "    serverpod_cli $SERVERPOD_CLI_VERSION — full prebuilt bundle"
 echo "    opencode $OPENCODE_VERSION — darwin-arm64 only"
 echo "    git $GIT_VERSION — dugite-native macOS-${DUGITE_ARCH}"
@@ -200,49 +204,8 @@ precache_flutter_web() {
   )
 }
 
-strip_flutter_for_web() {
-  local flutter_dir="$1"
-  local cache_dir="$flutter_dir/bin/cache"
-  local engine_dir="$cache_dir/artifacts/engine"
-  echo "==> Stripping non-macOS / non-web platform artifacts"
-  # Keep packages/*, dart-sdk snapshots/resources, DevTools, examples, etc.
-  # Only drop other platforms' engine builds and mobile/Android tooling.
-
-  if [[ -d "$engine_dir" ]]; then
-    find "$engine_dir" -mindepth 1 -maxdepth 1 | while read -r entry; do
-      local base
-      base="$(basename "$entry")"
-      case "$base" in
-        common|darwin-arm64|darwin-x64) ;;
-        *)
-          echo "    drop engine/$base"
-          rm -rf "$entry"
-          ;;
-      esac
-    done
-  fi
-
-  rm -rf \
-    "$cache_dir/artifacts/ios-deploy" \
-    "$cache_dir/artifacts/libimobiledevice" \
-    "$cache_dir/artifacts/libimobiledeviceglue" \
-    "$cache_dir/artifacts/libplist" \
-    "$cache_dir/artifacts/libusbmuxd" \
-    "$cache_dir/artifacts/usbmuxd" \
-    "$cache_dir/artifacts/gradle_wrapper" \
-    "$cache_dir/artifacts/openssl" \
-    "$cache_dir/artifacts/flutter-pi" \
-    "$cache_dir/downloads" \
-    "$flutter_dir/.pub-cache"
-
-  if [[ -d "$flutter_dir/.git" ]]; then
-    git -C "$flutter_dir" gc --aggressive --prune=all >/dev/null 2>&1 || true
-  fi
-}
-
 if wants flutter; then
   precache_flutter_web
-  strip_flutter_for_web "$FLUTTER_DIR"
   echo "==> Ensuring flutter_tools snapshot stays valid on other Macs"
   bash "$ROOT_DIR/tool/ensure_flutter_tools_cache.sh" "$FLUTTER_DIR"
 fi
