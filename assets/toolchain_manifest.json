@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestId": "2026.08.16.1817",
+  "manifestId": "2026.08.18.0640",
   "baseUrl": "https://storage.googleapis.com/serverpod-appstudio-toolchain/",
   "tools": [
     {
@@ -36,17 +36,17 @@
       "id": "serverpod_cli",
       "displayName": "Serverpod CLI",
       "description": "Creates projects, generates code and runs the server.",
-      "version": "4.0.0-beta.2",
+      "version": "4.0.0-beta.3",
       "build": 1,
       "hostAccepts": ">=4.0.0-beta.2 <4.1.0",
       "required": true,
-      "installDir": "serverpod_cli/4.0.0-beta.2",
+      "installDir": "serverpod_cli/4.0.0-beta.3",
       "platforms": {
         "macos-arm64": {
-          "path": "tools/serverpod_cli/4.0.0-beta.2/b1/serverpod_cli-macos-arm64.tar.gz",
-          "sha256": "4df06ad0fca2669ac0a9de68f14359de871c43c15c442a1c9ce581ed07d90205",
-          "downloadBytes": 11287952,
-          "installedBytes": 30269440,
+          "path": "tools/serverpod_cli/4.0.0-beta.3/b1/serverpod_cli-macos-arm64.tar.gz",
+          "sha256": "c2ed7a8e7dd3e91abd76f1587c325e0a9596e08cef12fe0592418343f8e4bf65",
+          "downloadBytes": 11332115,
+          "installedBytes": 30367744,
           "format": "tar.gz",
           "stripComponents": 1
         }
