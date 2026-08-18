@@ -10,7 +10,6 @@ import '../../util/quit_app.dart';
 import '../../widgets/determinate_progress.dart';
 import '../../widgets/error_banner.dart';
 import '../../widgets/settings_table.dart';
-import 'install_globally_checkbox.dart';
 import 'tools_view.dart';
 
 /// Raises the download plan. Completes when the toolchain is in place — the
@@ -58,8 +57,6 @@ class ToolchainSetupDialog extends StatefulWidget {
 }
 
 class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
-  bool _installGlobally = true;
-
   /// Guards the self-close: the controller notifies several times as the last
   /// install settles, and popping a route twice throws.
   bool _closing = false;
@@ -128,7 +125,11 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
     setState(() => _running = true);
     try {
       await widget.toolchains.installMissing();
-      if (mounted && _installGlobally) {
+      // Unconditional: putting the tools on the user's own `PATH` is what lets
+      // an external editor or AI agent find them, and with App Studio's own
+      // agent gone that is the only way they are reached from outside. It was
+      // an opt-in checkbox here, which is a question with one useful answer.
+      if (mounted) {
         await widget.toolchains.setShellPathEnabled(true);
       }
     } finally {
@@ -234,11 +235,6 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
                 ),
               ),
           ],
-        ),
-        const ShadGap(3),
-        InstallGloballyCheckbox(
-          value: _installGlobally,
-          onChanged: (v) => setState(() => _installGlobally = v),
         ),
       ],
     );

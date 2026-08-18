@@ -1,4 +1,5 @@
 import 'package:appstudio/theme/app_theme.dart';
+import 'package:appstudio/toolchain/shell_path_state.dart';
 import 'package:appstudio/toolchain/tool_status.dart';
 import 'package:appstudio/toolchain/tool_version.dart';
 import 'package:appstudio/toolchain/toolchain.dart';
@@ -7,6 +8,7 @@ import 'package:appstudio/toolchain/toolchain_manifest.dart';
 import 'package:appstudio/toolchain/toolchain_paths.dart';
 import 'package:appstudio/toolchain/toolchain_requirements.dart';
 import 'package:appstudio/ui/toolchain/manage_tools_pane.dart';
+import 'package:appstudio/widgets/error_banner.dart';
 import 'package:appstudio/widgets/settings_table.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,7 +20,9 @@ late ToolManifest manifest;
 
 /// The version the live manifest pins for Flutter, so "current" fixtures track
 /// a Flutter bump instead of silently turning into behind-the-pin ones.
-String flutterPin() => manifest[ToolId.flutter]!.version.toString();
+String pinFor(ToolId id) => manifest[id]!.version.toString();
+
+String flutterPin() => pinFor(ToolId.flutter);
 
 ToolCandidate satisfied(ToolId id, ToolSource source, String version) =>
     ToolCandidate(
@@ -43,7 +47,11 @@ ToolCandidate rejected(ToolId id, String version, String reason) =>
 
 /// A controller whose inventory is fixed, so the pane is tested against known
 /// state rather than whatever is installed on the machine.
-ToolchainController controllerWith(Map<ToolId, List<ToolCandidate>> byTool) {
+// ignore: library_private_types_in_public_api
+_FixedToolchainController controllerWith(
+  Map<ToolId, List<ToolCandidate>> byTool, {
+  ShellPathState shellPathState = ShellPathState.absent,
+}) {
   final tools = {
     for (final entry in byTool.entries)
       entry.key: ToolStatus(
@@ -58,24 +66,46 @@ ToolchainController controllerWith(Map<ToolId, List<ToolCandidate>> byTool) {
     manifest: manifest,
     paths: ToolchainPaths.resolve(),
     requirements: ToolchainRequirements.empty,
+    shellPathState: shellPathState,
   );
 }
 
 /// Refresh would re-probe the real machine and overwrite the fixture; preflight
-/// would go to the network.
+/// would go to the network; the shell PATH calls would edit the rc file of
+/// whoever is running the tests.
 class _FixedToolchainController extends ToolchainController {
   _FixedToolchainController({
     required super.initial,
     required super.manifest,
     required super.paths,
     required super.requirements,
-  });
+    ShellPathState shellPathState = ShellPathState.absent,
+  }) : _state = shellPathState;
+
+  ShellPathState _state;
+
+  /// What the pane asked us to write, in order.
+  final List<bool> shellPathWrites = [];
+
+  @override
+  ShellPathState get shellPathState => _state;
 
   @override
   Future<void> refresh({bool deep = false}) async {}
 
   @override
   Future<String?> preflight() async => null;
+
+  @override
+  Future<void> refreshShellPathState() async {}
+
+  @override
+  Future<String?> setShellPathEnabled(bool enabled, {bool force = false}) async {
+    shellPathWrites.add(enabled);
+    _state = enabled ? ShellPathState.present : ShellPathState.absent;
+    notifyListeners();
+    return null;
+  }
 }
 
 void main() {
@@ -150,7 +180,10 @@ void main() {
     // The version that is there, then the one that would land — otherwise a
     // working `serverpod` command beside a plain "Missing" reads as a failed
     // detection rather than an upgrade.
-    expect(find.text('3.5.0-beta.7 → 4.0.0-beta.2'), findsOneWidget);
+    expect(
+      find.text('3.5.0-beta.7 → ${pinFor(ToolId.serverpodCli)}'),
+      findsOneWidget,
+    );
     expect(find.text('Missing'), findsOneWidget);
   });
 
@@ -213,64 +246,99 @@ void main() {
     expect(find.text('2.30.0'), findsOneWidget);
   });
 
-  testWidgets('offers the global install with the setup dialog\'s wording',
-      (tester) async {
-    await pumpPane(
-      tester,
-      controllerWith({
-        ToolId.flutter: [
-          satisfied(ToolId.flutter, ToolSource.managed, flutterPin()),
-        ],
-      }),
-    );
+  testWidgets('puts the tools on PATH without asking', (tester) async {
+    // The opt-in is gone: an external editor or AI agent is the only thing that
+    // reaches the toolchain from outside now, so the pane makes it true rather
+    // than offering it.
+    final tools = controllerWith({
+      ToolId.flutter: [
+        satisfied(ToolId.flutter, ToolSource.managed, flutterPin()),
+      ],
+    });
+    await pumpPane(tester, tools);
+    await tester.pump();
 
-    expect(find.text('Install tools globally'), findsOneWidget);
-    expect(
-      find.textContaining('external AI agents'),
-      findsOneWidget,
-    );
-    expect(find.text('Add the tools to your PATH'), findsNothing);
+    expect(find.byType(ShadCheckbox), findsNothing);
+    expect(find.text('Install tools globally'), findsNothing);
+    expect(tools.shellPathWrites, [true]);
   });
 
-  testWidgets('global install is checked and inert when nothing to add',
-      (tester) async {
+  testWidgets('writes nothing when there is nothing to add', (tester) async {
     // Every required tool is already on this Mac, so our PATH block would add
-    // nothing. Shown satisfied rather than inviting an edit that changes
-    // nothing — and the shell config is never touched.
-    await pumpPane(
-      tester,
-      controllerWith({
-        for (final id in ToolId.values)
-          if (id != ToolId.opencode)
-            id: [satisfied(id, ToolSource.host, '99.0.0')],
-        // Managed, and deliberately not counted: OpenCode *is* the agent, so an
-        // external one has no reason to look for it.
-        ToolId.opencode: [
-          satisfied(ToolId.opencode, ToolSource.managed, '1.18.4'),
-        ],
-      }),
-    );
+    // nothing — and editing the user's shell config to no effect is worse than
+    // leaving it alone.
+    final tools = controllerWith({
+      for (final id in ToolId.values)
+        if (id != ToolId.opencode)
+          id: [satisfied(id, ToolSource.host, '99.0.0')],
+      // Managed, and deliberately not counted: OpenCode *is* the agent, so an
+      // external one has no reason to look for it.
+      ToolId.opencode: [
+        satisfied(ToolId.opencode, ToolSource.managed, '1.18.4'),
+      ],
+    });
+    await pumpPane(tester, tools);
+    await tester.pump();
 
-    final box = tester.widget<ShadCheckbox>(find.byType(ShadCheckbox));
-    expect(box.value, isTrue);
-    expect(box.enabled, isFalse);
+    expect(tools.shellPathWrites, isEmpty);
   });
 
-  testWidgets('global install stays live while a tool is only managed',
-      (tester) async {
-    await pumpPane(
-      tester,
-      controllerWith({
+  testWidgets('a block already in place is left alone', (tester) async {
+    final tools = controllerWith(
+      {
         ToolId.flutter: [
           satisfied(ToolId.flutter, ToolSource.managed, flutterPin()),
         ],
-        ToolId.git: [satisfied(ToolId.git, ToolSource.host, '2.53.0')],
-      }),
+      },
+      shellPathState: ShellPathState.present,
     );
+    await pumpPane(tester, tools);
+    await tester.pump();
 
-    final box = tester.widget<ShadCheckbox>(find.byType(ShadCheckbox));
-    expect(box.value, isFalse);
-    expect(box.enabled, isTrue);
+    expect(tools.shellPathWrites, isEmpty);
+    // Nothing to report, so the section draws nothing.
+    expect(find.byType(ErrorBanner), findsNothing);
+  });
+
+  testWidgets('a hand-edited block is reported, not overwritten',
+      (tester) async {
+    final tools = controllerWith(
+      {
+        ToolId.flutter: [
+          satisfied(ToolId.flutter, ToolSource.managed, flutterPin()),
+        ],
+      },
+      shellPathState: ShellPathState.edited,
+    );
+    await pumpPane(tester, tools);
+    await tester.pump();
+
+    expect(tools.shellPathWrites, isEmpty);
+    expect(find.byType(ErrorBanner), findsOneWidget);
+
+    // Replacing is the only way out now: there is no opting back out of it.
+    expect(find.text('Remove it'), findsNothing);
+    await tester.tap(find.text('Replace (backs up first)'));
+    await tester.pump();
+    expect(tools.shellPathWrites, [true]);
+  });
+
+  testWidgets('a shell we cannot edit gets the line to add by hand',
+      (tester) async {
+    final tools = controllerWith(
+      {
+        ToolId.flutter: [
+          satisfied(ToolId.flutter, ToolSource.managed, flutterPin()),
+        ],
+      },
+      shellPathState: ShellPathState.unsupported,
+    );
+    await pumpPane(tester, tools);
+    await tester.pump();
+
+    expect(tools.shellPathWrites, isEmpty);
+    expect(find.text('Install tools globally'), findsOneWidget);
+    expect(find.textContaining('external AI agents'), findsOneWidget);
   });
 
   testWidgets('Developer tools, not "Native tools"', (tester) async {

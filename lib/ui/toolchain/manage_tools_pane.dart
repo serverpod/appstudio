@@ -10,7 +10,6 @@ import '../../toolchain/tool_status.dart';
 import '../../widgets/determinate_progress.dart';
 import '../../widgets/error_banner.dart';
 import '../../widgets/settings_table.dart';
-import 'install_globally_checkbox.dart';
 import 'tools_view.dart';
 
 /// Which tools are in play, which version, and what can be done about them.
@@ -46,7 +45,6 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
       // The startup probe stops at the first satisfied candidate; this view
       // wants the alternatives too ("you also have a host Flutter").
       unawaited(widget.toolchains.refreshDeep());
-      unawaited(widget.toolchains.refreshShellPathState());
       // Pulls a newer published manifest, which is the only way a managed
       // install can turn out to be behind — without it "Update All" could
       // never light up.
@@ -109,7 +107,7 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: _ShellPathToggle(
+                child: _ShellPathSection(
                   toolchains: toolchains,
                   alreadyGlobal: inventory.requiredToolsAreNative,
                 ),
@@ -231,9 +229,17 @@ class _InstallBanner extends StatelessWidget {
   }
 }
 
-/// Opt-in for putting the tools on the user's own `PATH`.
-class _ShellPathToggle extends StatefulWidget {
-  const _ShellPathToggle({
+/// The tools on the user's own `PATH` — kept true, and reported on only when
+/// it cannot be.
+///
+/// This was a checkbox in both this pane and first-run setup. Installing
+/// globally is what lets an external editor or AI agent find the toolchain,
+/// and with App Studio's own agent gone that is the only way it is reached
+/// from outside — so it is no longer a question. The section puts the block in
+/// place itself and draws nothing at all in the ordinary case; what is left is
+/// the two states it cannot fix on its own.
+class _ShellPathSection extends StatefulWidget {
+  const _ShellPathSection({
     required this.toolchains,
     this.alreadyGlobal = false,
   });
@@ -244,12 +250,37 @@ class _ShellPathToggle extends StatefulWidget {
   final bool alreadyGlobal;
 
   @override
-  State<_ShellPathToggle> createState() => _ShellPathToggleState();
+  State<_ShellPathSection> createState() => _ShellPathSectionState();
 }
 
-class _ShellPathToggleState extends State<_ShellPathToggle> {
+class _ShellPathSectionState extends State<_ShellPathSection> {
   String? _error;
   bool _working = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Post-frame for the same reason the pane defers its own probe: the
+    // controller notifies synchronously before its first await, which would
+    // otherwise mark an ancestor dirty in the middle of its build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_ensureEnabled());
+    });
+  }
+
+  /// Only `absent` is ours to fix. `edited` means the user wrote inside our
+  /// block and gets the repair banner instead; `unsupported` is a shell we
+  /// cannot edit at all.
+  Future<void> _ensureEnabled() async {
+    await widget.toolchains.refreshShellPathState();
+    if (!mounted) return;
+    // Every required tool is already on this Mac, so our block would add
+    // nothing — the same case that used to show the checkbox ticked and inert,
+    // writing nothing.
+    if (widget.alreadyGlobal) return;
+    if (widget.toolchains.shellPathState != ShellPathState.absent) return;
+    await _set(true);
+  }
 
   Future<void> _set(bool enabled, {bool force = false}) async {
     setState(() {
@@ -286,7 +317,7 @@ class _ShellPathToggleState extends State<_ShellPathToggle> {
           const ShadGap(1),
           Text(
             'App Studio cannot edit ${widget.toolchains.shellName} configuration. '
-            'Add this line yourself:',
+            'Add this line yourself so external AI agents can find the tools:',
             style: theme.textTheme.muted,
           ),
           const ShadGap(1.5),
@@ -298,39 +329,29 @@ class _ShellPathToggleState extends State<_ShellPathToggle> {
       );
     }
 
+    // Our block is not in play, so neither are the states that report on it.
+    final edited = !widget.alreadyGlobal && state == ShellPathState.edited;
+    if (!edited && _error == null) return const SizedBox.shrink();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        InstallGloballyCheckbox(
-          value: widget.alreadyGlobal || state == ShellPathState.present,
-          enabled: !widget.alreadyGlobal,
-          onChanged: _working ? null : (v) => _set(v),
-        ),
-        // Our block is not in play, so neither are the states that report on it.
-        if (!widget.alreadyGlobal && state == ShellPathState.edited) ...[
-          const SizedBox(height: 8),
+        if (edited) ...[
           ErrorBanner(
             message:
                 'Your shell config was edited inside the App Studio '
-                'block, so it was left alone.',
+                'block, so it was left alone. External AI agents may not find '
+                'the tools until it is replaced.',
           ),
           const SizedBox(height: 6),
-          Row(
-            children: [
-              ShadButton.outline(
-                onPressed: _working ? null : () => _set(false),
-                child: const Text('Remove it'),
-              ),
-              const SizedBox(width: 6),
-              ShadButton.ghost(
-                onPressed: _working ? null : () => _set(true, force: true),
-                child: const Text('Replace (backs up first)'),
-              ),
-            ],
+          ShadButton.outline(
+            onPressed: _working ? null : () => _set(true, force: true),
+            enabled: !_working,
+            child: const Text('Replace (backs up first)'),
           ),
         ],
         if (_error != null) ...[
-          const SizedBox(height: 8),
+          if (edited) const SizedBox(height: 8),
           ErrorBanner(message: _error!),
         ],
       ],
