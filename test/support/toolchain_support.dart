@@ -7,10 +7,11 @@ import 'package:appstudio/toolchain/toolchain_manifest.dart';
 import 'package:appstudio/toolchain/toolchain_paths.dart';
 import 'package:appstudio/toolchain/toolchain_requirements.dart';
 
-Future<ToolManifest> loadTestManifest() async {
-  final source = await File('assets/toolchain_manifest.json').readAsString();
-  return ToolManifest.tryParse(source)!;
-}
+Future<String> loadTestManifestSource() =>
+    File('assets/toolchain_manifest.json').readAsString();
+
+Future<ToolManifest> loadTestManifest() async =>
+    ToolManifest.tryParse(await loadTestManifestSource())!;
 
 /// A controller with nothing resolved. Instant, and correct for tests that only
 /// need a controller to exist — they never spawn a tool.

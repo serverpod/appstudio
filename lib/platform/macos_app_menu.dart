@@ -108,6 +108,14 @@ class MacAppMenu {
 
     MacMenuBar.setMenuItemSelectedHandler(_onItemSelected);
 
+    // Before the menus, not after: the plugin installs its Settings override
+    // from a block queued at registration, which force-enables the item, and
+    // its own flag defaults to enabled — so until this lands the stock item is
+    // live and ⌘, reaches the action without the menu ever being drawn. The
+    // native side re-applies whatever it was last told, so an override that
+    // installs after this call still ends up here.
+    await MacMenuBar.setSettingsEnabled(canOpenProjects());
+
     MacMenuBar.onCut(() async => false);
     MacMenuBar.onCopy(() async => false);
     MacMenuBar.onPaste(() async => false);
@@ -122,10 +130,6 @@ class MacAppMenu {
     await _installAppMenuItems();
 
     _installed = true;
-    // The plugin installs its Settings override at registration and defaults it
-    // to enabled, so the initial state has to be pushed here — on a fresh Mac
-    // the very first frame is the setup screen.
-    await MacMenuBar.setSettingsEnabled(canOpenProjects());
     await _syncRecents();
     await _syncAppearance();
   }

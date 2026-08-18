@@ -1068,8 +1068,27 @@ that could not work — there is no Flutter SDK to build with yet.
 - The gate is `installable` (missing **and** we have an artifact), not
   `isComplete`. A required tool we cannot supply is unfixable by this screen, so
   blocking on it would be a dead end; those surface as the toolbar's destructive
-  badge instead. `MacAppMenu.canOpenProjects` reads the same condition, because
-  ⌘O, Open Recent and Settings would otherwise walk straight past the gate.
+  badge instead. It is `ToolchainInventory.needsSetup`, named rather than
+  written out, because three things have to agree on it and would otherwise
+  drift: the screen `main.dart` picks, `MacAppMenu.canOpenProjects` — ⌘O, Open
+  Recent and Settings would walk straight past the gate — and
+  `StudioShell._showSettings`.
+- **Settings is disabled *and* inert while setup is up, which is two mechanisms
+  on purpose.** The menu item greys out, and `_showSettings` returns without
+  opening anything. The shell is not even built in that state, so the second is
+  belt to the first's braces — but every route into the dialog goes through that
+  one function (the menu item via `AgentController`'s handler, and the toolbar's
+  warning badge), and the only pane Settings could show then is a Tools tab
+  duplicating the setup screen already on top of it. The badge is never the
+  casualty: the shell is built exactly when nothing is installable, so a badge
+  that is visible is always about a tool `needsSetup` ignores.
+- **`MacMenuBar.setSettingsEnabled` is pushed before the menus are installed,
+  not after.** The plugin installs its Settings override from a block queued at
+  registration — which force-enables the item — and its own flag defaults to
+  enabled, so until Dart says otherwise the stock item is live and ⌘, reaches
+  the action without the menu ever being drawn. The native side re-applies
+  whatever it was last told when the override lands, so pushing early is safe
+  either way round.
 - **Disabling the stock Settings item sets `isEnabled`, not `validateMenuItem`.**
   `addMenuItem` turns `autoenablesItems` off on whatever menu it adds to, and
   this app adds Check for Updates and Uninstall to the App menu — so AppKit

@@ -191,6 +191,18 @@ class ToolchainInventory {
 
   bool get isComplete => missingRequired.isEmpty;
 
+  /// Whether first-run setup still owns the window.
+  ///
+  /// [installable], not [isComplete]: a required tool we have no artifact for
+  /// cannot be fixed by the setup screen, so blocking on it would be a dead
+  /// end — that surfaces as the toolbar's warning badge instead.
+  ///
+  /// Named because three things have to agree on it: the screen `main.dart`
+  /// picks, the App menu items that would walk straight past that screen
+  /// (File → Open, Open Recent, Settings), and [StudioShell]'s own settings
+  /// route. Written out three times, they would drift.
+  bool get needsSetup => installable.isNotEmpty;
+
   /// Whether every required tool an outside program would look for is already
   /// on this Mac rather than only inside our managed directory.
   ///

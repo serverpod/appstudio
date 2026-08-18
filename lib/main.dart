@@ -228,12 +228,9 @@ class _AppStudioAppState extends State<AppStudioApp> {
 
   /// Whether the first-run setup screen owns the window.
   ///
-  /// Gated on `installable`, not on a complete toolchain: a required tool we
-  /// have no artifact for cannot be fixed by the setup screen, so blocking on
-  /// it would be a dead end. Those surface as the toolbar's destructive badge,
-  /// pointing at Settings → Tools.
-  bool get _needsToolchainSetup =>
-      widget.toolchains.inventory.installable.isNotEmpty;
+  /// See [ToolchainInventory.needsSetup] for why this is gated on what we can
+  /// download rather than on a complete toolchain.
+  bool get _needsToolchainSetup => widget.toolchains.inventory.needsSetup;
 
   /// Opening a project auto-starts the server, so this is the moment the long
   /// first compile begins — say so before it looks like a hang.

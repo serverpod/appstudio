@@ -76,7 +76,15 @@ class _StudioShellState extends State<StudioShell> {
   /// it is where keys and the default model are configured, and both are read
   /// from the running agent. With a project open this is a no-op — that agent
   /// is already the real one, and closing Settings leaves it alone.
+  ///
+  /// Does nothing while the toolchain still needs first-run setup. The App menu
+  /// greys the item out on the same condition, and this shell is not even built
+  /// in that state, so this is the belt to that pair of braces: every route in
+  /// goes through here — the menu item, `AgentController`'s handler and the
+  /// toolbar's warning badge — and the one thing Settings could offer then is a
+  /// Tools tab duplicating the setup screen already on top of it.
   Future<void> _showSettings(SettingsTab tab) async {
+    if (widget.toolchains.inventory.needsSetup) return;
     unawaited(widget.agent.startForSettings());
     try {
       await showSettingsDialog(
