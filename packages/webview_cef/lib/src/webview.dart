@@ -146,6 +146,21 @@ class WebViewController extends ValueNotifier<bool> {
     return _pluginChannel.invokeMethod('reloadIgnoreCache', _browserId);
   }
 
+  /// Clears everything the shared profile holds for [origin] — HTTP cache,
+  /// service workers, Cache Storage, localStorage, IndexedDB and cookies.
+  ///
+  /// Profile state is keyed by origin, not by browser: a freshly created
+  /// webview on an origin some earlier browser visited is answered out of the
+  /// state that browser left behind. [reloadIgnoreCache] only empties the HTTP
+  /// cache; this drops the rest.
+  Future<void> clearBrowsingData(String origin) async {
+    if (_isDisposed) {
+      return;
+    }
+    assert(value);
+    return _pluginChannel.invokeMethod('clearBrowsingData', [_browserId, origin]);
+  }
+
   Future<void> goForward() async {
     if (_isDisposed) {
       return;

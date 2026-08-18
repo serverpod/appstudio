@@ -505,6 +505,26 @@ void WebviewHandler::reloadIgnoreCache(int browserId) {
     browser->ReloadIgnoreCache();
 }
 
+void WebviewHandler::clearBrowsingData(int browserId, const std::string& origin) {
+    auto it = browser_map_.find(browserId);
+    if (it == browser_map_.end()) {
+        return;
+    }
+    CefRefPtr<CefBrowser> browser = it->second.browser;
+    // Everything except the HTTP cache lives on the request context keyed by
+    // origin, not by browser — a new browser on the same origin is answered
+    // out of whatever the previous one left behind. Network.clearBrowserCache
+    // cannot reach any of it; Storage.clearDataForOrigin is the DevTools
+    // command Chrome's own "Clear site data" uses.
+    CefRefPtr<CefDictionaryValue> params = CefDictionaryValue::Create();
+    params->SetString("origin", origin);
+    params->SetString("storageTypes", "all");
+    browser->GetHost()->ExecuteDevToolsMethod(
+            0, "Storage.clearDataForOrigin", params);
+    browser->GetHost()->ExecuteDevToolsMethod(
+            0, "Network.clearBrowserCache", nullptr);
+}
+
 void WebviewHandler::openDevTools(int browserId) {
     auto it = browser_map_.find(browserId);
     if (it != browser_map_.end()) {

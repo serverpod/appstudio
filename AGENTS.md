@@ -561,8 +561,16 @@ is damaged and can't be opened”, which is quarantine rather than actual damage
 `xattr -cr "/Applications/App Studio.app"` clears it. Prefer shipping a notarized
 build; this is for a build that never leaves the machine.
 
-**Artifact is a `.zip`, not a DMG.** Built with `ditto -c -k --keepParent` —
-plain `zip` mangles symlinks and the CEF framework is full of them. The app is
+**Artifact is a `.zip`, not a DMG.** Built with `ditto -c -k --norsrc
+--keepParent` — plain `zip` mangles symlinks and the CEF framework is full of
+them, and **`--norsrc` is load-bearing**: without it ditto archives the build
+machine's xattrs as inline `._foo` AppleDouble entries, which Archive Utility
+extracts as literal files (it only folds the sequestered `__MACOSX` form back
+into xattrs). Those land as unsealed contents in every framework root and
+Gatekeeper rejects the app — "unsealed contents present in the root directory
+of an embedded framework" — for anyone who unzips by double-clicking in
+Finder, while Safari's auto-extract goes through ditto itself and hides it.
+`make_zip` asserts the archive is clean. The app is
 notarized, then **stapled, then re-zipped**: a zip cannot carry a ticket but the
 app inside it can, and Sparkle installs that app directly. The bundle is
 `App Studio.app` (with a space); download filenames stay `AppStudio-…` so URLs
@@ -785,6 +793,24 @@ install. Sparkle would also catch it, but later and less clearly.
 - **View modes:** `PreviewViewMode` — portrait phone (default), landscape phone, desktop. Defined in `preview_device.dart`.
 - **Reload: there is no reload button, and no second path.** Every reload goes through `previewReloadToken` → `PreviewPaneState.reload()`, so it is always the hard one — a plain navigation re-serves the cached `main.dart.js`, so a rebuilt app looks unchanged. Three things bump the token: the DWDS attach, `ServerpodProcessController.requestPreviewReload()`, and a successful Hot Restart. Re-apply the theme shim afterwards: it is injected at load start with the brightness captured when the webview was created.
 - **A hard reload has to take three separate caches, and missing any one of them shows the previous build.** `reload()` runs `previewCachePurgeScript` (`preview/preview_cache_purge.dart`) first, because a **service worker and its Cache Storage entries are page state**: they outlive the navigation entirely and then answer the *new* document's requests out of the build that registered them, which no amount of cache-bypassing on our side can reach. Flutter web in debug registers no service worker, but the previewed app is the user's and may. The purge is asynchronous and `executeJavaScript` cannot await it, so `_purgePageCaches` polls `window.__appStudioCachesPurged` — bounded at 1s, then reloads regardless, since not reloading is the worse failure. `reloadIgnoreCache()` then covers the other two: the fork's `WebviewHandler::reloadIgnoreCache` issues DevTools `Network.clearBrowserCache` before `CefBrowser::ReloadIgnoreCache()`, because the latter only bypasses the cache for the requests *this* navigation makes — the stored entries survive it, so the next plain navigation (DWDS triggers one of its own) serves the old bytes again. CEF exposes no cache-clear API; the DevTools protocol is the route, and commands on one session run in order.
+- **Every project serves from the same origin, so switching projects clears the
+  profile.** The CEF request context (HTTP cache, localStorage, service
+  workers, cookies) is global and in-memory — it outlives the per-project
+  webview, and `http://localhost:9998` is the same origin for every project, so
+  project B's first load could be answered out of project A's state.
+  `_ensureWebView` tracks which project the profile last served (module-level
+  in `preview_pane.dart` — the pane's State unmounts when a project closes, the
+  profile does not) and on a switch calls the fork's
+  `WebViewController.clearBrowsingData` — DevTools `Storage.clearDataForOrigin`
+  with `storageTypes: "all"` plus `Network.clearBrowserCache`, the same pair
+  Chrome's own "Clear site data" uses — then runs the full `reload()`, since
+  the initial navigation may already have been served from the old state. The
+  tracker is only advanced after the clear succeeds, so a failed clear stays
+  due on the retry. Same-project restarts are deliberately untouched: the clear
+  keys on the project changing, not on the webview being recreated, so
+  localStorage survives a Full Restart within one session. Keeping the profile
+  in-memory (the `cache_path` note below) is unchanged — this is about state
+  crossing projects inside one app run, not across launches.
 - **The runner is not racing us.** `serverpod`'s `hot_restart` MCP tool is `WatchSession.forceRestart`, which awaits the full compile, the server reboot, `_restartAllFlutterApps()` (a VM-service hot restart of the running `flutter run`) and `_notifyBrowserRefresh()` before it answers — so by the time `McpController` bumps the token, the web server is already serving the new output. If the preview still shows old code, it is a cache and not timing.
 - The header's reload button is **gone on purpose.** Hot Restart now force-reloads the preview itself, so the button's only remaining job was papering over a reload that had not happened — and the honest fix for that is the token, not a second control that does the same thing by hand.
 - **Backdrop:** CEF composites with alpha, so an opaque `ColoredBox` (`previewBackdropColor`) sits under the surface, following the *previewed* app's brightness, not the shell's.

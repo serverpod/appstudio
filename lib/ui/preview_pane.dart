@@ -55,6 +55,16 @@ const _brightnessSegments = [
   ),
 ];
 
+/// The project the shared CEF profile last served.
+///
+/// Every project serves from the same `http://localhost:9998` origin, and the
+/// profile behind it (HTTP cache, localStorage, service workers, cookies) is
+/// global to the CEF request context — it survives the per-project webview, so
+/// without a clear the next project's first load can be answered out of the
+/// previous project's state. Module-level because the pane's State unmounts
+/// when a project closes; the profile does not.
+String? _cefProfileProjectPath;
+
 class PreviewPane extends StatefulWidget {
   const PreviewPane({
     super.key,
@@ -254,7 +264,26 @@ class PreviewPaneState extends State<PreviewPane> {
       await controller.initialize(widget.previewUrl.toString());
       _appliedBrightness = widget.mode.previewBrightness;
       _lastReloadToken = widget.process.previewReloadToken;
-      _onWebViewReadyChanged();
+      final projectPath = widget.process.session.projectPath;
+      final staleProfile = projectPath != null &&
+          _cefProfileProjectPath != null &&
+          _cefProfileProjectPath != projectPath;
+      if (staleProfile) {
+        // The profile still holds the previous project's state for this same
+        // origin. Clear it, and only then mark the profile as ours — a failed
+        // clear lands in the catch below and stays due on the next attempt.
+        await controller.clearBrowsingData(widget.previewUrl.origin);
+        _cefProfileProjectPath = projectPath;
+        // The initial navigation above may already have been answered out of
+        // the old state; reload() re-fetches past every cache and keeps the
+        // overlay up until this project's own app is live.
+        await reload();
+      } else {
+        if (projectPath != null) {
+          _cefProfileProjectPath = projectPath;
+        }
+        _onWebViewReadyChanged();
+      }
     } catch (e) {
       _error = e.toString();
       await _disposeController();

@@ -182,6 +182,9 @@ public:
     void reload(int browserId);
     // Reload bypassing the cache, so a rebuilt app is not served stale assets.
     void reloadIgnoreCache(int browserId);
+    // Drop everything the (shared) profile holds for |origin|: HTTP cache,
+    // service workers, Cache Storage, localStorage, IndexedDB and cookies.
+    void clearBrowsingData(int browserId, const std::string& origin);
     void openDevTools(int browserId);
 
     void imeSetComposition(int browserId, std::string text);

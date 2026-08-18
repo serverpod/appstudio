@@ -391,7 +391,15 @@ namespace webview_cef {
 			m_handler->reloadIgnoreCache(browserId);
 			result(1, nullptr);
 		}
-		else if (name.compare("openDevTools") == 0) {			
+		else if (name.compare("clearBrowsingData") == 0) {
+			int browserId = int(webview_value_get_int(webview_value_get_list_value(values, 0)));
+			const auto origin = webview_value_get_string(webview_value_get_list_value(values, 1));
+			if (origin != nullptr) {
+				m_handler->clearBrowsingData(browserId, origin);
+				result(1, nullptr);
+			}
+		}
+		else if (name.compare("openDevTools") == 0) {
 			int browserId = int(webview_value_get_int(values));
 			m_handler->openDevTools(browserId);
 			result(1, nullptr);

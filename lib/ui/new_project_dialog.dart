@@ -253,16 +253,18 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
         ),
       ];
     }
+    // Mid-run there is nothing to press — Cancel cannot stop the CLI and
+    // Create already ran — so the row disappears instead of dimming.
+    if (_creating) return const [];
     return [
       ShadButton.outline(
-        enabled: !_creating,
         onPressed: () => Navigator.of(context).pop(),
         child: const Text('Cancel'),
       ),
       ShadButton(
         enabled: _canCreate,
         onPressed: _create,
-        child: Text(_creating ? 'Creating…' : 'Create'),
+        child: const Text('Create'),
       ),
     ];
   }

@@ -279,10 +279,21 @@ ZIP_PATH="$DIST_DIR/${DIST_BASENAME}-$(uname -m).zip"
 rm -f "$ZIP_PATH"
 
 # ditto, never `zip`: the CEF framework is full of symlinks and plain zip
-# mangles them.
+# mangles them. --norsrc, because ditto otherwise archives the build machine's
+# xattrs (com.apple.provenance and friends) as inline `._foo` AppleDouble
+# entries — and Archive Utility extracts those as literal files (it only folds
+# the sequestered __MACOSX form back into xattrs), which lands unsealed
+# `._*` litter in every framework root and a Gatekeeper-rejected app for
+# anyone who unzips by double-clicking in Finder. Safari's auto-extract goes
+# through ditto itself, which is the only reason this ever looked fine.
 make_zip() {
   rm -f "$ZIP_PATH"
-  ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
+  ditto -c -k --norsrc --keepParent "$APP_PATH" "$ZIP_PATH"
+  if unzip -l "$ZIP_PATH" | grep -qE '/\._|__MACOSX'; then
+    echo "error: archive carries AppleDouble metadata entries (._*) — these" >&2
+    echo "       extract as unsealed files and break Gatekeeper validation" >&2
+    exit 1
+  fi
 }
 
 echo "==> Creating $ZIP_PATH"
