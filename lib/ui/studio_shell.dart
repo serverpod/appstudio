@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show clampDouble;
 import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 
@@ -297,7 +299,15 @@ class _Workspace extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final total = constraints.maxWidth;
-        final left = leftPanelVisible ? total * splitRatio : 0.0;
+        // The stored split is a ratio, but the floor is pixels: the panel
+        // never drops below an 80-column log line, which a ratio minimum
+        // cannot promise — it thins out with the window. The max ratio still
+        // caps it, and wins when the window is too narrow for both.
+        final maxLeft = total * kWorkspaceMaxSplitRatio;
+        final minLeft = math.min(terminalPaneMinWidth(), maxLeft);
+        final left = leftPanelVisible
+            ? clampDouble(total * splitRatio, minLeft, maxLeft)
+            : 0.0;
 
         return Stack(
           children: [

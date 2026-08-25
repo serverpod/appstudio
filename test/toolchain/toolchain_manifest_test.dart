@@ -244,6 +244,17 @@ void main() {
       expect(manifest!.tools.keys.toSet(), ToolId.values.toSet());
     });
 
+    test('baseUrl is the CDN host, not the bucket', () async {
+      // publish_toolchain.sh rewrites baseUrl on every run, from the bucket it
+      // was told to publish to. If that ever resolves back to the bucket's own
+      // storage.googleapis.com URL, every install silently stops going through
+      // the CDN — which works, so nothing else would notice.
+      final source =
+          await File('assets/toolchain_manifest.json').readAsString();
+      final manifest = ToolManifest.tryParse(source)!;
+      expect(manifest.baseUrl.toString(), 'https://asdl.serverpod.dev/');
+    });
+
     test('pins match toolchain/active.json', () async {
       final source =
           await File('assets/toolchain_manifest.json').readAsString();

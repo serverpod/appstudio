@@ -17,8 +17,16 @@
 // every update check fails against a malformed URL. Build the slashes from a
 // variable so the two characters are never adjacent in the source text.
 // (Verify with: PlistBuddy -c 'Print :SUFeedURL' on the built Info.plist.)
+//
+// The host is asdl.serverpod.dev — the Cloud CDN in front of the release bucket,
+// not the bucket's own storage.googleapis.com URL. This value is COMPILED IN, so
+// changing it only ever affects copies built afterwards: every already-installed
+// App Studio keeps polling whatever URL it shipped with. The old bucket URL
+// therefore has to keep serving the same feed forever, and does — the CDN is a
+// second way to reach one bucket, not a move. Retiring that URL would strand
+// every install made before this line changed.
 SPARKLE_SLASH = /
-SPARKLE_FEED_URL = https:$(SPARKLE_SLASH)$(SPARKLE_SLASH)storage.googleapis.com/serverpod-appstudio-toolchain/appcast/macos/appcast.xml
+SPARKLE_FEED_URL = https:$(SPARKLE_SLASH)$(SPARKLE_SLASH)asdl.serverpod.dev/appcast/macos/appcast.xml
 
 // The ed25519 public key. Its private half is in the release engineer's login
 // Keychain — see "Back up the signing key" in AGENTS.md. Changing this value

@@ -451,9 +451,8 @@ make update_flutter   V=3.44.2                # download full SDK + set pin; car
   own defaults, which would otherwise reset a pin to whatever the file was last
   written with — and point the "already present?" checks at a tree that was
   never built.
-- Bucket `gs://serverpod-appstudio-toolchain`, served from
-  `https://storage.googleapis.com/serverpod-appstudio-toolchain/`. Public read.
-  Immutability is enforced by **`--if-generation-match=0` in the publish
+- Bucket `gs://serverpod-appstudio-toolchain`, public read, reachable two ways —
+  see **One bucket, two URLs** below. Immutability is enforced by **`--if-generation-match=0` in the publish
   scripts**, not by IAM — the release account holds `roles/owner` and *can*
   overwrite or delete an object. **A mistaken publish cannot be undone by the
   account that made it: always `--dry-run` first.**
@@ -489,6 +488,49 @@ make update_flutter   V=3.44.2                # download full SDK + set pin; car
 - Do **not** put a service-account key in a `.env`. Write access here is effectively
   code-signing authority over every install. Use `--impersonate-service-account` (no key
   exists) or Workload Identity Federation in CI.
+
+### One bucket, two URLs — and which one a caller may use
+
+`gs://serverpod-appstudio-toolchain` is reachable both directly and through a
+Cloud CDN, and **mixing the two up is the hazard.** `tool/lib/bucket_urls.sh`
+owns the distinction; nothing derives one URL from the other.
+
+- **Origin** — `https://storage.googleapis.com/<bucket>/` — is the bucket
+  itself, and every **publish-time read** uses it. `object_exists` /
+  `published_sha`, the re-download-and-re-hash verification, the appcast
+  read-back, and `published_max_build`'s feed read are all asking what is *in
+  the bucket*, and a cached answer is not an answer to that question.
+- **Public** — `https://asdl.serverpod.dev/` — is the same bucket behind the
+  CDN, and every URL handed to a **user** uses it: the manifest's `baseUrl`, the
+  appcast enclosures, and `SPARKLE_FEED_URL`.
+- **The build-number gate is the one that cannot be allowed to read stale.** A
+  low answer from `published_max_build` approves a build number already
+  published, which blinds every installed copy to updates forever and cannot be
+  undone. `set_version.sh` and `publish_dist.sh` both read the origin feed, and
+  `fetch_uncached` cachebusts on top of that.
+- **The origin URL must keep working forever.** Every copy of App Studio built
+  before the CDN existed has it compiled in — as its Sparkle feed *and* as the
+  `baseUrl` of its baked manifest. The CDN is a second route to one bucket, not
+  a move; retiring the old URL strands those installs permanently.
+- **`--bucket=NAME` falls back to the origin for the public URL too**
+  (`public_base_url`). The CDN fronts exactly one bucket, so stamping its host
+  into a manifest built from a different one yields downloads that 404 — or,
+  worse, silently resolve to the production object sharing that path.
+- **Only the two mutable objects are invalidated**, `appcast.xml` and
+  `manifest.json`, both published with `max-age=300`. `invalidate_cdn_path` is
+  best-effort and returns 0: the object is already in the bucket, the TTL it
+  waits out is five minutes, and everything that must not be stale reads the
+  origin anyway — so failing a release that already succeeded would be the worse
+  outcome. Invalidating an immutable object is meaningless and the quota is
+  small, so nothing else gets one.
+- **Negative caching is off on the backend bucket, deliberately.** The cache
+  mode enables it by default and would hold a `404` for 120 s; every publish path
+  here probes for object *absence*, so a freshly published object answering 404
+  from the edge would resolve an archive to the wrong build number.
+- The CDN is a global external Application Load Balancer in the same project
+  (`serverpod-appstudio`): backend bucket `asdl-backend`, url map `asdl-url-map`,
+  Google-managed cert `asdl-cert`. Those names are in `bucket_urls.sh` because
+  the invalidation needs them.
 
 ### Native tools: what we can and cannot ship
 
@@ -742,7 +784,11 @@ the feed goes live rather than after.
 `max-age=300`, so a plain GET returns the *previous* feed for five minutes
 after a publish. That is not cosmetic: `published_max_build` reads this feed,
 and a stale answer would let the build-number gate approve a number already
-taken. Use `fetch_uncached` from `tool/lib/pubspec_version.sh`.
+taken. Use `fetch_uncached` from `tool/lib/pubspec_version.sh`, and read the
+**origin** URL — see One bucket, two URLs. Now that a CDN sits in front of the
+bucket there are two caches to get past, and only the origin read has just one.
+The app's own feed URL is the CDN's, and `publish_appcast.sh` invalidates that
+path at the edge on every publish.
 
 ### Zip, not DMG — and why translocation matters
 
@@ -1181,9 +1227,11 @@ that could not work — there is no Flutter SDK to build with yet.
   first and filling the table in afterwards is what made a slow network read as
   a stuck dialog.
 - **A failed published-manifest fetch is not a preflight failure.**
-  `manifest.json` is an optional upgrade over the pin baked into the app and is
-  *not published today* (404), so treating its absence as fatal would mean no
-  first run ever gets past this screen. What `preflight` reports is an
+  `manifest.json` is an optional upgrade over the pin baked into the app — the
+  app is fully functional on the baked pin alone — so treating its absence as
+  fatal would mean a bucket hiccup could stop any first run from getting past
+  this screen. (It *is* published: `publish_toolchain.sh` uploads it at the end
+  of every run. An older note here said it 404s, which stopped being true.) What `preflight` reports is an
   unreachable **artifact** — `ToolManifest.probeArtifacts` HEADs each one, and a
   miss means that download is about to fail. It probes only the tools actually
   about to be fetched (`only:`), so a host copy of Flutter cannot be blocked by

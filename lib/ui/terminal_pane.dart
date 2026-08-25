@@ -17,6 +17,39 @@ enum _TerminalTab { agent, serverLogs }
 const String kLeftPanelName =
     kOpenCodeAgentEnabled ? 'Agent & logs' : 'logs';
 
+/// Font size for the server log terminal. [terminalPaneMinWidth] measures with
+/// it, so the panel's 80-column minimum follows a change here automatically.
+const kTerminalFontSize = 11.0;
+
+/// The terminal's content inset on every side.
+const _kTerminalPadding = 8.0;
+
+double? _cachedMinWidth;
+
+/// Minimum width for the pane that keeps a full 80-column log line visible,
+/// padding included.
+///
+/// Measured from the terminal's own font rather than hardcoded, so it cannot
+/// drift when [kTerminalFontSize] or [kMacMonoFont] moves. Cached — the
+/// metrics cannot change at runtime.
+double terminalPaneMinWidth() => _cachedMinWidth ??= _measureMinWidth();
+
+double _measureMinWidth() {
+  final painter = TextPainter(
+    text: TextSpan(
+      text: ''.padRight(80, 'M'),
+      style: const TextStyle(
+        fontFamily: kMacMonoFont,
+        fontSize: kTerminalFontSize,
+      ),
+    ),
+    textDirection: TextDirection.ltr,
+  )..layout();
+  final width = painter.width + 2 * _kTerminalPadding;
+  painter.dispose();
+  return width;
+}
+
 class TerminalPane extends StatefulWidget {
   const TerminalPane({
     super.key,
@@ -113,8 +146,11 @@ class _TerminalPaneState extends State<TerminalPane> {
     final terminal = TerminalView(
       widget.studioTerminal.terminal,
       theme: xtermTheme,
-      textStyle: TerminalStyle(fontSize: 13, fontFamily: kMacMonoFont),
-      padding: const EdgeInsets.all(8),
+      textStyle: TerminalStyle(
+        fontSize: kTerminalFontSize,
+        fontFamily: kMacMonoFont,
+      ),
+      padding: const EdgeInsets.all(_kTerminalPadding),
       autofocus: _selectedTab == _TerminalTab.serverLogs,
       hardwareKeyboardOnly: true,
     );

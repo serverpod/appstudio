@@ -19,12 +19,18 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=tool/lib/pubspec_version.sh
 source "$ROOT_DIR/tool/lib/pubspec_version.sh"
+# shellcheck source=tool/lib/bucket_urls.sh
+source "$ROOT_DIR/tool/lib/bucket_urls.sh"
 
 # Overridable so the test suite can drive this against a temp pubspec and a
 # local feed instead of the real bucket.
 PUBSPEC="${PUBSPEC:-$ROOT_DIR/pubspec.yaml}"
 BUCKET="${BUCKET:-serverpod-appstudio-toolchain}"
-APPCAST_URL="${APPCAST_URL:-https://storage.googleapis.com/$BUCKET/appcast/macos/appcast.xml}"
+# The ORIGIN feed, deliberately — never the CDN. This is the read that decides
+# the next build number, and a build number that repeats one already published
+# blinds every installed copy to updates forever, unfixably. It is the one place
+# in the release flow where a cached answer would do permanent damage.
+APPCAST_URL="${APPCAST_URL:-$(origin_base_url "$BUCKET")appcast/macos/appcast.xml}"
 
 if [[ $# -ne 1 ]]; then
   sed -n '11,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'

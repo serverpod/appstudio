@@ -34,7 +34,13 @@ for arg in "$@"; do
   esac
 done
 
-BASE_URL="https://storage.googleapis.com/$BUCKET/"
+# shellcheck source=tool/lib/bucket_urls.sh
+source "$ROOT_DIR/tool/lib/bucket_urls.sh"
+# The feed and every enclosure in it are user-facing, so they carry the CDN host.
+# The read-back that proves this publish landed is not, and reads the origin.
+# See tool/lib/bucket_urls.sh.
+ORIGIN_BASE_URL="$(origin_base_url "$BUCKET")"
+PUBLIC_BASE_URL="$(public_base_url "$BUCKET")"
 
 gcloud_storage() {
   if [[ -n "$IMPERSONATE" ]]; then
@@ -172,7 +178,7 @@ echo "==> Generating and signing the appcast"
 "$SPARKLE_BIN/generate_appcast" \
   --maximum-versions 0 \
   --maximum-deltas 0 \
-  --download-url-prefix "$BASE_URL" \
+  --download-url-prefix "$PUBLIC_BASE_URL" \
   --link "https://serverpod.dev" \
   "$RELEASES"
 
@@ -185,7 +191,7 @@ fi
 # generate_appcast builds URLs as <prefix><filename>, because it only sees a
 # flat directory. The real objects live under releases/macos/<v>/b<n>/, so
 # rewrite each enclosure to its true path.
-python3 - "$FEED" "$MAP" "$BASE_URL" <<'PY'
+python3 - "$FEED" "$MAP" "$PUBLIC_BASE_URL" <<'PY'
 import re, sys
 feed_path, map_path, base = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(map_path) as f:
@@ -282,15 +288,28 @@ gcloud_storage cp "$FEED" "gs://$BUCKET/$APPCAST_PATH" \
   --cache-control="public, max-age=300, must-revalidate" \
   --content-type="application/xml"
 
+# This is the object the CDN is most likely to be holding a stale copy of, and
+# the one where staleness is most visible: an update check inside the max-age
+# window is told there is nothing new. Fire the invalidation now so it runs while
+# the verification below does its own work.
+invalidate_cdn_path "$BUCKET" "/$APPCAST_PATH" \
+  ${IMPERSONATE:+--impersonate-service-account="$IMPERSONATE"}
+
 echo
 echo "==> Verifying the published feed"
-# Read back WITHOUT the cache. The feed we just replaced was served with
-# max-age=300, so a plain GET happily returns the previous one and this check
-# fails on a perfectly good publish. Retry a few times anyway, for genuine
-# propagation rather than caching.
+# Read back from the ORIGIN, and WITHOUT the cache. The feed we just replaced was
+# served with max-age=300, so a plain GET happily returns the previous one and
+# this check fails on a perfectly good publish. Retry a few times anyway, for
+# genuine propagation rather than caching.
+#
+# Not the CDN copy: the invalidation above is asynchronous, so for the next few
+# minutes the edge may legitimately still serve the old feed, and diffing against
+# it would fail every publish. What must be true right now is that the BUCKET
+# holds the feed we generated — the edge catches up on its own, and every reader
+# that cannot tolerate a stale answer reads the origin too.
 CHECK="$WORK/published.xml"
 for attempt in 1 2 3 4 5; do
-  fetch_uncached "$BASE_URL$APPCAST_PATH" >"$CHECK" || true
+  fetch_uncached "$ORIGIN_BASE_URL$APPCAST_PATH" >"$CHECK" || true
   if diff -q "$FEED" "$CHECK" >/dev/null 2>&1; then
     break
   fi
@@ -304,7 +323,11 @@ for attempt in 1 2 3 4 5; do
 done
 
 # Every enclosure must actually be fetchable, or an update check offers a
-# download that 404s.
+# download that 404s. These are CDN URLs now, so this exercises the exact path
+# Sparkle will take — including whether the load balancer is actually serving the
+# bucket, which nothing else here would notice. Safe to check immediately:
+# release zips are immutable and negative caching is off on the backend bucket,
+# so there is no cached 404 to trip over.
 python3 -c "
 import re,sys
 urls = re.findall(r'url=\"([^\"]+)\"', open('$CHECK').read())
@@ -319,4 +342,4 @@ print('\n'.join(urls))
 done
 
 echo
-echo "Published: $BASE_URL$APPCAST_PATH"
+echo "Published: $PUBLIC_BASE_URL$APPCAST_PATH"

@@ -34,7 +34,13 @@ for arg in "$@"; do
   esac
 done
 
-BASE_URL="https://storage.googleapis.com/$BUCKET/"
+# shellcheck source=tool/lib/bucket_urls.sh
+source "$ROOT_DIR/tool/lib/bucket_urls.sh"
+# The build-number gate and the upload verification read the origin; the URLs
+# printed at the end are the ones a person would hand out, so they are the CDN's.
+# See tool/lib/bucket_urls.sh.
+ORIGIN_BASE_URL="$(origin_base_url "$BUCKET")"
+PUBLIC_BASE_URL="$(public_base_url "$BUCKET")"
 ARCH="$(uname -m)"
 
 gcloud_storage() {
@@ -72,7 +78,7 @@ echo "    size  $(du -h "$ZIP_PATH" | awk '{print $1}')"
 # ---------------------------------------------------------------------------
 echo
 echo "==> Checking the build number is newer than everything published"
-PUBLISHED_MAX="$(published_max_build "$BASE_URL$APPCAST_PATH")"
+PUBLISHED_MAX="$(published_max_build "$ORIGIN_BASE_URL$APPCAST_PATH")"
 echo "    pubspec build $BUILD_NUMBER, highest published $PUBLISHED_MAX"
 assert_build_is_newer "$BUILD_NUMBER" "$PUBLISHED_MAX"
 
@@ -176,7 +182,7 @@ rm -f "$SUMS"
 echo
 echo "==> Verifying the upload"
 CHECK="$(mktemp)"
-curl -fsSL "$BASE_URL$OBJECT_PATH" -o "$CHECK"
+curl -fsSL "$ORIGIN_BASE_URL$OBJECT_PATH" -o "$CHECK"
 ACTUAL="$(shasum -a 256 "$CHECK" | awk '{print $1}')"
 rm -f "$CHECK"
 if [[ "$ACTUAL" != "$SHA256" ]]; then
@@ -187,8 +193,8 @@ echo "    ok ($BYTES bytes)"
 
 echo
 echo "Published:"
-echo "  $BASE_URL$OBJECT_PATH"
-echo "  $BASE_URL$OBJECT_PATH.sha256"
+echo "  $PUBLIC_BASE_URL$OBJECT_PATH"
+echo "  $PUBLIC_BASE_URL$OBJECT_PATH.sha256"
 echo
 echo "Released versions:"
 curl -fsSL "https://storage.googleapis.com/storage/v1/b/$BUCKET/o?prefix=releases/macos/&delimiter=/" \

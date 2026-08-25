@@ -55,7 +55,12 @@ case "$ARCH" in
   *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
 esac
 
-BASE_URL="https://storage.googleapis.com/$BUCKET/"
+# shellcheck source=tool/lib/bucket_urls.sh
+source "$ROOT_DIR/tool/lib/bucket_urls.sh"
+# Publish-time reads go to the origin; the manifest hands users the CDN. See
+# tool/lib/bucket_urls.sh for why these must not be the same URL.
+ORIGIN_BASE_URL="$(origin_base_url "$BUCKET")"
+PUBLIC_BASE_URL="$(public_base_url "$BUCKET")"
 STAGING="$(mktemp -d)"
 trap 'rm -rf "$STAGING"' EXIT
 
@@ -130,12 +135,16 @@ done
 
 # Both probes read the bucket over plain HTTPS rather than through gcloud, so a
 # --dry-run reports the same decision an authenticated run would take.
+#
+# ORIGIN, never the CDN. These ask whether an object exists in the bucket and
+# what bytes it holds, and a cached answer — a 404 held at the edge, a sidecar
+# from before a repack — would resolve the archive to the wrong build number.
 object_exists() {
-  curl -fsI -o /dev/null "$BASE_URL$1"
+  curl -fsI -o /dev/null "$ORIGIN_BASE_URL$1"
 }
 
 published_sha() {
-  curl -fsSL "$BASE_URL$1.sha256" 2>/dev/null | awk '{print $1}'
+  curl -fsSL "$ORIGIN_BASE_URL$1.sha256" 2>/dev/null | awk '{print $1}'
 }
 
 # Finds where this archive belongs. Sets RESOLVED_{PATH,BUILD,ACTION}.
@@ -198,6 +207,7 @@ done
 echo
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "==> Dry run: nothing uploaded, manifest not written."
+  echo "    manifest baseUrl would be: $PUBLIC_BASE_URL"
   exit 0
 fi
 
@@ -230,7 +240,7 @@ echo "==> Verifying (re-download and re-hash)"
 # about to promise.
 while IFS='|' read -r id version object_path sha download_bytes installed_bytes base build action; do
   check="$STAGING/verify-$id.tar.gz"
-  curl -fsSL "$BASE_URL$object_path" -o "$check"
+  curl -fsSL "$ORIGIN_BASE_URL$object_path" -o "$check"
   actual="$(shasum -a 256 "$check" | awk '{print $1}')"
   if [[ "$actual" != "$sha" ]]; then
     echo "  MISMATCH for $object_path: expected $sha, got $actual" >&2
@@ -242,7 +252,7 @@ done <"$ENTRIES_JSON"
 
 echo
 echo "==> Writing $MANIFEST_FILE"
-python3 - "$MANIFEST_FILE" "$ENTRIES_JSON" "$PLATFORM" "$BASE_URL" <<'PYTHON'
+python3 - "$MANIFEST_FILE" "$ENTRIES_JSON" "$PLATFORM" "$PUBLIC_BASE_URL" <<'PYTHON'
 import json, sys, datetime
 
 manifest_path, entries_path, platform, base_url = sys.argv[1:5]
@@ -312,6 +322,12 @@ gcloud_storage cp "$MANIFEST_FILE" "gs://$BUCKET/manifest.json" \
   --cache-control="public, max-age=300" \
   --content-type="application/json"
 echo "  uploaded manifest.json"
+# manifest.json is mutable, so the edge is holding the previous one for up to
+# max-age=300. The app's own fetch defeats that with a cachebuster query
+# (ToolManifest.fetchPublished), so this is belt to that braces — but it is what
+# makes "publish, then check the URL by hand" behave.
+invalidate_cdn_path "$BUCKET" "/manifest.json" \
+  ${IMPERSONATE:+--impersonate-service-account="$IMPERSONATE"}
 
 echo
 echo "==> Smoke test: vendor signatures survived the tar round trip"

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "manifestId": "2026.08.18.0640",
-  "baseUrl": "https://storage.googleapis.com/serverpod-appstudio-toolchain/",
+  "baseUrl": "https://asdl.serverpod.dev/",
   "tools": [
     {
       "id": "flutter",
