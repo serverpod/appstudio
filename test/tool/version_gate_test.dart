@@ -145,16 +145,67 @@ void main() {
     });
   });
 
+  group('downloads_max_build', () {
+    /// The downloads pointer, as publish_downloads.sh writes it.
+    Future<String> downloadsWith({required int latest, required int preview}) async {
+      final file = File(p.join(tmp.path, 'macos.json'));
+      await file.writeAsString(
+        '{"latest": {"build": $latest, "url": "https://x/a.zip"},'
+        ' "preview": {"build": $preview, "url": "https://x/b.zip"}}',
+      );
+      return 'file://${file.path}';
+    }
+
+    test('reads the higher of latest and preview', () async {
+      final url = await downloadsWith(latest: 7, preview: 9);
+      expect(await sh('downloads_max_build "$url"'), (0, '9'));
+    });
+
+    test('fails open on a missing file', () async {
+      expect(
+        await sh('downloads_max_build "file:///nonexistent/macos.json"'),
+        (0, '0'),
+      );
+    });
+
+    test('unparseable JSON reads as 0, not as a crash', () async {
+      final file = File(p.join(tmp.path, 'broken.json'));
+      await file.writeAsString('not json');
+      expect(
+        await sh('downloads_max_build "file://${file.path}"'),
+        (0, '0'),
+      );
+    });
+
+    test('release_max_build takes the max of feed and downloads', () async {
+      final feed = await appcastWith([7]);
+      final downloads = await downloadsWith(latest: 7, preview: 12);
+      expect(
+        await sh('release_max_build "$feed" "$downloads"'),
+        (0, '12'),
+      );
+      expect(
+        await sh('release_max_build "$feed" "file:///nonexistent.json"'),
+        (0, '7'),
+      );
+    });
+  });
+
   group('set_version.sh', () {
     Future<(int, String, String)> run(
       String spec, {
       required String pubspec,
       required String appcastUrl,
+      String downloadsUrl = 'file:///nonexistent/macos.json',
     }) async {
       final result = await Process.run(
         '/bin/bash',
         [setVersion, spec],
-        environment: {'PUBSPEC': pubspec, 'APPCAST_URL': appcastUrl},
+        environment: {
+          'PUBSPEC': pubspec,
+          'APPCAST_URL': appcastUrl,
+          'DOWNLOADS_URL': downloadsUrl,
+        },
       );
       return (
         result.exitCode,
@@ -192,6 +243,26 @@ void main() {
       pubspec = await pubspecWith('1.0.0+7');
       expect((await run('3.1.4', pubspec: pubspec, appcastUrl: url)).$2,
           contains('version: 3.1.4+8'));
+    });
+
+    test('clears a build uploaded but not yet promoted', () async {
+      // The split release flow's window: b9 is uploaded (so it is in the
+      // downloads pointer) but not yet in the appcast. The next number must
+      // clear it, or promoting both would repeat a CFBundleVersion.
+      final pubspec = await pubspecWith('1.0.0+7');
+      final feed = await appcastWith([7]);
+      final downloads = File(p.join(tmp.path, 'pending.json'));
+      await downloads.writeAsString(
+        '{"latest": {"build": 7}, "preview": {"build": 9}}',
+      );
+      final (code, text, _) = await run(
+        'patch',
+        pubspec: pubspec,
+        appcastUrl: feed,
+        downloadsUrl: 'file://${downloads.path}',
+      );
+      expect(code, 0);
+      expect(text, contains('version: 1.0.1+10'));
     });
 
     test('"build" republishes the same version under a new counter', () async {

@@ -47,6 +47,45 @@ published_max_build() {
   printf '%s\n' "$out"
 }
 
+# downloads_max_build <downloads-json-url>
+#
+# Highest build recorded in downloads/macos.json — the pointer that also knows
+# about a build that was uploaded but not yet promoted into the appcast. The
+# appcast alone under-reports in exactly that window, and a build number chosen
+# from an under-report is the unfixable mistake. 0 when the file is missing or
+# unparseable, for the same fail-open reason as published_max_build.
+downloads_max_build() {
+  local url="$1" out
+  out="$(fetch_uncached "$url" | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    print(0)
+    raise SystemExit
+builds = [
+    entry.get("build")
+    for entry in (data.get("latest"), data.get("preview"))
+    if isinstance(entry, dict)
+]
+print(max([b for b in builds if isinstance(b, int)] or [0]))
+' 2>/dev/null || true)"
+  [[ "$out" =~ ^[0-9]+$ ]] || out=0
+  printf '%s\n' "$out"
+}
+
+# release_max_build <appcast-url> <downloads-url>
+#
+# The highest build number the world has seen: the live appcast (promoted
+# releases) plus the downloads pointer (uploads awaiting promotion). This is
+# what the next build number must clear.
+release_max_build() {
+  local a b
+  a="$(published_max_build "$1")"
+  b="$(downloads_max_build "$2")"
+  if [[ "$a" -ge "$b" ]]; then printf '%s\n' "$a"; else printf '%s\n' "$b"; fi
+}
+
 # curl, but guaranteed not to read a stale copy of the appcast.
 #
 # The feed is uploaded with `max-age=300`, so a plain GET can return the

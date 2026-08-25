@@ -31,6 +31,10 @@ BUCKET="${BUCKET:-serverpod-appstudio-toolchain}"
 # blinds every installed copy to updates forever, unfixably. It is the one place
 # in the release flow where a cached answer would do permanent damage.
 APPCAST_URL="${APPCAST_URL:-$(origin_base_url "$BUCKET")appcast/macos/appcast.xml}"
+# The downloads pointer knows about a build that was uploaded but not yet
+# promoted into the appcast — the appcast alone under-reports in exactly that
+# window, and the number handed out here must clear those uploads too.
+DOWNLOADS_URL="${DOWNLOADS_URL:-$(origin_base_url "$BUCKET")downloads/macos.json}"
 
 if [[ $# -ne 1 ]]; then
   sed -n '11,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -65,9 +69,10 @@ if [[ "$NEW_VERSION" != "$CUR_VERSION" ]] \
 fi
 
 # The counter has to clear everything already published, not just what happens
-# to be in this checkout — a colleague's release, or a rebased branch, would
-# otherwise hand out a build number Sparkle has already seen.
-PUBLISHED_MAX="$(published_max_build "$APPCAST_URL")"
+# to be in this checkout — a colleague's release, a rebased branch, or an
+# upload still waiting for promotion would otherwise hand out a build number
+# Sparkle has already seen (or is about to see).
+PUBLISHED_MAX="$(release_max_build "$APPCAST_URL" "$DOWNLOADS_URL")"
 NEW_BUILD="$CUR_BUILD"
 [[ "$PUBLISHED_MAX" -gt "$NEW_BUILD" ]] && NEW_BUILD="$PUBLISHED_MAX"
 NEW_BUILD="$((NEW_BUILD + 1))"

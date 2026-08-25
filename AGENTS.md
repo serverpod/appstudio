@@ -400,11 +400,11 @@ make deps              # pub get + CEF/pods (once, or when CEF is missing)
 make start             # flutter run -d macos
 make clean             # drop build/ + dist/ (keeps CEF, Pods, toolchain/)
 make clean_all         # also drop CEF, Pods and the dev toolchain
-make dist_debug        # unsigned zip
-make dist              # Developer ID + notarized zip
+make build_debug       # unsigned zip
+make build             # Developer ID + notarized zip
 ```
 
-`start` / `dist` / `dist_debug` only need CEF; the app downloads its own tools.
+`start` / `build` / `build_debug` only need CEF; the app downloads its own tools.
 
 **Stale-embed trap:** Xcode never deletes unknown files under `Contents/Resources`, so a build tree from before the toolchain moved out keeps a ~1.8 GB embed alive — it gets re-signed on every release and shipped in the archive (2.1 GB app instead of 350 MB). `distribute_macos.sh` deletes it defensively; `make clean` is the honest fix.
 
@@ -432,10 +432,9 @@ make dist              # Developer ID + notarized zip
 ```bash
 make update_serverpod V=4.0.0-beta.2          # copy from the local dart install
 make update_flutter   V=3.44.2                # download full SDK + set pin; carries Dart
-./tool/bundle_toolchain.sh                    # or: build every tree at once
-./tool/publish_toolchain.sh --dry-run         # sizes and targets, no upload
-./tool/publish_toolchain.sh --only=git        # publish a subset
-./tool/publish_toolchain.sh                   # publish everything
+make dev_toolchain                            # or: build every tree at once
+make publish_toolchain                        # dry-run, confirm, then publish
+./tool/publish_toolchain.sh --only=git        # publish a subset (script directly)
 ```
 
 - **There is no download for the Serverpod CLI** — pub publishes no macOS
@@ -516,13 +515,13 @@ owns the distinction; nothing derives one URL from the other.
   (`public_base_url`). The CDN fronts exactly one bucket, so stamping its host
   into a manifest built from a different one yields downloads that 404 — or,
   worse, silently resolve to the production object sharing that path.
-- **Only the two mutable objects are invalidated**, `appcast.xml` and
-  `manifest.json`, both published with `max-age=300`. `invalidate_cdn_path` is
-  best-effort and returns 0: the object is already in the bucket, the TTL it
-  waits out is five minutes, and everything that must not be stale reads the
-  origin anyway — so failing a release that already succeeded would be the worse
-  outcome. Invalidating an immutable object is meaningless and the quota is
-  small, so nothing else gets one.
+- **Only the three mutable objects are invalidated** — `appcast.xml` and
+  `manifest.json` (`max-age=300`) and `downloads/macos.json` (`max-age=60`).
+  `invalidate_cdn_path` is best-effort and returns 0: the object is already in
+  the bucket, the TTL it waits out is minutes, and everything that must not be
+  stale reads the origin anyway — so failing a release that already succeeded
+  would be the worse outcome. Invalidating an immutable object is meaningless
+  and the quota is small, so nothing else gets one.
 - **Negative caching is off on the backend bucket, deliberately.** The cache
   mode enables it by default and would hold a `404` for 120 s; every publish path
   here probes for object *absence*, so a freshly published object answering 404
@@ -572,13 +571,35 @@ Opened Serverpod projects must launch Flutter in **`web-server`** mode on port *
 
 ### Release / distribute
 
+Releasing is **two deliberate halves**, so a build can be tested on another
+Mac before any existing install is offered it:
+
 ```bash
-make release V=1.2.3      # set the version, then everything below
-make dist                 # build + sign + notarize + PUBLISH to the bucket
-PUBLISH=0 make dist       # stop at the local zip
-make publish_dist         # upload an already-built zip
-make dist_debug           # unsigned, local only, never uploaded
+make release V=1.2.3      # set the version + build + notarize + upload —
+                          # downloadable by direct URL, NOT yet an auto-update
+make promote              # add it to the appcast: auto-update goes live
+
+make set_version V=1.2.3  # the individual steps release is made of
+make build                # signed + notarized zip in dist/, nothing uploaded
+make publish              # upload the built zip (re-runnable: identical bytes
+                          # are recognised and skipped)
+make build_debug          # unsigned, local only, never uploaded
 ```
+
+`make publish` (`tool/publish_dist.sh`) uploads the zip and its `.sha256`
+sidecar and moves the **preview** entry of `downloads/macos.json`; the appcast
+is untouched, so existing installs see nothing. `make promote`
+(`tool/publish_appcast.sh`) is the step that reaches users — it confirms
+interactively, inserts the build into the feed, and catches the **latest**
+entry up.
+
+**`downloads/macos.json`** is the pointer the website's download page reads:
+`latest` (the newest build in the appcast) and `preview` (the newest upload,
+which may not be promoted yet), each a full URL plus version, build and sha256.
+When nothing awaits promotion the two entries are identical. It is mutable,
+served with `max-age=60`, and derived entirely from published state by
+`tool/publish_downloads.sh` — both publish scripts re-run it, so it never
+needs running by hand and is always safe to re-run.
 
 Defaults, all overridable from the environment: bundle id
 `dev.serverpod.appstudio`, team Serverpod AB (`WK2NRY4GS4`),
@@ -627,16 +648,22 @@ repeat or a rollback makes every installed copy see "you're up to date" forever,
 and because published objects are immutable it cannot be fixed by re-uploading.
 
 Never hand-edit the version. Use `make set_version V=1.2.3` (or
-`V=patch|minor|major|build`), which reads the live appcast and picks a counter
-that clears everything already published — including releases made from another
-checkout. `publish_dist.sh` re-checks the same gate before uploading. Both share
-`tool/lib/pubspec_version.sh`; `test/tool/version_gate_test.dart` covers it.
+`V=patch|minor|major|build`), which reads the live appcast **and** the
+`downloads/macos.json` pointer — the latter is what knows about a build
+uploaded but not yet promoted, which the appcast alone under-reports — and
+picks a counter that clears everything, including releases made from another
+checkout. `publish_dist.sh` re-checks the appcast gate before uploading. All
+of it shares `tool/lib/pubspec_version.sh`;
+`test/tool/version_gate_test.dart` covers it.
 
-**`make dist` publishes.** `tool/publish_dist.sh` derives the path from
-`pubspec.yaml` (`version: 1.0.0+1` → `releases/macos/1.0.0/b1/AppStudio-1.0.0-arm64.zip`)
+`tool/publish_dist.sh` derives the path from `pubspec.yaml`
+(`version: 1.0.0+1` → `releases/macos/1.0.0/b1/AppStudio-1.0.0-arm64.zip`)
 and uploads with `--if-generation-match=0`, so objects are immutable — a
 re-release means bumping the build number, never overwriting a URL someone
-already has. A `.sha256` sidecar goes up alongside it.
+already has. A `.sha256` sidecar goes up alongside it. A re-run for bytes
+already published is recognised (via the sidecar) and skipped, so `make
+publish` is idempotent; the same path holding *different* bytes is a hard
+error.
 
 Four gates run before any upload, all verified to reject:
 - the build number must beat every `sparkle:version` in the live appcast,
@@ -660,7 +687,8 @@ Sparkle owns the update UI. A Flutter dialog cannot show install progress after
 our own process has terminated, which is exactly when it matters.
 
 ```
-appcast/macos/appcast.xml       MUTABLE — the one rewritable object in the bucket
+appcast/macos/appcast.xml       MUTABLE — what installed copies poll (max-age=300)
+downloads/macos.json            MUTABLE — latest + preview links for the website (max-age=60)
 releases/macos/<v>/b<n>/*.zip   immutable
 ```
 
@@ -743,8 +771,8 @@ file is sitting in the repo.
 ### Releasing
 
 ```bash
-make release V=1.2.3     # set version -> build -> notarize -> publish -> appcast
-make publish_appcast     # dry-run the feed; prints how to publish for real
+make release V=1.2.3     # set version -> build -> notarize -> upload
+make promote             # add the uploaded build to the feed (confirms first)
 ```
 
 `tool/ensure_sparkle_tools.sh` fetches `generate_appcast` / `sign_update` /
@@ -752,16 +780,23 @@ make publish_appcast     # dry-run the feed; prints how to publish for real
 hardcoded constant — the tools and the embedded framework must be the same
 release or the feed's signatures will not verify.
 
-`generate_appcast` only sees a flat directory, so it builds enclosure URLs as
-`<prefix><filename>`; `publish_appcast.sh` rewrites each one to the real
-`releases/macos/<v>/b<n>/` object, then fetches the published feed back and
-checks every enclosure actually resolves.
+**The appcast is updated incrementally.** `publish_appcast.sh` downloads only
+the one zip being promoted — from the *bucket*, never from `dist/`, verified
+against its `.sha256` sidecar, because the feed describes the published object
+and that object is what gets signed — runs `generate_appcast` over just that
+file, and inserts the resulting item into the live feed. Existing items pass
+through byte-for-byte with the signatures they already have, and only the new
+enclosure is probed for reachability: the old flow re-downloaded, re-signed
+and re-probed every published release (N×350 MB) to say something about one
+build. Promoting a build already in the feed is a no-op that still refreshes
+`downloads/macos.json`, so a half-finished promote can just be re-run.
 
-**Every published release stays in the feed** (`--maximum-versions 0`). The
-default is 3 and the pruning is *silent* — `generate_appcast` moves older
-archives into `old_updates/` and drops them. Keeping everything means the feed
-is exactly the set of published objects, which is an invariant the script can
-and does check. Items are ~0.5 KB.
+`generate_appcast` only sees a flat directory, so it builds the enclosure URL
+as `<prefix><filename>`; the script rewrites it to the real
+`releases/macos/<v>/b<n>/` object and refuses an item that names any other
+URL, a different build number, or no signature. Every release stays in the
+feed forever — items are ~0.5 KB, and the monotonic build-number gate runs
+against the feed itself before anything is inserted.
 
 **The signing key is checked against the shipped key before anything uploads.**
 `generate_appcast` signs with the Keychain private key; installed copies verify

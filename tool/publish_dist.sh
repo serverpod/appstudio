@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
 #
-# Uploads the release DMG in dist/macos to the public bucket, under a path
-# derived from the pubspec version.
+# Uploads the release zip in dist/macos to the public bucket, under a path
+# derived from the pubspec version, and refreshes the "preview" entry in
+# downloads/macos.json.
+#
+# This does NOT touch the appcast. The uploaded build is reachable through its
+# direct URL (printed at the end) so it can be tested on another Mac first;
+# `make promote` (tool/publish_appcast.sh) is what makes it the live
+# auto-update for existing installs.
 #
 # Object names are immutable: every upload uses --if-generation-match=0, so a
 # name collision fails instead of overwriting. (That flag is what enforces it —
 # NOT the IAM role, which for a project owner does permit overwrite.)
 # Re-releasing therefore means bumping the build number in pubspec.yaml, which
-# is deliberate: a download URL should never change meaning.
+# is deliberate: a download URL should never change meaning. Re-running with
+# the SAME bytes is fine — the upload is recognised and skipped.
 #
 # Usage:
 #   tool/publish_dist.sh [--dry-run] [--bucket=NAME] [--allow-unnotarized]
@@ -59,7 +66,7 @@ read -r APP_VERSION BUILD_NUMBER <<<"$(read_pubspec_version "$ROOT_DIR/pubspec.y
 ZIP_PATH="$DIST_DIR/AppStudio-$ARCH.zip"
 if [[ ! -f "$ZIP_PATH" ]]; then
   echo "error: no archive at $ZIP_PATH" >&2
-  echo "Run 'make dist' first." >&2
+  echo "Run 'make build' first." >&2
   exit 1
 fi
 
@@ -77,9 +84,9 @@ echo "    size  $(du -h "$ZIP_PATH" | awk '{print $1}')"
 # updates — and because objects are immutable it cannot be fixed by reuploading.
 # ---------------------------------------------------------------------------
 echo
-echo "==> Checking the build number is newer than everything published"
+echo "==> Checking the build number is newer than everything in the appcast"
 PUBLISHED_MAX="$(published_max_build "$ORIGIN_BASE_URL$APPCAST_PATH")"
-echo "    pubspec build $BUILD_NUMBER, highest published $PUBLISHED_MAX"
+echo "    pubspec build $BUILD_NUMBER, highest promoted $PUBLISHED_MAX"
 assert_build_is_newer "$BUILD_NUMBER" "$PUBLISHED_MAX"
 
 # ---------------------------------------------------------------------------
@@ -112,7 +119,7 @@ echo "    archive reports version $ZIP_VERSION (build $ZIP_BUILD)"
 
 if [[ "$ZIP_VERSION" != "$APP_VERSION" ]]; then
   echo "error: the archive contains $ZIP_VERSION but pubspec.yaml says $APP_VERSION." >&2
-  echo "That archive is stale. Run 'make clean && make dist'." >&2
+  echo "That archive is stale. Run 'make clean && make build'." >&2
   exit 1
 fi
 if [[ "$ZIP_BUILD" != "$BUILD_NUMBER" ]]; then
@@ -124,7 +131,7 @@ fi
 # anyway. distribute_macos.sh drops it, but verify what we are uploading.
 if [[ -d "$UNPACKED_APP/Contents/Resources/toolchain" ]]; then
   echo "error: this build still embeds a toolchain — it came from a stale tree." >&2
-  echo "Run 'make clean && make dist'." >&2
+  echo "Run 'make clean && make build'." >&2
   exit 1
 fi
 
@@ -160,24 +167,42 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
-echo
-echo "==> Uploading"
-# --if-generation-match=0 means "only if this object does not exist", so a
-# repeat publish of the same version fails loudly instead of overwriting.
-gcloud_storage cp "$ZIP_PATH" "gs://$BUCKET/$OBJECT_PATH" \
-  --if-generation-match=0 \
-  --cache-control="public, max-age=31536000, immutable" \
-  --content-type="application/zip"
+# A re-run for bytes already in the bucket is fine (a failed downloads-pointer
+# update, a second `make publish` to be sure); the same PATH holding DIFFERENT
+# bytes means a stale or rebuilt archive and needs a new build number.
+ALREADY_PUBLISHED="$(
+  curl -fsSL "$ORIGIN_BASE_URL$OBJECT_PATH.sha256" 2>/dev/null \
+    | awk '{print $1; exit}' || true
+)"
+if [[ -n "$ALREADY_PUBLISHED" && "$ALREADY_PUBLISHED" != "$SHA256" ]]; then
+  echo "error: gs://$BUCKET/$OBJECT_PATH already exists with different bytes." >&2
+  echo "Published objects are immutable — bump the build number:" >&2
+  echo "  make set_version V=build && make build && make publish" >&2
+  exit 1
+fi
 
-# Sidecar so users can verify a download without trusting the page they got
-# the link from.
-SUMS="$(mktemp)"
-printf '%s  %s\n' "$SHA256" "$OBJECT_NAME" >"$SUMS"
-gcloud_storage cp "$SUMS" "gs://$BUCKET/$OBJECT_PATH.sha256" \
-  --if-generation-match=0 \
-  --cache-control="public, max-age=31536000, immutable" \
-  --content-type="text/plain"
-rm -f "$SUMS"
+echo
+if [[ -n "$ALREADY_PUBLISHED" ]]; then
+  echo "==> Already uploaded (byte-identical) — skipping the upload"
+else
+  echo "==> Uploading"
+  # --if-generation-match=0 means "only if this object does not exist", so a
+  # repeat publish of the same version fails loudly instead of overwriting.
+  gcloud_storage cp "$ZIP_PATH" "gs://$BUCKET/$OBJECT_PATH" \
+    --if-generation-match=0 \
+    --cache-control="public, max-age=31536000, immutable" \
+    --content-type="application/zip"
+
+  # Sidecar so users can verify a download without trusting the page they got
+  # the link from.
+  SUMS="$(mktemp)"
+  printf '%s  %s\n' "$SHA256" "$OBJECT_NAME" >"$SUMS"
+  gcloud_storage cp "$SUMS" "gs://$BUCKET/$OBJECT_PATH.sha256" \
+    --if-generation-match=0 \
+    --cache-control="public, max-age=31536000, immutable" \
+    --content-type="text/plain"
+  rm -f "$SUMS"
+fi
 
 echo
 echo "==> Verifying the upload"
@@ -191,12 +216,16 @@ if [[ "$ACTUAL" != "$SHA256" ]]; then
 fi
 echo "    ok ($BYTES bytes)"
 
+# The website's "preview" pointer follows the newest upload.
 echo
-echo "Published:"
+"$ROOT_DIR/tool/publish_downloads.sh" --bucket="$BUCKET" \
+  ${IMPERSONATE:+--impersonate-service-account="$IMPERSONATE"}
+
+echo
+echo "Uploaded, NOT yet in the appcast — existing installs are untouched."
+echo
+echo "Test this build on another Mac:"
 echo "  $PUBLIC_BASE_URL$OBJECT_PATH"
-echo "  $PUBLIC_BASE_URL$OBJECT_PATH.sha256"
 echo
-echo "Released versions:"
-curl -fsSL "https://storage.googleapis.com/storage/v1/b/$BUCKET/o?prefix=releases/macos/&delimiter=/" \
-  | python3 -c "import json,sys; [print('  ' + p) for p in json.load(sys.stdin).get('prefixes', [])]" \
-  2>/dev/null || true
+echo "When it checks out, make it the live auto-update:"
+echo "  make promote"

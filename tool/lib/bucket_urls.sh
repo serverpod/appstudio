@@ -51,10 +51,10 @@ public_base_url() {
 
 # invalidate_cdn_path <bucket> <path> [extra gcloud args...]
 #
-# Drops one path from the CDN edge caches. Only the two MUTABLE objects need
-# this — appcast.xml and manifest.json, both published with max-age=300 — and
-# only they may have it: invalidating an immutable object is meaningless, and the
-# quota is per-project and small.
+# Drops one path from the CDN edge caches. Only the three MUTABLE objects need
+# this — appcast.xml and manifest.json (max-age=300) and downloads/macos.json
+# (max-age=60) — and only they may have it: invalidating an immutable object is
+# meaningless, and the quota is per-project and small.
 #
 # Best-effort by design. The object is already in the bucket by the time this
 # runs, the TTL it would wait out is five minutes, and every reader that must

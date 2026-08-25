@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
 #
-# Regenerates the Sparkle appcast from the published releases and uploads it.
+# Promotes the build pubspec.yaml names into the Sparkle appcast — the moment
+# auto-update starts offering it to every installed copy. Until this runs, an
+# uploaded build is reachable only through its direct download URL (and the
+# "preview" entry in downloads/macos.json), which is what makes "upload, test
+# on another Mac, then promote" possible.
 #
-# The appcast is the ONE mutable object in the bucket. Everything else uses
-# --if-generation-match=0; this file has to be rewritten on every release, so
-# it deliberately does not. That is the whole exception, and it is why the feed
-# is signed: a rewritable object is only as trustworthy as its signature.
+# The appcast is mutable where everything else in the bucket uses
+# --if-generation-match=0: it has to be rewritten on every release. That is
+# why the feed is signed — a rewritable object is only as trustworthy as its
+# signature.
 #
-# Flow: download every published release zip -> run generate_appcast over the
-# directory (which reads the private key from the login Keychain and signs each
-# item with EdDSA) -> rewrite the enclosure URLs to point back at the bucket ->
-# upload -> fetch it back and verify.
+# The update is INCREMENTAL: download the one zip being promoted from the
+# bucket, verify it against its .sha256 sidecar, run generate_appcast over just
+# that file (it reads the private key from the login Keychain and signs the
+# item with EdDSA), then insert the new item into the live feed. Existing items
+# are carried over byte-for-byte with the signatures they already have — the
+# old flow re-downloaded and re-signed every published release on every run,
+# which was N×350 MB of work to say something about one build.
 #
 # Usage:
 #   tool/publish_appcast.sh [--dry-run] [--bucket=NAME]
@@ -113,43 +120,78 @@ fi
 echo "==> Signing key matches the one shipped in the app"
 
 # ---------------------------------------------------------------------------
-# Collect every published release. generate_appcast needs the actual bundles:
-# it reads each one's CFBundleVersion and signs the archive, so a feed cannot
-# be assembled from listings alone.
+# What is being promoted: exactly what pubspec.yaml names. That build must
+# already be uploaded (make publish); this script never uploads archives.
 # ---------------------------------------------------------------------------
+read -r APP_VERSION BUILD_NUMBER <<<"$(read_pubspec_version "$ROOT_DIR/pubspec.yaml")"
+ARCH="$(uname -m)"
+OBJECT_NAME="AppStudio-$APP_VERSION-$ARCH.zip"
+OBJECT_PATH="releases/macos/$APP_VERSION/b$BUILD_NUMBER/$OBJECT_NAME"
+NEW_URL="$PUBLIC_BASE_URL$OBJECT_PATH"
+
+echo
+echo "==> Promoting App Studio $APP_VERSION (build $BUILD_NUMBER) into the appcast"
+
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 RELEASES="$WORK/releases"
 mkdir -p "$RELEASES"
 
-echo "==> Collecting published releases"
-OBJECTS="$(
-  gcloud storage ls "gs://$BUCKET/releases/macos/**/*.zip" 2>/dev/null || true
-)"
-if [[ -z "$OBJECTS" ]]; then
-  echo "error: no release archives under gs://$BUCKET/releases/macos/" >&2
-  echo "Publish a build first: make dist" >&2
-  exit 1
+# ---------------------------------------------------------------------------
+# The live feed, read from the origin without the cache — this is the document
+# being edited, and editing a stale copy would silently drop a release.
+# ---------------------------------------------------------------------------
+EXISTING="$WORK/existing.xml"
+HAVE_FEED=0
+if fetch_uncached "$ORIGIN_BASE_URL$APPCAST_PATH" >"$EXISTING" && [[ -s "$EXISTING" ]]; then
+  HAVE_FEED=1
 fi
 
-# Remember where each file came from, so the feed can point at the immutable
-# object rather than at the flat directory generate_appcast sees.
-MAP="$WORK/map.txt"
-: >"$MAP"
-while IFS= read -r obj; do
-  [[ -n "$obj" ]] || continue
-  name="$(basename "$obj")"
-  if [[ -f "$RELEASES/$name" ]]; then
-    echo "error: two published objects share the filename $name:" >&2
-    grep -F "	$name" "$MAP" >&2 || true
-    echo "  $obj" >&2
-    echo "The feed cannot tell them apart. Rename one before republishing." >&2
-    exit 1
+if [[ "$HAVE_FEED" == "1" ]] \
+  && grep -Eq "<sparkle:version>[[:space:]]*$BUILD_NUMBER[[:space:]]*</sparkle:version>" \
+    "$EXISTING"; then
+  echo "    build $BUILD_NUMBER is already in the appcast — nothing to promote."
+  if [[ "$DRY_RUN" != "1" ]]; then
+    # Re-running after a half-finished promote: make sure the downloads
+    # pointer caught up too.
+    "$ROOT_DIR/tool/publish_downloads.sh" --bucket="$BUCKET" \
+      ${IMPERSONATE:+--impersonate-service-account="$IMPERSONATE"}
   fi
-  echo "    $obj"
-  gcloud_storage cp "$obj" "$RELEASES/$name" >/dev/null
-  printf '%s\t%s\n' "${obj#gs://$BUCKET/}" "$name" >>"$MAP"
-done <<<"$OBJECTS"
+  exit 0
+fi
+
+# The monotonic gate, against the feed itself. Promoting a build Sparkle has
+# already seen a higher number than would be invisible to every install.
+if [[ "$HAVE_FEED" == "1" ]]; then
+  FEED_MAX="$(sparkle_max_build <"$EXISTING")"
+  assert_build_is_newer "$BUILD_NUMBER" "$FEED_MAX"
+fi
+
+# ---------------------------------------------------------------------------
+# Fetch the one zip being promoted and prove it is the upload it claims to be.
+# generate_appcast needs the actual bundle — it reads CFBundleVersion and signs
+# the archive — and the bytes MUST come from the bucket, not from dist/: the
+# feed describes the published object, so that object is what gets signed.
+# ---------------------------------------------------------------------------
+echo
+echo "==> Fetching the uploaded build"
+if ! curl -fsSL "$ORIGIN_BASE_URL$OBJECT_PATH" -o "$RELEASES/$OBJECT_NAME"; then
+  echo "error: nothing is uploaded at $ORIGIN_BASE_URL$OBJECT_PATH" >&2
+  echo "Run 'make publish' first." >&2
+  exit 1
+fi
+EXPECTED_SHA="$(
+  curl -fsSL "$ORIGIN_BASE_URL$OBJECT_PATH.sha256" | awk '{print $1; exit}'
+)" || {
+  echo "error: no .sha256 sidecar next to the uploaded zip" >&2
+  exit 1
+}
+ACTUAL_SHA="$(shasum -a 256 "$RELEASES/$OBJECT_NAME" | awk '{print $1}')"
+if [[ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]]; then
+  echo "error: the uploaded zip hashes $ACTUAL_SHA but its sidecar says $EXPECTED_SHA" >&2
+  exit 1
+fi
+echo "    sha256 verified against the published sidecar"
 
 # ---------------------------------------------------------------------------
 # Generate. The private key is read from the Keychain via SecItemCopyMatching,
@@ -157,24 +199,15 @@ done <<<"$OBJECTS"
 # for access the first time.
 # ---------------------------------------------------------------------------
 echo
-echo "==> Generating and signing the appcast"
-# --maximum-deltas 0 keeps deltas OFF.
+echo "==> Generating and signing the new item"
+# generate_appcast only sees the one zip being promoted, so it emits a
+# single-item feed; the item is extracted and merged into the live feed below.
 #
-# generate_appcast turns them on by itself as soon as two versions are present,
-# and then writes <sparkle:deltas> enclosures for .delta files that this script
-# neither uploads nor knows how to name — so the feed points at objects that do
-# not exist. Enabling deltas properly is its own piece of work: the files need
-# an immutable path, and because every release regenerates every delta, the
-# upload cannot simply use --if-generation-match=0 the way the release zips do.
-# Until that is designed and measured, full updates only.
-# --maximum-versions 0 keeps EVERY published release in the feed.
-#
-# The default is 3, and the pruning is silent: `generate_appcast` quietly moves
-# older archives into an old_updates/ directory and drops them from the feed.
-# That makes the feed disagree with the bucket, and it makes "did this publish
-# work?" impossible to answer by inspection. Keeping everything means the feed
-# is exactly the set of published objects — an invariant this script then
-# checks. Items are ~0.5 KB, so the feed stays small for a long time.
+# --maximum-deltas 0 keeps deltas OFF. generate_appcast turns them on by itself
+# the moment two versions are present in its directory — only one ever is now,
+# but the flag stays, because a .delta enclosure points at a file this script
+# neither uploads nor knows how to name. --maximum-versions 0 for the same
+# belt-and-braces reason: the default (3) silently prunes.
 "$SPARKLE_BIN/generate_appcast" \
   --maximum-versions 0 \
   --maximum-deltas 0 \
@@ -182,54 +215,58 @@ echo "==> Generating and signing the appcast"
   --link "https://serverpod.dev" \
   "$RELEASES"
 
-FEED="$RELEASES/appcast.xml"
-if [[ ! -f "$FEED" ]]; then
+GENERATED="$RELEASES/appcast.xml"
+if [[ ! -f "$GENERATED" ]]; then
   echo "error: generate_appcast produced no appcast.xml" >&2
   exit 1
 fi
 
-# generate_appcast builds URLs as <prefix><filename>, because it only sees a
-# flat directory. The real objects live under releases/macos/<v>/b<n>/, so
-# rewrite each enclosure to its true path.
-python3 - "$FEED" "$MAP" "$PUBLIC_BASE_URL" <<'PY'
+# Merge: rewrite the generated enclosure URL to the real object path (the tool
+# builds <prefix><filename> because it only sees a flat directory), check the
+# item says exactly what we mean to publish, and insert it at the top of the
+# live feed. Existing items pass through untouched.
+FEED="$WORK/merged.xml"
+python3 - "$GENERATED" "$EXISTING" "$FEED" \
+  "$PUBLIC_BASE_URL$OBJECT_NAME" "$NEW_URL" "$BUILD_NUMBER" "$HAVE_FEED" <<'PY'
 import re, sys
-feed_path, map_path, base = sys.argv[1], sys.argv[2], sys.argv[3]
-with open(map_path) as f:
-    paths = dict(
-        (name, obj)
-        for obj, name in (line.rstrip("\n").split("\t") for line in f if line.strip())
-    )
-with open(feed_path) as f:
-    feed = f.read()
-missing = []
-for name, obj in paths.items():
-    flat = base + name
-    if flat in feed:
-        feed = feed.replace(flat, base + obj)
-    elif base + obj not in feed:
-        missing.append(name)
-if missing:
-    sys.exit(
-        "error: these published archives are missing from the generated feed:\n  "
-        + "\n  ".join(missing)
-        + "\n\ngenerate_appcast dropped them. Check --maximum-versions (0 keeps"
-        "\nall) and look for an old_updates/ directory beside the archives."
-    )
+gen_path, old_path, out_path, flat_url, real_url, build, have_feed = sys.argv[1:8]
 
-# Every enclosure must now point at an object we actually published. Anything
-# else means generate_appcast emitted a file this script does not upload — as
-# it did for delta updates — and the feed would advertise a 404. Catch it here,
-# by name, instead of at the reachability check after the feed is already live.
-known = {base + obj for obj in paths.values()}
-bad = [u for u in re.findall(r'url="([^"]+)"', feed) if u not in known]
-if bad:
-    sys.exit(
-        "error: the feed references files this script does not publish:\n  "
-        + "\n  ".join(bad)
-    )
+with open(gen_path) as f:
+    generated = f.read()
+generated = generated.replace(flat_url, real_url)
 
-with open(feed_path, "w") as f:
-    f.write(feed)
+items = re.findall(r"<item>.*?</item>", generated, re.S)
+if len(items) != 1:
+    sys.exit(f"error: generate_appcast emitted {len(items)} items, expected 1")
+item = items[0]
+
+if not re.search(
+    rf"<sparkle:version>\s*{build}\s*</sparkle:version>", item
+) and not re.search(rf'sparkle:version="{build}"', item):
+    sys.exit(f"error: the generated item does not carry build {build} — "
+             "the zip in the bucket is not the build pubspec.yaml names")
+if "sparkle:edSignature" not in item:
+    sys.exit("error: the generated item is not signed")
+urls = re.findall(r'url="([^"]+)"', item)
+if urls != [real_url]:
+    sys.exit("error: the item references URLs this script does not publish:\n  "
+             + "\n  ".join(urls))
+
+if have_feed == "1":
+    with open(old_path) as f:
+        old = f.read()
+    # Newest first, matching what generate_appcast itself writes.
+    if "<item>" in old:
+        merged = old.replace("<item>", item + "\n        <item>", 1)
+    elif "</channel>" in old:
+        merged = old.replace("</channel>", item + "\n    </channel>", 1)
+    else:
+        sys.exit("error: the live appcast has no <channel> to insert into")
+else:
+    merged = generated
+
+with open(out_path, "w") as f:
+    f.write(merged)
 PY
 
 echo
@@ -322,24 +359,25 @@ for attempt in 1 2 3 4 5; do
   sleep 3
 done
 
-# Every enclosure must actually be fetchable, or an update check offers a
-# download that 404s. These are CDN URLs now, so this exercises the exact path
-# Sparkle will take — including whether the load balancer is actually serving the
-# bucket, which nothing else here would notice. Safe to check immediately:
-# release zips are immutable and negative caching is off on the backend bucket,
-# so there is no cached 404 to trip over.
-python3 -c "
-import re,sys
-urls = re.findall(r'url=\"([^\"]+)\"', open('$CHECK').read())
-print('\n'.join(urls))
-" | while IFS= read -r url; do
-  [[ -n "$url" ]] || continue
-  if ! curl -fsSL -I "$url" >/dev/null 2>&1; then
-    echo "error: enclosure is not reachable: $url" >&2
-    exit 1
-  fi
-  echo "    ok $url"
-done
+# The new enclosure must actually be fetchable, or the update check offers a
+# download that 404s. It is a CDN URL, so this exercises the exact path Sparkle
+# will take — including whether the load balancer is actually serving the
+# bucket. Only the item just added is checked: every older enclosure was
+# checked when IT was promoted, and the objects are immutable, so re-probing
+# them on every release proves nothing new. Safe to check immediately: release
+# zips are immutable and negative caching is off on the backend bucket, so
+# there is no cached 404 to trip over.
+if ! curl -fsSL -I "$NEW_URL" >/dev/null 2>&1; then
+  echo "error: enclosure is not reachable: $NEW_URL" >&2
+  exit 1
+fi
+echo "    ok $NEW_URL"
+
+# The download page's "latest" pointer follows the appcast; catch it up.
+echo
+"$ROOT_DIR/tool/publish_downloads.sh" --bucket="$BUCKET" \
+  ${IMPERSONATE:+--impersonate-service-account="$IMPERSONATE"}
 
 echo
 echo "Published: $PUBLIC_BASE_URL$APPCAST_PATH"
+echo "App Studio $APP_VERSION (build $BUILD_NUMBER) is now live for auto-update."
