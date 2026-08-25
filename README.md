@@ -43,29 +43,36 @@ One-time setup on a release machine:
   Secret Manager — see `AGENTS.md`, "Back up the signing key".
 - `gcloud` authenticated with write access to the release bucket.
 
-Then the whole release is one command:
+Then a release is two commands, with room to test in between:
 
 ```bash
-make release V=1.2.3        # set version → build → sign → notarize → publish → appcast
+make release V=1.2.3        # set version → build → sign → notarize → upload
+# ...download the printed URL on another Mac and try the build...
+make promote                # add it to the appcast — auto-update goes live
 ```
+
+`make release` uploads the zip and points the **preview** entry of
+`downloads/macos.json` (the file the website's download page reads) at it, but
+leaves the appcast alone — existing installs are not offered anything until
+`make promote`, which confirms interactively and then moves the **latest**
+entry up too.
 
 `V=` also takes `patch`, `minor`, `major` or `build`. The version step picks a
-build counter that clears everything already in the live appcast, and the
-publish re-checks the same gate — plus that the zip's `Info.plist` matches
-`pubspec.yaml`, that no stale toolchain embed survived, and that the
-notarization ticket is stapled — before anything uploads. Uploads are immutable:
-a bad release is fixed by shipping the next build number, never by replacing an
-object.
+build counter that clears everything already published — the live appcast plus
+any upload still waiting for promotion — and the upload re-checks the appcast
+gate, plus that the zip's `Info.plist` matches `pubspec.yaml`, that no stale
+toolchain embed survived, and that the notarization ticket is stapled, before
+anything goes out. Uploads are immutable: a bad release is fixed by shipping
+the next build number, never by replacing an object.
 
-To inspect the zip before it goes out, split the same flow:
+The first half also comes apart, to inspect the zip before it goes out:
 
 ```bash
-PUBLISH=0 make dist         # build + sign + notarize, stop at dist/macos/*.zip
-make publish_dist           # upload the zip
-make publish_appcast        # dry-runs the Sparkle feed, prints the real command
+make build                  # sign + notarize, stop at dist/macos/*.zip
+make publish                # upload it (re-runnable: identical bytes are skipped)
 ```
 
-`make dist_debug` builds an unsigned zip for local use only — copied to another
+`make build_debug` builds an unsigned zip for local use only — copied to another
 Mac it trips Gatekeeper ("damaged"), which is quarantine, not damage.
 
 A clean, notarized `.app` is ~350 MB; ~2.1 GB means a stale build tree — run
@@ -81,8 +88,7 @@ updates for good — use `make set_version` (which `make release` runs for you).
 dart install serverpod_cli 4.0.0-beta.3     # pub publishes no macOS archive
 make update_serverpod V=4.0.0-beta.3
 # raise "hostAccepts" in assets/toolchain_manifest.json if this is a new minimum
-./tool/publish_toolchain.sh --only=serverpod_cli --dry-run
-./tool/publish_toolchain.sh --only=serverpod_cli
+make publish_toolchain
 git add -A && git commit
 ```
 
@@ -95,8 +101,7 @@ web, so expect a multi-GB download and upload.
 ```bash
 make update_flutter V=3.45.0
 # raise "hostAccepts" — a minor bump falls outside the pinned range
-./tool/publish_toolchain.sh --only=flutter --dry-run
-./tool/publish_toolchain.sh --only=flutter
+make publish_toolchain
 git add -A && git commit                    # includes assets/toolchain_manifest.json
 ```
 
@@ -105,11 +110,14 @@ pinned version is re-downloaded and re-bundled. The publish rewrites
 `assets/toolchain_manifest.json`, which ships in the app — commit it with the
 release.
 
-### Why the toolchain publish is not a make target
+### The toolchain publish always dry-runs first
 
-`make publish_toolchain` only ever dry-runs. Published objects are immutable and
-the account that uploads them cannot undo the mistake, so the real upload is
-always typed out. `--dry-run` first, every time.
+`make publish_toolchain` dry-runs, shows what would upload, and asks before
+publishing for real. Published objects are immutable and the account that
+uploads them cannot undo a mistake, which is why the dry run is not optional.
+Tools whose trees are unchanged resolve to what is already published and are
+skipped, so a full run after updating one tool only uploads that tool; to force
+a subset explicitly, `./tool/publish_toolchain.sh --only=<id>` still works.
 
 `hostAccepts` is the one manifest field the script never writes — it is the
 minimum version App Studio will accept, which is a decision rather than a
