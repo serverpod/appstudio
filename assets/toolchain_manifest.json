@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestId": "2026.08.18.0640",
+  "manifestId": "2026.08.28.1440",
   "baseUrl": "https://asdl.serverpod.dev/",
   "tools": [
     {
@@ -17,7 +17,7 @@
           "path": "tools/flutter/3.47.0/b1/flutter-macos-arm64.tar.gz",
           "sha256": "5c24ae92313c5509890fc10ed5b667133444c7b6e95922de10b1bd5275ab0e9a",
           "downloadBytes": 2030399555,
-          "installedBytes": 4201148416,
+          "installedBytes": 4177879040,
           "format": "tar.gz",
           "stripComponents": 1
         }
@@ -36,17 +36,17 @@
       "id": "serverpod_cli",
       "displayName": "Serverpod CLI",
       "description": "Creates projects, generates code and runs the server.",
-      "version": "4.0.0-beta.3",
+      "version": "4.0.0-rc.1",
       "build": 1,
       "hostAccepts": ">=4.0.0-beta.2 <4.1.0",
       "required": true,
-      "installDir": "serverpod_cli/4.0.0-beta.3",
+      "installDir": "serverpod_cli/4.0.0-rc.1",
       "platforms": {
         "macos-arm64": {
-          "path": "tools/serverpod_cli/4.0.0-beta.3/b1/serverpod_cli-macos-arm64.tar.gz",
-          "sha256": "c2ed7a8e7dd3e91abd76f1587c325e0a9596e08cef12fe0592418343f8e4bf65",
-          "downloadBytes": 11332115,
-          "installedBytes": 30367744,
+          "path": "tools/serverpod_cli/4.0.0-rc.1/b1/serverpod_cli-macos-arm64.tar.gz",
+          "sha256": "fc05e61a2883597528328a40b24f0a5bb20304d6aa28e17b42af9b3ad2e405d7",
+          "downloadBytes": 11356444,
+          "installedBytes": 30433280,
           "format": "tar.gz",
           "stripComponents": 1
         }
@@ -63,15 +63,15 @@
       "displayName": "OpenCode",
       "description": "Backs the Agent tab.",
       "version": "1.18.4",
-      "build": 1,
+      "build": 2,
       "hostAccepts": ">=1.18.0",
       "required": true,
       "installDir": "opencode/1.18.4",
       "platforms": {
         "macos-arm64": {
-          "path": "tools/opencode/1.18.4/b1/opencode-macos-arm64.tar.gz",
-          "sha256": "94152c5fca175859001d809f11dc5bad7333001f43b7b645e5246e08400754ed",
-          "downloadBytes": 44850474,
+          "path": "tools/opencode/1.18.4/b2/opencode-macos-arm64.tar.gz",
+          "sha256": "b3b2b05a5191e25cefd38788276125943e4fbf016b655da33e65aa178b445221",
+          "downloadBytes": 44850482,
           "installedBytes": 138297344,
           "format": "tar.gz",
           "stripComponents": 1
@@ -87,15 +87,15 @@
       "displayName": "Git",
       "description": "Flutter needs a real git. macOS ships a stub that prompts to install Xcode.",
       "version": "2.53.0-3",
-      "build": 1,
+      "build": 2,
       "hostAccepts": ">=2.20.0",
       "required": true,
       "installDir": "git/2.53.0-3",
       "platforms": {
         "macos-arm64": {
-          "path": "tools/git/2.53.0-3/b1/git-macos-arm64.tar.gz",
-          "sha256": "1700caeb6fad9f609d4118c49ea37be57c65def1c0a8fb5591c1c13f78da46ec",
-          "downloadBytes": 60229484,
+          "path": "tools/git/2.53.0-3/b2/git-macos-arm64.tar.gz",
+          "sha256": "3dfba5aab35da823b00fb7943374051a2bbeb53593c297678009d87e07cce7c3",
+          "downloadBytes": 60229489,
           "installedBytes": 148090880,
           "format": "tar.gz",
           "stripComponents": 1
@@ -113,15 +113,15 @@
       "displayName": "Developer tools",
       "description": "otool and install_name_tool, used by Serverpod to relocate native libraries. macOS ships stubs that prompt to install Xcode.",
       "version": "20.1.8",
-      "build": 1,
+      "build": 2,
       "hostAccepts": "*",
       "required": true,
       "installDir": "llvm-tools/20.1.8",
       "platforms": {
         "macos-arm64": {
-          "path": "tools/llvm-tools/20.1.8/b1/llvm-tools-macos-arm64.tar.gz",
-          "sha256": "03f9b9d7ee7f2b38aa613ada7feae3abadbd8219c0f49c222961bac683c27f1b",
-          "downloadBytes": 9608845,
+          "path": "tools/llvm-tools/20.1.8/b2/llvm-tools-macos-arm64.tar.gz",
+          "sha256": "f5c0aa400da0e0b91b6916ba5b75a4a2bbccc1c07062754c8b9ecf9d798296c7",
+          "downloadBytes": 9608866,
           "installedBytes": 42471424,
           "format": "tar.gz",
           "stripComponents": 1
