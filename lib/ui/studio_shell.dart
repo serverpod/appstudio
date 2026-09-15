@@ -21,6 +21,7 @@ import 'hot_restart_button.dart';
 import 'new_project_dialog.dart';
 import 'open_in_editor_buttons.dart';
 import 'preview_pane.dart';
+import 'publish_to_cloud_button.dart';
 import 'settings/settings_dialog.dart';
 import 'start_page.dart';
 import 'terminal_pane.dart';
@@ -258,6 +259,8 @@ class _Toolbar extends StatelessWidget {
             const Spacer(),
           _ToolchainWarningBadge(toolchains: toolchains, onTap: onManageTools),
           OpenInEditorButtons(editors: editors),
+          const PublishToCloudButton(),
+          const SizedBox(width: 8),
           HotRestartButton(mcp: mcp),
           const SizedBox(width: 8),
           FullRestartButton(process: process),
