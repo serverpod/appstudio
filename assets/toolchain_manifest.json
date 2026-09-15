@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "manifestId": "2026.08.28.1440",
+  "manifestId": "2026.09.15.1017",
   "baseUrl": "https://asdl.serverpod.dev/",
   "tools": [
     {
@@ -36,17 +36,17 @@
       "id": "serverpod_cli",
       "displayName": "Serverpod CLI",
       "description": "Creates projects, generates code and runs the server.",
-      "version": "4.0.0-rc.1",
+      "version": "4.0.0",
       "build": 1,
-      "hostAccepts": ">=4.0.0-beta.2 <4.1.0",
+      "hostAccepts": ">=4.0.0 <4.1.0",
       "required": true,
-      "installDir": "serverpod_cli/4.0.0-rc.1",
+      "installDir": "serverpod_cli/4.0.0",
       "platforms": {
         "macos-arm64": {
-          "path": "tools/serverpod_cli/4.0.0-rc.1/b1/serverpod_cli-macos-arm64.tar.gz",
-          "sha256": "fc05e61a2883597528328a40b24f0a5bb20304d6aa28e17b42af9b3ad2e405d7",
-          "downloadBytes": 11356444,
-          "installedBytes": 30433280,
+          "path": "tools/serverpod_cli/4.0.0/b1/serverpod_cli-macos-arm64.tar.gz",
+          "sha256": "c6397cf6fe85368bb8cfccd982f979bf4535e1ed9e8ac4b7de0ac2dc4d573f81",
+          "downloadBytes": 11442027,
+          "installedBytes": 30695424,
           "format": "tar.gz",
           "stripComponents": 1
         }
