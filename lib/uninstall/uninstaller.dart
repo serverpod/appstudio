@@ -9,19 +9,24 @@ import '../process/serverpod_process.dart';
 import '../toolchain/shim_writer.dart';
 import '../toolchain/toolchain_controller.dart';
 import '../update/session_teardown.dart';
+import '../util/home_dir.dart';
 import 'uninstall_result.dart';
 
 export 'uninstall_result.dart';
 
 /// Removes everything App Studio put on this Mac, apart from the app bundle.
 ///
-/// Three stores, only one of which is the Application Support directory:
+/// Four stores, only one of which is the Application Support directory:
 ///
 ///  * `~/Library/Application Support/App Studio` — the toolchain, shims,
 ///    manifests and install state.
 ///  * The `PATH` block in the user's shell rc file, which lives in the home
 ///    directory. Leaving it behind would point their shell at a directory that
 ///    no longer exists, in every new terminal, forever.
+///  * `~/.serverpod` — the Serverpod CLI's own state: per-version template
+///    caches, the analytics id and run counter, the latest-version check and
+///    the cloud CLI's login. The CLI we ran wrote it, and a fresh install
+///    would otherwise inherit it.
 ///  * Preferences (NSUserDefaults) — recents, theme, the toolchain-setup
 ///    dismissal. Without clearing these a reinstall would not behave like a
 ///    fresh one, which is the whole point.
@@ -36,12 +41,24 @@ class Uninstaller {
     required this.process,
     required this.agent,
     required this.mcp,
+    this.homeOverride,
   });
 
   final ToolchainController toolchains;
   final ServerpodProcessController process;
   final AgentController agent;
   final McpController mcp;
+
+  /// Where `~/.serverpod` is looked for; `$HOME` when null. Tests point it at
+  /// a scratch directory so they never touch the real one.
+  final String? homeOverride;
+
+  /// The Serverpod CLI's state directory, or null when there is no home.
+  String? get serverpodStateDir {
+    final home = homeOverride ?? homeDirectory();
+    if (home == null || home.isEmpty) return null;
+    return '$home/.serverpod';
+  }
 
   /// Total size of the Application Support directory, or null if it cannot be
   /// measured. Used by the confirmation dialog, which takes it as a callback so
@@ -101,6 +118,18 @@ class Uninstaller {
 
     await step('deleting the App Studio support folder', () async {
       final dir = Directory(toolchains.paths.appSupportRoot);
+      if (await dir.exists()) {
+        await dir.delete(recursive: true);
+      }
+    });
+
+    // After the session is down: the CLI writes here on every run, and the
+    // cloud CLI holds its login here, so this is only safe once nothing of
+    // ours can start either.
+    await step('deleting the Serverpod CLI settings folder', () async {
+      final path = serverpodStateDir;
+      if (path == null) return;
+      final dir = Directory(path);
       if (await dir.exists()) {
         await dir.delete(recursive: true);
       }

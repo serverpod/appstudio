@@ -75,6 +75,8 @@ void main() {
         process: process,
         agent: agent,
         mcp: mcp,
+        // Never the real one: the step under test deletes ~/.serverpod.
+        homeOverride: tmp.path,
       );
 
   /// A stand-in for an install: a file buried in the support directory.
@@ -145,6 +147,30 @@ void main() {
     // Preferences come after the delete, and must have been cleared anyway.
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('theme_mode'), isNull);
+  });
+
+  test('deletes the Serverpod CLI state directory', () async {
+    // The CLI keeps its own state in ~/.serverpod — template caches per
+    // version, the analytics id, the cloud login. A fresh install would
+    // otherwise inherit all of it.
+    final state = Directory(p.join(tmp.path, '.serverpod'));
+    final login = File(p.join(state.path, 'cloud', 'auth.json'));
+    await login.parent.create(recursive: true);
+    await login.writeAsString('{}');
+    await File(p.join(state.path, 'uuid')).writeAsString('abc');
+
+    final result = await uninstaller().run();
+
+    expect(await state.exists(), isFalse);
+    expect(result.failures, isEmpty, reason: result.failures.join(', '));
+  });
+
+  test('a missing Serverpod CLI state directory is not a failure', () async {
+    expect(await Directory(p.join(tmp.path, '.serverpod')).exists(), isFalse);
+
+    final result = await uninstaller().run();
+
+    expect(result.failures, isEmpty, reason: result.failures.join(', '));
   });
 
   test('does not touch the pub cache unless asked', () async {

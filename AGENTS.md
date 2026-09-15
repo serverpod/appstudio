@@ -432,6 +432,7 @@ make build             # Developer ID + notarized zip
 ```bash
 make update_serverpod V=4.0.0-beta.2          # copy from the local dart install
 make update_flutter   V=3.44.2                # download full SDK + set pin; carries Dart
+make update_llvm_tools V=23.1.1               # otool from that LLVM + cctools install_name_tool
 make dev_toolchain                            # or: build every tree at once
 make publish_toolchain                        # dry-run, confirm, then publish
 ./tool/publish_toolchain.sh --only=git        # publish a subset (script directly)
@@ -539,11 +540,27 @@ Serverpod's per-start native-assets step runs exactly three commands on prebuilt
 - `/usr/bin/{otool,install_name_tool,clang,ar,ld,lipo,strip}` are **all the same 118,928-byte
   Xcode CLT shim** and pop a modal installer on a clean Mac. Never execute them.
 - `/usr/bin/codesign` (459,824 bytes) **is** a real base-system binary — nothing to ship.
-- We ship LLVM's `llvm-objdump`/`llvm-objcopy` under the names `otool`/`install_name_tool`
-  (they dispatch on `argv[0]`). Verified: `otool -D` output is byte-identical to Apple's, and
-  `install_name_tool` self-reports as "compatible with cctools install_name_tool".
-  `llvm-install-name-tool` does not re-sign after editing a Mach-O — which is fine, because
-  Serverpod runs `codesign` on the very next line.
+- We ship LLVM's `llvm-objdump` under the name `otool` (it dispatches on `argv[0]`; `otool -D`
+  output is byte-identical to Apple's) and an `install_name_tool` **built from Apple's cctools
+  sources** via cctools-port, statically linked, pinned by commit in `bundle_toolchain.sh`.
+- **`install_name_tool` must not be `llvm-objcopy`, and it was.** Every `dart compile exe`
+  output carries an `LC_NOTE` load command (data owner `__dart_app_snap`, the embedded
+  snapshot), `dart install` runs `install_name_tool -add_rpath` on that executable, and
+  `llvm-objcopy` refuses to lay out a Mach-O with a load command it does not know:
+  `unsupported load command (cmd=0x31)`. That took out `dart install` and `serverpod cloud`
+  (which self-installs the cloud CLI through it) on every Mac without the CLT — exactly the
+  Macs the managed toolchain exists for. LLVM `main` still has the same allowlist, so a newer
+  release does not fix it; cctools handles the command, and is what Apple ships.
+  `bundle_toolchain.sh`'s `verify_llvm_tools` compiles a Dart program and adds an rpath to
+  it, and refuses to stage the tree otherwise.
+- Neither tool re-signs after editing a Mach-O (cctools-port writes a placeholder signature
+  and says so on stderr) — which is fine, because Serverpod and `dart install` both run
+  `codesign` on the very next line.
+- **The `llvm_tools` pin is the LLVM version, and a cctools change only reaches installed
+  copies with an LLVM bump.** `ToolchainInventory.updatable` compares what `otool --version`
+  reports against the manifest pin; nothing reads the build number. `make update_llvm_tools
+  V=<llvm>` rebuilds both halves; bumping `CCTOOLS_PORT_COMMIT` alone republishes a tree no
+  installed copy will ever pick up.
 - **Compiling** native code from source is different: `native_toolchain_c` needs `clang`, `ar`
   and `xcrun --show-sdk-path`, and **the macOS SDK cannot be redistributed**. That path
   requires Xcode CLT; detect it and offer `xcode-select --install`.
@@ -559,11 +576,11 @@ toolchain/
   serverpod_cli/<version>/{bin,lib}/   # full CLI bundle — lib/ has sqlite dylibs (required)
   opencode/<version>/opencode          # darwin-arm64 CLI binary
   git/<version>/{bin,libexec}/         # portable Git (dugite-native) — avoids Xcode CLT stub
-  llvm-tools/<version>/bin/            # otool + install_name_tool from LLVM (no CLT stubs)
+  llvm-tools/<version>/bin/            # otool (LLVM) + install_name_tool (cctools), no CLT stubs
   bin/{flutter,dart,serverpod,opencode,git}
 ```
 
-- **`./tool/bundle_toolchain.sh`** — downloads the full Flutter SDK (not stripped) and runs `flutter precache --web`; downloads OpenCode + portable Git; downloads an official LLVM release and installs `llvm-objdump`/`llvm-objcopy` as `otool`/`install_name_tool`. Does **not** download Serverpod; copy the full CLI bundle into `toolchain/serverpod_cli/<version>/` first. A version flag both selects what to fetch and becomes the new pin in `active.json`; a tool run without its flag rebuilds whatever `active.json` already pins. Flags: `--force`, `--flutter=VERSION`, `--serverpod=VERSION`, `--opencode=VERSION`, `--git=VERSION`.
+- **`./tool/bundle_toolchain.sh`** — downloads the full Flutter SDK (not stripped) and runs `flutter precache --web`; downloads OpenCode + portable Git; downloads an official LLVM release and installs `llvm-objdump` as `otool`, and builds `install_name_tool` from the pinned cctools-port commit (needs Xcode or the CLT on the release Mac). Does **not** download Serverpod; copy the full CLI bundle into `toolchain/serverpod_cli/<version>/` first. A version flag both selects what to fetch and becomes the new pin in `active.json`; a tool run without its flag rebuilds whatever `active.json` already pins. Flags: `--force`, `--flutter=VERSION`, `--serverpod=VERSION`, `--opencode=VERSION`, `--git=VERSION`.
 - `Toolchain.resolve()` prepends portable `git` + `cctools` to `PATH` and sets `FLUTTER_PREBUILT_ENGINE_VERSION` so target Macs don't need Xcode / CLT for web preview.
 - Nothing is embedded in the `.app` at build time — `tool/embed_toolchain.sh` is dead and referenced by neither the Makefile nor the Xcode project. `distribute_macos.sh` still asserts no `Contents/Resources/toolchain` survives, which now catches a stale build tree rather than a live feature.
 
@@ -1083,6 +1100,12 @@ button — now an expand icon — is the way back.
 - It never aborts on a failed step: stopping halfway leaves neither a working
   install nor a clean machine. Failures are collected and named on the final
   screen, which never claims a clean uninstall that did not happen.
+- **`~/.serverpod` is removed too.** The Serverpod CLI keeps its own state
+  there — per-version template caches, the analytics id and run counter, the
+  latest-version check, and the cloud CLI's login — and a fresh install would
+  otherwise inherit it. It is shared with a standalone `serverpod` the user
+  may have, which is why the confirm dialog names it; the cloud login is the
+  one thing in there that is not re-derived on the next run.
 - Deliberately **not** removed: `~/.pub-cache` (opt-in checkbox — shared with
   every Dart project) and `~/.local/share/opencode/auth.json` (API keys the
   OpenCode CLI uses independently of App Studio).

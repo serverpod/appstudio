@@ -112,9 +112,9 @@ collect flutter "$FLUTTER_VERSION" "$TOOLCHAIN_DIR/flutter/$FLUTTER_VERSION"
 collect serverpod_cli "$SERVERPOD_VERSION" "$TOOLCHAIN_DIR/serverpod_cli/$SERVERPOD_VERSION"
 collect opencode "$OPENCODE_VERSION" "$TOOLCHAIN_DIR/opencode/$OPENCODE_VERSION"
 collect git "$GIT_VERSION" "$TOOLCHAIN_DIR/git/$GIT_VERSION"
-# llvm-tools is produced by bundle_toolchain.sh once it switches off Xcode's
-# cctools; until then there is nothing to publish and the app falls back to a
-# host Xcode/CLT otool.
+# llvm-tools is otool from an LLVM release plus install_name_tool built from
+# cctools, staged by bundle_toolchain.sh. The pin is the LLVM version, which
+# is what the app compares installed copies against.
 LLVM_VERSION="$(active_version llvm_tools)"
 collect llvm-tools "$LLVM_VERSION" "$TOOLCHAIN_DIR/llvm-tools/$LLVM_VERSION"
 

@@ -10,7 +10,8 @@
 #   toolchain/opencode/<version>/opencode
 # Downloads portable Git (dugite-native) into:
 #   toolchain/git/<version>/{bin,libexec,...}
-# Installs otool + install_name_tool from an official LLVM release into:
+# Installs otool (from an official LLVM release) and install_name_tool (built
+# from Apple's cctools sources) into:
 #   toolchain/llvm-tools/<version>/bin
 #
 # --only= builds a subset. Tools left out keep whatever active.json already
@@ -24,15 +25,28 @@ SERVERPOD_CLI_VERSION="${SERVERPOD_CLI_VERSION:-4.0.0-beta.2}"
 OPENCODE_VERSION="${OPENCODE_VERSION:-1.18.4}"
 # dugite-native release tag without leading "v" (GitHub Desktop portable Git).
 GIT_VERSION="${GIT_VERSION:-2.53.0-3}"
-# Official LLVM release: llvm-otool / llvm-install-name-tool are
-# Apache-2.0 WITH LLVM-exception, so redistribution is unambiguous.
-LLVM_VERSION="${LLVM_VERSION:-20.1.8}"
+# Official LLVM release, for otool: llvm-otool is Apache-2.0 WITH
+# LLVM-exception, so redistribution is unambiguous. This is also the version
+# the whole llvm-tools tree is pinned and published under — see the llvm-tools
+# section below for why install_name_tool no longer comes from it.
+LLVM_VERSION="${LLVM_VERSION:-23.1.1}"
+# install_name_tool is built from cctools (APSL 2.0) via cctools-port, whose
+# autotools tree builds with a plain C compiler. Pinned by commit so the build
+# is reproducible; the version is what that commit's configure reports.
+#
+# Bumping this alone does not reach installed copies: the app compares the
+# version `otool --version` reports against the manifest pin, and only a newer
+# LLVM_VERSION makes an installed tree read as out of date. Move both.
+CCTOOLS_VERSION="1030.6.3"
+CCTOOLS_PORT_COMMIT="904de2a71d4da6a9b30d2efaf912a10ddc7d9ddb"  # branch 1030.6.3-ld64-956.6
+CCTOOLS_PORT_REPO="https://github.com/tpoechtrager/cctools-port.git"
 FORCE="${FORCE:-0}"
 ONLY="${ONLY:-}"
 
 usage() {
   echo "Usage: $0 [--force] [--only=IDS] [--flutter=VERSION]" >&2
   echo "          [--serverpod=VERSION] [--opencode=VERSION] [--git=VERSION]" >&2
+  echo "          [--llvm=VERSION]" >&2
   echo "  --only= comma-separated: flutter,serverpod_cli,opencode,git,llvm-tools" >&2
 }
 
@@ -121,7 +135,7 @@ echo "    Flutter $FLUTTER_VERSION ($HOST_ARCH) — full SDK, precached for web"
 echo "    serverpod_cli $SERVERPOD_CLI_VERSION — full prebuilt bundle"
 echo "    opencode $OPENCODE_VERSION — darwin-arm64 only"
 echo "    git $GIT_VERSION — dugite-native macOS-${DUGITE_ARCH}"
-echo "    llvm-tools $LLVM_VERSION — otool + install_name_tool (no CLT stubs, no Xcode)"
+echo "    llvm-tools $LLVM_VERSION — otool (LLVM) + install_name_tool (cctools $CCTOOLS_VERSION)"
 
 mkdir -p "$OUT_DIR"
 
@@ -279,35 +293,166 @@ else
   trap - EXIT
 fi
 
-# otool + install_name_tool, from an official LLVM release rather than Xcode.
+# otool + install_name_tool, without Xcode.
 #
 # Copying Apple's binaries out of Xcode is restricted by its licence, and
-# publishing them to a public bucket would be plain redistribution. LLVM's are
-# verified drop-ins: `llvm-otool -D` output is byte-identical to Apple's, and
-# although llvm-install-name-tool does not re-sign after editing a Mach-O
-# (Apple's does, via libcodedirectory.dylib), Serverpod runs `codesign` on the
-# very next line — so that difference does not matter here.
+# publishing them to a public bucket would be plain redistribution. So the two
+# come from two open-source upstreams:
 #
-# Both are argv[0]-dispatching aliases, so they are installed under the Apple
-# names and behave accordingly.
+#   otool              llvm-objdump from an official LLVM release. It switches
+#                      behaviour on argv[0], so it is installed under Apple's
+#                      name; `otool -D` output is byte-identical to Apple's,
+#                      whose own otool has been llvm-otool since Xcode 15.
+#   install_name_tool  Apple's cctools source (APSL 2.0), built through the
+#                      cctools-port autotools tree and linked statically
+#                      against libstuff/libmacho, so the binary depends on
+#                      libSystem alone.
+#
+# install_name_tool used to be llvm-objcopy under the same argv[0] trick, and
+# that broke `dart install` — and with it `serverpod cloud`, which installs the
+# cloud CLI through it. `dart compile exe` output carries an LC_NOTE load
+# command (data owner __dart_app_snap: the embedded snapshot), `dart install`
+# then runs `install_name_tool -add_rpath` on that executable, and llvm-objcopy
+# refuses to lay out a Mach-O with any load command it does not know:
+# "unsupported load command (cmd=0x31)". LLVM main still does not know this
+# one. cctools handles it, and is what Apple ships. verify_llvm_tools below
+# pins that by compiling a Dart program and adding an rpath to it, so a tree
+# that would fail `dart install` cannot be staged.
+#
+# Neither tool re-signs after editing — cctools-port writes a placeholder
+# signature and says so on stderr — but Serverpod and `dart install` both run
+# `codesign` on the very next line, so that difference does not matter here.
+
+build_cctools_install_name_tool() {
+  local dest="$1" work="$2"
+  # cctools-port ships configure and libtool pre-generated, so the build needs
+  # a C compiler and nothing else — Xcode or the CLT on the *release* Mac. The
+  # product is static, so the target Mac needs neither.
+  if ! xcode-select -p >/dev/null 2>&1; then
+    echo "Building install_name_tool needs Xcode or the Command Line Tools" >&2
+    echo "on this Mac (xcode-select --install)." >&2
+    exit 1
+  fi
+  local src="$work/cctools-port"
+  echo "==> Fetching cctools-port @ ${CCTOOLS_PORT_COMMIT:0:12} (cctools $CCTOOLS_VERSION)"
+  git init -q "$src"
+  git -C "$src" fetch -q --depth 1 "$CCTOOLS_PORT_REPO" "$CCTOOLS_PORT_COMMIT"
+  git -C "$src" checkout -q FETCH_HEAD
+
+  echo "==> Building install_name_tool from cctools $CCTOOLS_VERSION"
+  # Only what install_name_tool links: the two support libraries and the one
+  # program. The full tree wants libtapi for ld64, which this never needs.
+  (
+    cd "$src/cctools"
+    ./configure >"$work/cctools-configure.log" 2>&1
+    make -j"$(sysctl -n hw.ncpu)" -C libstuff >"$work/cctools-libstuff.log" 2>&1
+    make -j"$(sysctl -n hw.ncpu)" -C libmacho >"$work/cctools-libmacho.log" 2>&1
+    make -C misc install_name_tool >"$work/cctools-misc.log" 2>&1
+  ) || {
+    echo "cctools build failed — logs in $work/cctools-*.log" >&2
+    exit 1
+  }
+
+  # configure writes the version it was generated with into every Makefile;
+  # a commit bump that forgets CCTOOLS_VERSION fails here rather than
+  # publishing a manifest note that names the wrong sources.
+  local reported
+  reported="$(sed -n 's/^PACKAGE_VERSION = //p' "$src/cctools/Makefile" | head -1)"
+  if [[ "$reported" != "$CCTOOLS_VERSION" ]]; then
+    echo "cctools-port @ $CCTOOLS_PORT_COMMIT reports version '$reported', expected $CCTOOLS_VERSION" >&2
+    exit 1
+  fi
+  cp "$src/cctools/misc/install_name_tool" "$dest"
+}
+
+# The check that this tree will survive `dart install`: llvm-objcopy failed
+# it with "unsupported load command (cmd=0x31)" and shipped anyway.
+verify_llvm_tools() {
+  local bin="$LLVM_DIR/bin" dart=""
+  # Never the staged Flutter's bin/dart. That wrapper rewrites bin/cache
+  # stamps as a side effect — and it is first on PATH here, because this
+  # script prepends $FLUTTER_DIR/bin for the Flutter steps — while
+  # publish_toolchain.sh recognises an unchanged tree by the hash of its
+  # archive, mtimes included. One run of the wrapper cost a 1.9 GB Flutter
+  # re-upload under a new build number. The raw SDK binary inside the same
+  # tree compiles without touching it; a host dart is the fallback, found on
+  # a PATH with the staged bin taken back off.
+  if [[ -x "$FLUTTER_DIR/bin/cache/dart-sdk/bin/dart" ]]; then
+    dart="$FLUTTER_DIR/bin/cache/dart-sdk/bin/dart"
+  else
+    dart="$(PATH="${PATH#"$FLUTTER_DIR/bin:"}" command -v dart || true)"
+  fi
+  if [[ -z "$dart" ]]; then
+    echo "Verifying install_name_tool needs a dart: no staged Flutter SDK and none on PATH." >&2
+    exit 1
+  fi
+
+  # The tripwire for the paragraph above: anything in the Flutter tree newer
+  # than this marker was written by the verification, and the run must not
+  # end looking clean.
+  local marker=""
+  if [[ -d "$FLUTTER_DIR" ]]; then
+    marker="$(mktemp)"
+  fi
+
+  local tmp
+  tmp="$(mktemp -d)"
+  printf 'void main() => print("ok");\n' >"$tmp/probe.dart"
+  "$dart" compile exe "$tmp/probe.dart" -o "$tmp/probe" >/dev/null
+  if ! "$bin/otool" -l "$tmp/probe" | grep -q 'LC_NOTE'; then
+    echo "dart compile exe output carries no LC_NOTE; this check no longer proves anything." >&2
+    exit 1
+  fi
+  if ! "$bin/install_name_tool" -add_rpath @executable_path/../lib "$tmp/probe" 2>"$tmp/stderr"; then
+    cat "$tmp/stderr" >&2
+    echo "install_name_tool cannot edit a dart-compiled executable; refusing to stage it." >&2
+    exit 1
+  fi
+  if ! "$bin/otool" -l "$tmp/probe" | grep -q '@executable_path/../lib'; then
+    echo "install_name_tool exited 0 but the rpath is not there." >&2
+    exit 1
+  fi
+  # What `dart install` does next, and the only way the edited binary runs.
+  /usr/bin/codesign --force --sign - "$tmp/probe" 2>/dev/null
+  if [[ "$("$tmp/probe")" != "ok" ]]; then
+    echo "The probe executable no longer runs after install_name_tool edited it." >&2
+    exit 1
+  fi
+  rm -rf "$tmp"
+
+  if [[ -n "$marker" ]]; then
+    local touched
+    touched="$(find "$FLUTTER_DIR" -newer "$marker" -type f | head -5)"
+    rm -f "$marker"
+    if [[ -n "$touched" ]]; then
+      echo "Verification wrote into the staged Flutter tree, which would republish it:" >&2
+      printf '  %s\n' $touched >&2
+      exit 1
+    fi
+  fi
+  echo "    install_name_tool: added an rpath to a dart-compiled executable (LC_NOTE present)"
+}
+
 if ! wants llvm-tools; then
   echo "==> Skipping llvm-tools (not selected); keeping pinned $LLVM_VERSION"
 elif [[ -x "$LLVM_DIR/bin/otool" && -x "$LLVM_DIR/bin/install_name_tool" && "$FORCE" != "1" ]]; then
-  echo "==> llvm-tools already present (pass --force to re-download)"
+  echo "==> llvm-tools already present (pass --force to rebuild)"
 else
-  echo "==> Downloading LLVM $LLVM_VERSION (~1.4 GB, for two binaries)"
   LLVM_TMP="$(mktemp -d)"
+  echo "==> Downloading LLVM $LLVM_VERSION (~1.4 GB, for one binary)"
   curl -fL --retry 3 --progress-bar -o "$LLVM_TMP/llvm.tar.xz" "$LLVM_URL"
 
   PREFIX="LLVM-${LLVM_VERSION}-macOS-ARM64"
   tar -xJf "$LLVM_TMP/llvm.tar.xz" -C "$LLVM_TMP" --strip-components=2 \
-    "$PREFIX/bin/llvm-objdump" "$PREFIX/bin/llvm-objcopy"
+    "$PREFIX/bin/llvm-objdump"
+
+  build_cctools_install_name_tool "$LLVM_TMP/install_name_tool" "$LLVM_TMP"
 
   rm -rf "$LLVM_DIR"
   mkdir -p "$LLVM_DIR/bin"
-  # Installed under Apple's names: both binaries switch behaviour on argv[0].
+  # Installed under Apple's name: llvm-objdump switches behaviour on argv[0].
   cp "$LLVM_TMP/llvm-objdump" "$LLVM_DIR/bin/otool"
-  cp "$LLVM_TMP/llvm-objcopy" "$LLVM_DIR/bin/install_name_tool"
+  cp "$LLVM_TMP/install_name_tool" "$LLVM_DIR/bin/install_name_tool"
   chmod +x "$LLVM_DIR/bin/otool" "$LLVM_DIR/bin/install_name_tool"
   rm -rf "$LLVM_TMP"
 fi
@@ -456,10 +601,14 @@ fi
 if wants git && [[ -x "$GIT_DIR/bin/git" ]]; then
   show 1 "$BIN_DIR/git" --version
 fi
-if wants llvm-tools && [[ -x "$LLVM_DIR/bin/otool" ]] \
-    && [[ -f "$SERVERPOD_DIR/lib/libsqlite3_connection_pool.dylib" ]]; then
-  show 2 env PATH="$LLVM_DIR/bin:/usr/bin:/bin" "$LLVM_DIR/bin/otool" -D \
-    "$SERVERPOD_DIR/lib/libsqlite3_connection_pool.dylib"
+if wants llvm-tools && [[ -x "$LLVM_DIR/bin/otool" ]]; then
+  show 2 "$LLVM_DIR/bin/otool" --version
+  if [[ -f "$SERVERPOD_DIR/lib/libsqlite3_connection_pool.dylib" ]]; then
+    show 2 env PATH="$LLVM_DIR/bin:/usr/bin:/bin" "$LLVM_DIR/bin/otool" -D \
+      "$SERVERPOD_DIR/lib/libsqlite3_connection_pool.dylib"
+  fi
+  # Not `show`: this one has to be able to fail the run.
+  verify_llvm_tools
 fi
 if wants flutter && [[ -x "$BIN_DIR/flutter" && -x "$FLUTTER_DIR/bin/flutter" ]]; then
   show 3 "$BIN_DIR/flutter" --version
@@ -469,7 +618,7 @@ if wants opencode && [[ -x "$OPENCODE_DIR/opencode" ]]; then
 fi
 
 echo "==> Done"
-echo "    active: flutter=$FLUTTER_VERSION serverpod_cli=$SERVERPOD_CLI_VERSION opencode=$OPENCODE_VERSION git=$GIT_VERSION"
+echo "    active: flutter=$FLUTTER_VERSION serverpod_cli=$SERVERPOD_CLI_VERSION opencode=$OPENCODE_VERSION git=$GIT_VERSION llvm_tools=$LLVM_VERSION"
 echo "    serverpod bundle: $SERVERPOD_DIR/{bin,lib}"
 echo "    llvm-tools: $LLVM_DIR/bin"
 du -sh "$OUT_DIR" "$SERVERPOD_DIR" "$FLUTTER_DIR" "$OPENCODE_DIR" "$GIT_DIR" "$LLVM_DIR" 2>/dev/null || true

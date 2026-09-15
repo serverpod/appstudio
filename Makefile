@@ -24,6 +24,7 @@
 # Publish the bundled tools:
 #   make update_flutter    Download the full Flutter/Dart SDK; V=… sets the pin
 #   make update_serverpod  Copy the Serverpod CLI from this Mac's dart install
+#   make update_llvm_tools Rebuild otool + install_name_tool; V=… sets the pin
 #   make dev_toolchain     Build every toolchain/ tree
 #   make publish_toolchain Upload the tools to GCS and refresh the manifest
 #
@@ -37,7 +38,8 @@ CEF_STAMP := $(ROOT)/packages/webview_cef/macos/third/cef/version.txt
 
 .PHONY: help start deps ensure_deps previews clean clean_all \
         set_version release build build_debug publish promote \
-        update_flutter update_serverpod dev_toolchain publish_toolchain
+        update_flutter update_serverpod update_llvm_tools dev_toolchain \
+        publish_toolchain
 
 help:
 	@echo "Run locally:"
@@ -62,6 +64,7 @@ help:
 	@echo "Publish the bundled tools:"
 	@echo "  make update_flutter [V=3.44.2]     Download the SDK and set the pin"
 	@echo "  make update_serverpod [V=4.0.0]    Copy the CLI from the dart install"
+	@echo "  make update_llvm_tools [V=23.1.1]  Rebuild otool + install_name_tool"
 	@echo "  make dev_toolchain                 Build every <repo>/toolchain tree"
 	@echo "  make publish_toolchain             Dry-run, confirm, then upload"
 	@echo ""
@@ -212,6 +215,20 @@ update_serverpod:
 	@echo "Serverpod CLI updated. Raise hostAccepts in"
 	@echo "assets/toolchain_manifest.json if this is a new minimum, then:"
 	@echo "  make publish_toolchain"
+
+# otool from the LLVM release V= names, plus install_name_tool built from the
+# cctools sources the script pins by commit. Needs Xcode or the CLT on this
+# Mac for the build; the product is static and needs neither. V= is the LLVM
+# version and becomes the pin — and it is the version installed copies compare
+# against (`otool --version`), so a new cctools reaches them only alongside an
+# LLVM bump. The run refuses to stage a tree whose install_name_tool cannot
+# edit a dart-compiled executable, which is the failure that made this a
+# separate build in the first place.
+update_llvm_tools:
+	cd "$(ROOT)" && ./tool/bundle_toolchain.sh --only=llvm-tools --force \
+		$(if $(V),--llvm=$(V))
+	@echo ""
+	@echo "Developer tools updated. Publish them with: make publish_toolchain"
 
 # Dry-run first, then confirm before uploading for real. Uploads are immutable
 # and cannot be undone with the publisher role, which is why the dry run is

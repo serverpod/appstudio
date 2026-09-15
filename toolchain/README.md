@@ -17,7 +17,7 @@ toolchain/
   git/<git_version>/                  # portable Git (dugite-native) — avoids Xcode CLT stub
     bin/git
     libexec/
-  llvm-tools/<llvm_version>/          # otool + install_name_tool from an LLVM release
+  llvm-tools/<llvm_version>/          # otool from an LLVM release + install_name_tool from cctools
     bin/{otool,install_name_tool}
   pins/{flutter,serverpod_cli,opencode,git,llvm_tools}  # plain strings for the wrappers
   bin/{flutter,dart,serverpod,opencode,git}             # wrappers → pins + versioned binaries
@@ -35,9 +35,10 @@ wrapper unexpanded and die under `set -u`.
 ```bash
 make update_serverpod V=4.0.0-beta.2   # copy from this Mac's dart install
 make update_flutter   V=3.44.2         # download full SDK; carries the Dart SDK
+make update_llvm_tools V=23.1.1        # otool from that LLVM release + cctools install_name_tool
 ```
 
-Both are `bundle_toolchain.sh --only=<id> --force`. `V=` becomes the new pin in
+All three are `bundle_toolchain.sh --only=<id> --force`. `V=` becomes the new pin in
 `active.json`; without it the currently pinned version is rebuilt. Tools left
 out keep whatever `active.json` already pins, so a partial run cannot move a pin
 for a tree it never rebuilt.
@@ -79,12 +80,34 @@ invoked. Flutter requires a real `git` even for web-only runs. The bundled
 binary is prepended to `PATH` (and `GIT_EXEC_PATH` is set) for all spawned
 Serverpod / Flutter processes.
 
-### Why llvm-tools is bundled
+### Why llvm-tools is bundled, and what is in it
 
 Serverpod’s native-assets step runs `otool -D` and `install_name_tool` on sqlite
-dylibs. `/usr/bin/otool` and `/usr/bin/install_name_tool` are CLT stubs on a
-clean Mac. `bundle_toolchain.sh` downloads an official LLVM release and installs
-`llvm-objdump` / `llvm-objcopy` under the Apple names — they dispatch on
-`argv[0]` — then prepends that `bin/` to `PATH`. Copying Apple's own binaries out
-of Xcode would be redistribution the licence does not allow; LLVM's are
-Apache-2.0 WITH LLVM-exception.
+dylibs, and `dart install` runs `install_name_tool -add_rpath` on the
+executable it just compiled. `/usr/bin/otool` and `/usr/bin/install_name_tool`
+are CLT stubs on a clean Mac, and copying Apple's own binaries out of Xcode
+would be redistribution the licence does not allow. So the two are built from
+two open-source upstreams:
+
+- **`otool`** is `llvm-objdump` from an official LLVM release (Apache-2.0 WITH
+  LLVM-exception), installed under the Apple name — it dispatches on `argv[0]`.
+  Apple's own `otool` has been `llvm-otool` since Xcode 15.
+- **`install_name_tool`** is built from Apple's cctools sources (APSL 2.0)
+  through the [cctools-port](https://github.com/tpoechtrager/cctools-port)
+  autotools tree, pinned by commit in `bundle_toolchain.sh`. It is statically
+  linked and depends on `libSystem` alone.
+
+It used to be `llvm-objcopy` under the same trick, and that broke
+`dart install` — and `serverpod cloud`, which installs the cloud CLI through
+it. Every `dart compile exe` output carries an `LC_NOTE` load command (the
+embedded snapshot), and `llvm-objcopy` refuses any Mach-O with a load command
+it cannot lay out: `unsupported load command (cmd=0x31)`. LLVM `main` still
+does not accept it; cctools does. `bundle_toolchain.sh` refuses to stage a
+tree whose `install_name_tool` cannot add an rpath to a freshly compiled Dart
+program, so that cannot ship again unnoticed.
+
+The pin (`llvm_tools` in `active.json`) is the LLVM version, and it is what
+installed copies compare their `otool --version` against. **A new cctools
+reaches users only together with an LLVM bump** — bump both and run
+`make update_llvm_tools V=<llvm version>`. The build needs Xcode or the CLT on
+the release Mac, for the C compiler; the product needs neither.

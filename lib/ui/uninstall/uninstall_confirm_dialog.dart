@@ -33,8 +33,9 @@ Future<UninstallChoice?> showUninstallConfirmDialog(
 /// Confirms a full uninstall, naming exactly what goes and what stays.
 ///
 /// This is a bigger action than the old "uninstall all tools": it removes the
-/// whole Application Support directory, the shell PATH entry and every stored
-/// preference, so that a relaunch behaves like a fresh install.
+/// whole Application Support directory, the shell PATH entry, the Serverpod
+/// CLI's own settings folder and every stored preference, so that a relaunch
+/// behaves like a fresh install.
 ///
 /// The Dart package cache is offered separately and off by default: it is
 /// shared with every other Dart project on the machine and holds
@@ -79,7 +80,9 @@ class _UninstallConfirmDialogState extends State<UninstallConfirmDialog> {
         'This removes the downloaded tools, the shell PATH entry and all '
         'App Studio settings'
         '${_supportBytes == null ? '' : ' (${formatBytes(_supportBytes!)})'}'
-        '. The app itself is not deleted, drag it to the Trash afterwards.',
+        ', along with the Serverpod CLI\'s own settings in ~/.serverpod, '
+        'including any Serverpod Cloud login. The app itself is not deleted, '
+        'drag it to the Trash afterwards.',
       ),
       actions: [
         ShadButton.outline(
