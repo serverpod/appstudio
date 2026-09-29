@@ -22,13 +22,13 @@ class UninstallResult {
 
 /// What the user agreed to remove.
 class UninstallChoice {
-  const UninstallChoice({required this.tools, required this.clearPubCache});
+  const UninstallChoice({required this.tools});
 
   /// Tools App Studio installed that go too. App Studio's own data always
   /// goes; these are opt-out, because other things on the Mac may use them.
   final Set<ToolId> tools;
 
-  /// Also run `dart pub cache clean`, which affects every Dart project on the
-  /// machine — never implied by anything else.
-  final bool clearPubCache;
+  /// `dart pub cache clean` runs exactly when Flutter goes: the cache is
+  /// Flutter's Dart's, and with Flutter staying it is left alone.
+  bool get clearPubCache => tools.contains(ToolId.flutter);
 }

@@ -17,6 +17,17 @@ class ErrorBanner extends StatelessWidget {
     final theme = ShadTheme.of(context);
     final scheme = theme.colorScheme;
 
+    // `muted`, not `small`: failure messages wrap, and `small` is the label
+    // role (`leading-none`), which sets them solid.
+    final messageStyle = theme.textTheme.muted.copyWith(
+      color: scheme.destructive,
+    );
+    // The icon sits in a box one text line tall, so it is centred on the first
+    // line. Top-aligned on its own, it rode above the text by the line's
+    // leading.
+    final lineHeight =
+        (messageStyle.fontSize ?? 14) * (messageStyle.height ?? 1.2);
+
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
@@ -30,22 +41,18 @@ class ErrorBanner extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                LucideIcons.circleAlert,
-                size: 14,
-                color: scheme.destructive,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  message,
-                  // `muted`, not `small`: failure messages wrap, and `small` is
-                  // the label role (`leading-none`), which sets them solid.
-                  style: theme.textTheme.muted.copyWith(
+              SizedBox(
+                height: lineHeight,
+                child: Center(
+                  child: Icon(
+                    LucideIcons.circleAlert,
+                    size: 14,
                     color: scheme.destructive,
                   ),
                 ),
               ),
+              const SizedBox(width: 8),
+              Expanded(child: Text(message, style: messageStyle)),
             ],
           ),
           if (log != null && log!.isNotEmpty) ...[

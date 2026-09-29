@@ -32,8 +32,10 @@ export 'uninstall_result.dart';
 ///  * the Flutter SDK, and the `PATH` line App Studio added for it;
 ///  * the Command Line Tools, behind an administrator prompt.
 ///
-/// Deliberately never removed: anything App Studio did not install,
-/// `~/.pub-cache` unless asked (shared with every Dart project), and
+/// `~/.pub-cache` goes with Flutter — it is Flutter's Dart's package cache —
+/// and stays when Flutter does.
+///
+/// Deliberately never removed: anything App Studio did not install, and
 /// `~/.local/share/opencode/auth.json` (keys the OpenCode CLI uses on its own).
 class Uninstaller {
   const Uninstaller({
@@ -47,25 +49,6 @@ class Uninstaller {
   final ServerpodProcessController process;
   final AgentController agent;
   final McpController mcp;
-
-  /// Total size of the Application Support directory, or null if it cannot be
-  /// measured. Used by the confirmation dialog, which takes it as a callback so
-  /// it stays free of `dart:io`.
-  Future<int?> measureSupportBytes() async {
-    try {
-      final result = await Process.run(
-        '/usr/bin/du',
-        ['-sk', toolchains.paths.appSupportRoot],
-      );
-      if (result.exitCode != 0) return null;
-      final kb = int.tryParse(
-        (result.stdout as String).trim().split(RegExp(r'\s+')).first,
-      );
-      return kb == null ? null : kb * 1024;
-    } catch (_) {
-      return null;
-    }
-  }
 
   Future<UninstallResult> run(UninstallChoice choice) async {
     final failures = <String>[];
@@ -87,7 +70,7 @@ class Uninstaller {
 
     // Both need Dart, so both run before Flutter can go.
     if (choice.tools.contains(ToolId.serverpodCli)) {
-      await step('uninstalling the Serverpod CLI', () async {
+      await step('uninstalling Serverpod', () async {
         await toolchains.uninstallTool(ToolId.serverpodCli);
       });
     }
@@ -98,12 +81,12 @@ class Uninstaller {
       });
     }
     if (choice.tools.contains(ToolId.flutter)) {
-      await step('uninstalling the Flutter SDK', () async {
+      await step('uninstalling Flutter', () async {
         await toolchains.uninstallTool(ToolId.flutter);
       });
     }
     if (choice.tools.contains(ToolId.commandLineTools)) {
-      await step('uninstalling the Command Line Tools', () async {
+      await step('uninstalling Apple\'s command line tools', () async {
         await toolchains.uninstallTool(ToolId.commandLineTools);
       });
     }
@@ -123,7 +106,7 @@ class Uninstaller {
     // The CLI's own state goes with the CLI. After the session is down: the
     // CLI writes here on every run, and the cloud CLI holds its login here.
     if (choice.tools.contains(ToolId.serverpodCli)) {
-      await step('deleting the Serverpod CLI settings folder', () async {
+      await step('deleting Serverpod\'s settings', () async {
         final dir = Directory(toolchains.paths.serverpodStateDir);
         if (await dir.exists()) {
           await dir.delete(recursive: true);

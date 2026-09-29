@@ -5,9 +5,9 @@ import 'tool_version.dart';
 /// supply the `git` Flutter runs on, and the Serverpod CLI is installed with
 /// Flutter's own `dart`.
 enum ToolId {
-  commandLineTools('command_line_tools', 'Command Line Tools'),
-  flutter('flutter', 'Flutter SDK'),
-  serverpodCli('serverpod_cli', 'Serverpod CLI');
+  commandLineTools('command_line_tools', 'Apple\'s command line tools'),
+  flutter('flutter', 'Flutter'),
+  serverpodCli('serverpod_cli', 'Serverpod');
 
   const ToolId(this.manifestId, this.displayName);
 
@@ -217,6 +217,16 @@ class ToolchainInventory {
           ) ??
       false;
 
+  /// Whether a Flutter SDK installed the standard way was found — one not
+  /// managed by FVM or Puro, which App Studio does not work with yet.
+  bool get standardFlutterFound =>
+      tools[ToolId.flutter]?.candidates.any(
+            (c) =>
+                c.fitness != ToolFitness.notFound &&
+                !isVersionManagedFlutter(c.root),
+          ) ??
+      false;
+
   /// Whether first-run setup still owns the window.
   ///
   /// Named because three things have to agree on it: the screen `main.dart`
@@ -227,4 +237,13 @@ class ToolchainInventory {
       legacyInstallFound ||
       installable.isNotEmpty ||
       needsManualUpdate.isNotEmpty;
+}
+
+/// Whether [root] is an SDK managed by FVM (`~/fvm/…`, a project's `.fvm/`) or
+/// Puro (`~/.puro/…`). Both resolve their `flutter` symlinks into their own
+/// directories, so the path says which one it is.
+bool isVersionManagedFlutter(String? root) {
+  if (root == null) return false;
+  final segments = root.split('/');
+  return segments.any((s) => s == 'fvm' || s == '.fvm' || s == '.puro');
 }

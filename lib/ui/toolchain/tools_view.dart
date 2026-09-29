@@ -16,6 +16,17 @@ import '../../toolchain/tool_status.dart';
 abstract interface class ToolsView implements Listenable {
   ToolchainInventory get inventory;
 
+  /// Whether first-run setup still owns the window: the inventory needs work,
+  /// or the one-time Puro/FVM notice has not been answered yet.
+  bool get needsSetup;
+
+  /// The one-time notice that App Studio works with a standard Flutter
+  /// install only. Due on the first launch, unless one was found.
+  bool get needsFlutterNotice;
+
+  /// Records that the notice was answered with Continue.
+  Future<void> acknowledgeFlutterNotice();
+
   /// What an install would fetch — filled in by [preflight].
   InstallPlan get plan;
 
@@ -24,13 +35,6 @@ abstract interface class ToolsView implements Listenable {
 
   bool get isBusy;
   bool get isInstalling;
-
-  /// Where a Flutter SDK App Studio installs goes, shortened for display.
-  String get flutterInstallLabel;
-
-  /// The shell config `PATH` lines go into, shortened for display. Null for a
-  /// shell App Studio cannot edit.
-  String? get shellProfileLabel;
 
   /// `PATH` lines the user has to add by hand, because App Studio cannot edit
   /// their shell's config. Empty in the ordinary case.

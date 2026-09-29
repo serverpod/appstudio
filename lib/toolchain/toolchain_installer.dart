@@ -87,6 +87,10 @@ class ToolchainInstaller {
   /// rather than an endless wait.
   static const _cltInstallerProcess = 'Install Command Line Developer Tools';
 
+  /// Its bundle id, for bringing its window forward.
+  static const _cltInstallerBundleId =
+      'com.apple.dt.CommandLineTools.installondemand';
+
   void close() => _http.close();
 
   // -- Command Line Tools ---------------------------------------------------
@@ -111,6 +115,7 @@ class ToolchainInstaller {
     await Process.run('/usr/bin/xcode-select', const ['--install']);
 
     var sawInstaller = false;
+    var raised = 0;
     DateTime? installerGoneAt;
     while (true) {
       cancel.throwIfCancelled();
@@ -124,13 +129,20 @@ class ToolchainInstaller {
       if (running) {
         sawInstaller = true;
         installerGoneAt = null;
+        // Apple's installer opens *behind* App Studio, where it is easy to
+        // miss while the dialog here says to follow it. Twice, a poll apart:
+        // its window can appear a moment after its process does.
+        if (raised < 2) {
+          raised++;
+          await _bringToFront(_cltInstallerBundleId);
+        }
       } else if (sawInstaller) {
         // The tools land a moment after the window closes; give them that.
         installerGoneAt ??= DateTime.now();
         if (DateTime.now().difference(installerGoneAt) >
             const Duration(seconds: 15)) {
           throw const ToolInstallException(
-            'The Command Line Tools installer closed before it finished.',
+            'Apple\'s installer was closed before it finished.',
           );
         }
       }
@@ -148,6 +160,17 @@ class ToolchainInstaller {
           await File(p.join(dir, 'usr', 'bin', 'git')).exists();
     } catch (_) {
       return false;
+    }
+  }
+
+  /// Activates a running app through LaunchServices. `open` on an app that
+  /// is already running brings it forward rather than starting a second copy,
+  /// and unlike an AppleScript `activate` it needs no automation permission.
+  Future<void> _bringToFront(String bundleId) async {
+    try {
+      await Process.run('/usr/bin/open', ['-b', bundleId]);
+    } catch (_) {
+      // Cosmetic: the install works either way.
     }
   }
 
@@ -175,9 +198,8 @@ class ToolchainInstaller {
     // -128 is "User canceled" from the password prompt.
     throw ToolInstallException(
       error.contains('-128')
-          ? 'Removing the Command Line Tools was cancelled at the password '
-              'prompt.'
-          : 'Could not remove the Command Line Tools.',
+          ? 'Removing Apple\'s command line tools was cancelled.'
+          : 'Could not remove Apple\'s command line tools.',
       detail: error,
     );
   }
@@ -248,7 +270,7 @@ class ToolchainInstaller {
       final unpacked = Directory(p.join(staging.path, 'flutter'));
       if (!await File(p.join(unpacked.path, 'bin', 'flutter')).exists()) {
         throw const ToolInstallException(
-          'The Flutter archive unpacked without bin/flutter.',
+          'The Flutter download is incomplete. Try again.',
         );
       }
       cancel.throwIfCancelled();
@@ -278,8 +300,8 @@ class ToolchainInstaller {
       return;
     }
     throw ToolInstallException(
-      '${_pretty(target.path)} already exists and is not a Flutter SDK App '
-      'Studio installed. Move it somewhere else and try again.',
+      '${_pretty(target.path)} already exists, and App Studio did not put it '
+      'there. Move it somewhere else and try again.',
     );
   }
 
@@ -317,7 +339,7 @@ class ToolchainInstaller {
   }) async {
     final root = owned.path;
     if (root == null) {
-      throw const ToolInstallException('No Flutter SDK to update.');
+      throw const ToolInstallException('There is no Flutter to update.');
     }
     onProgress(ToolProgress(
       id: ToolId.flutter,
@@ -327,7 +349,7 @@ class ToolchainInstaller {
     final result = await _runFlutter(root, const ['upgrade']);
     if (result.exitCode != 0) {
       throw ToolInstallException(
-        'flutter upgrade failed.',
+        'Flutter could not be updated.',
         detail: _tail('${result.stdout}\n${result.stderr}'),
       );
     }
@@ -381,7 +403,7 @@ class ToolchainInstaller {
     );
     if (result.exitCode != 0) {
       throw ToolInstallException(
-        'dart install serverpod_cli failed.',
+        'Serverpod could not be installed.',
         detail: _tail('${result.stdout}\n${result.stderr}'),
       );
     }
@@ -413,7 +435,7 @@ class ToolchainInstaller {
       );
       if (result.exitCode != 0) {
         throw ToolInstallException(
-          'dart uninstall serverpod_cli failed.',
+          'Serverpod could not be uninstalled.',
           detail: _tail('${result.stdout}\n${result.stderr}'),
         );
       }
@@ -643,7 +665,7 @@ class ToolchainInstaller {
     );
     if (result.exitCode != 0) {
       throw ToolInstallException(
-        'Could not unpack the Flutter SDK.',
+        'Could not unpack Flutter.',
         detail: _tail('${result.stderr}'),
       );
     }

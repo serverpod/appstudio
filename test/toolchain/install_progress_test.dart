@@ -71,8 +71,7 @@ void main() {
       );
 
       expect(progress.current?.id, ToolId.flutter);
-      expect(progress.statusLabel, 'Downloading Flutter SDK…');
-      expect(progress.stepLabel, 'Step 2 of 3');
+      expect(progress.statusLabel, 'Downloading Flutter…');
       expect(progress.fraction, closeTo(0.25, 0.001));
       expect(progress.bytesReceived, 1);
       expect(progress.bytesTotal, 4);
@@ -84,16 +83,17 @@ void main() {
         tools: [at(ToolId.commandLineTools, ToolPhase.waitingForApple)],
       );
 
-      expect(progress.statusLabel, 'Installing Command Line Tools…');
-      expect(progress.hint, contains('window Apple opened'));
+      expect(progress.statusLabel, 'Installing Apple\'s command line tools…');
+      expect(
+        progress.hint,
+        'Follow the installation steps in the pop-up window.',
+      );
       expect(progress.isDownloading, isFalse);
       expect(progress.fraction, isNull);
-      // A run of one has no steps to count.
-      expect(progress.stepLabel, isNull);
     });
 
     test('names the tail once every step is terminal', () {
-      // The re-probe is still running; "Installed Serverpod CLI" read as
+      // The re-probe is still running; "Installed Serverpod" read as
       // finished while the dialog was visibly still busy.
       final progress = InstallProgress(
         startedAt: started,
@@ -163,5 +163,17 @@ void main() {
         expect(progress.eta, isNull);
       });
     });
+  });
+
+  test('the line under the bar never repeats the status line', () {
+    // "Setting up Flutter…" above and "Setting up Flutter" below read as a
+    // stutter; those steps leave the line empty instead.
+    for (final phase in [
+      ToolPhase.configuring,
+      ToolPhase.upgrading,
+      ToolPhase.installing,
+    ]) {
+      expect(phase.hint, isNull, reason: '$phase');
+    }
   });
 }

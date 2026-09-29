@@ -412,7 +412,7 @@ editor and any AI agent see exactly the tools App Studio runs:
 
 | Tool | Installed with | Lands in | `PATH` line |
 |---|---|---|---|
-| Command Line Tools | `xcode-select --install` (Apple's own dialog) | `/Library/Developer/CommandLineTools` | — |
+| Apple's command line tools | `xcode-select --install` (Apple's own dialog) | `/Library/Developer/CommandLineTools` | — |
 | Flutter SDK | official archive from `releases_macos.json`, `unzip` | `~/develop/flutter` | `export PATH="$HOME/develop/flutter/bin:$PATH"` |
 | Serverpod CLI | `dart install serverpod_cli@<version>` | `~/Library/Application Support/Dart/install/bin` | `export PATH="$PATH":"$HOME/Library/Application Support/Dart/install/bin"` |
 
@@ -448,6 +448,13 @@ editor and any AI agent see exactly the tools App Studio runs:
   `git` every 3 s. It also watches for the `Install Command Line Developer
   Tools` process, so a window closed early reads as a failure after 15 s
   instead of an endless wait. Cancel stops the wait, not Apple's installer.
+- **Apple's installer opens behind App Studio**, where a user reading "follow
+  the installation steps in the pop-up window" cannot find it. Once its
+  process appears it is brought forward with `open -b
+  com.apple.dt.CommandLineTools.installondemand` — twice, a poll apart, since
+  the window can follow the process. `open` on a running app activates it
+  through LaunchServices and needs no automation permission, which an
+  AppleScript `activate` would.
 - **A copy App Studio did not install is never changed**, with one exception.
   - An old **Flutter** of the user's gets `ToolAction.manual`: setup blocks on
     `ManualUpdateDialog`, which gives the exact command (the SDK's full path,
@@ -863,6 +870,15 @@ install. Sparkle would also catch it, but later and less clearly.
 - **Settings → Providers lists only providers that hold a key**, each with a green Connected badge and a trash button, and an Add Provider button that opens `add_provider_dialog.dart` (provider dropdown, key field, Connect/Cancel, no close X, narrower than Settings). It used to render a card with a key field for all seventeen curated providers, which buried the two that were actually configured. The dropdown filters out anything already connected: the fix for a bad key is remove-then-add, not a second add.
 - **The Add Provider dialog does the save itself** and stays open on failure with the key still in the field, because losing a pasted key to a dialog that closed is the worst possible response to an error. Be careful what it claims: `saveApiKey` writes to the auth store and treats that as the source of truth — it swallows a failed `PUT /auth/{id}` and restarts serve — so **a wrong-but-well-formed key does not fail here**. What the pane's `_connect` can report is an exception from the write, and the provider not appearing in `connectedProviders` afterwards, which is "that did not take effect" rather than "your key is wrong". Do not word it as validation.
 - Its width comes from `ShadDialog.constraints`, not a fixed-width child: the dialog sizes itself to its widest content, so a narrower child just leaves the inputs floating short of the edge.
+- **Every dialog's `child` goes through `DialogBody`** (`widgets/dialog_body.dart`)
+  — `const DialogBody()` alone for a dialog that is only a title and a
+  description. shad puts one `gap` between every part of a dialog, and nova sets
+  it to 4, which leaves the buttons sitting on the text; `DialogBody` makes the
+  space above the buttons `kDialogActionsSpacing` (16, shadcn's `gap-4`) with
+  content or without. Do not pad the buttons or the end of the content by hand
+  — that is what it replaced, one different amount per dialog.
+  `test/widgets/dialog_body_test.dart` measures the spacing and fails on a file
+  with more dialogs than `DialogBody`s.
 - **`ShadBadge.secondary` is invisible on a `muted` card** — slate defines `secondary` and `muted` as the same colour, in both brightnesses. Use `.outline` on a muted surface, and check any `secondary`-on-`muted` pairing before assuming it reads.
 - **`onPressed: null` does not grey out a `ShadButton` — pass `enabled: false` too.** The dimming is an `Opacity(.5)` driven by `ShadState.disabled`, which shad sets from the `enabled` property alone; that defaults to `true` no matter what `onPressed` is. A null handler on its own gets you a button that is inert but looks live, which reads as a broken click rather than an unavailable action. Settings → Tools passes both. The toolbar's `_IconAction` derives it as `enabled: onPressed != null`, so Start and Stop dim like everything else.
 - **A `ShadTooltip` never opens on a disabled `ShadButton`** — which is exactly when its text is worth reading. `ShadTooltip` owns no `MouseRegion`: it injects `onHoverChange` into the theme's hover strategies and relies on the *child* to report hover, and a disabled button puts its content behind an `AbsorbPointer`, so nothing ever reports. Wrap the button in a bare `ShadGestureDetector` — that sits outside the absorber and reports hover regardless. `HotRestartButton` does this, because "start the server first" is the whole point of the tooltip there.
@@ -1121,16 +1137,22 @@ class.
   directory, whatever an earlier build left for tools (its private toolchain
   and fenced `PATH` block), and preferences (NSUserDefaults), which is what
   makes a relaunch behave like a fresh install.
-- **The tools App Studio installed are checkboxes, ticked, each with what
-  removing it would break written under it** (`uninstallConsequence`). They are
-  real installs now, and other projects, Homebrew or the user's own terminal
-  may rely on them, so they are a choice rather than implied. Only tools in the
-  install record that are still on disk are offered (`removableTools`); a tool
-  the user installed themselves is never listed.
-- **Removing Flutter forces the Serverpod CLI** (`kUninstallRequires`): the CLI
-  runs on Flutter's Dart. The CLI's box is ticked and disabled while Flutter's
-  is, and says why. The Command Line Tools are not forced either way — removing
-  them leaves Flutter without `git`, which its consequence text says.
+- **The tools App Studio installed are checkboxes, ticked.** They are real
+  installs now, and other projects or the user's own terminal may rely on
+  them, so they are a choice rather than implied. Only the command line tools
+  carry a line on what removing them affects (`uninstallConsequence`): Flutter
+  and Serverpod say nothing beyond their label, by request — the dialog is
+  meant to be short. Only tools in the install record that are still on disk
+  are offered (`removableTools`); a tool the user installed themselves is
+  never listed.
+- **Removing Flutter forces Serverpod** (`kUninstallRequires`): the CLI runs
+  on Flutter's Dart. Its box is ticked and disabled while Flutter's is, and
+  says why. The command line tools are not forced either way.
+- **The Dart package cache goes with Flutter, and only with Flutter**
+  (`UninstallChoice.clearPubCache`). There is no checkbox for it. `dart pub
+  cache clean` does it while Flutter's Dart is still there; without a Dart,
+  `~/.pub-cache` is deleted directly — built from `ToolchainPaths.home`, never
+  from `$PUB_CACHE`, so a test's scratch home cannot reach a real cache.
 - **Order matters, and it is Serverpod → pub cache → Flutter → CLT.** `dart
   uninstall` and `dart pub cache clean` both need Flutter's Dart. The CLT go
   through `osascript … with administrator privileges` running Apple's
@@ -1148,8 +1170,7 @@ class.
   login — and so does the install record. When the CLI goes, the directory
   goes, and `persistRecord()` writes back whatever App Studio installed that
   the user chose to keep, so it can still be offered next time.
-- Deliberately **not** removed: anything App Studio did not install,
-  `~/.pub-cache` (opt-in checkbox — shared with every Dart project) and
+- Deliberately **not** removed: anything App Studio did not install, and
   `~/.local/share/opencode/auth.json` (API keys the OpenCode CLI uses
   independently of App Studio).
 - **Both uninstall screens ride on `LandingScaffold`**, like the start page and
@@ -1205,10 +1226,12 @@ make widgetbook    # every screen and dialog, in every state, light and dark
   opened from inside a use case — the toolbar's Publish to Cloud, say — would
   cover Widgetbook's own UI and outlive the use case that opened it, which
   surfaces as a cascade of `Duplicate GlobalKey` assertions.
-- **Full-window screens are drawn at a real window size and scaled down**
-  (`AppWindow`, `kAppWindowSize` 1280×800). Widgetbook's canvas is narrower
-  than App Studio's 1024×720 minimum, so laid out at canvas size the toolbar
-  overflowed and truncated text that never truncates in the app. The catalog
+- **Screens and dialogs are drawn at a real window size and scaled down**
+  (`AppWindow`, `kAppWindowSize` 1280×800), with `MediaQuery` saying so.
+  Widgetbook's canvas is narrower than App Studio's 1024×720 minimum, so laid
+  out at canvas size the toolbar overflowed, and shad — which switches dialogs
+  to a phone layout below a 640-wide *screen* — centred dialog text and
+  stacked the buttons. Neither ever happens in the app. The catalog
   test also builds the studio window at exactly the minimum
   (`kMinAppWindowSize`), which is the overflow a real user could hit.
 - **`StudioWindowMock` is an open project assembled from the real parts** —
@@ -1257,9 +1280,10 @@ page and the setup flow are two screens, never stacked.** The dialog used to
 float over the start page, which offered New Project and Open Project buttons
 that could not work — there is no Flutter SDK to build with yet.
 
-- The gate is `ToolchainInventory.needsSetup`: something App Studio can
-  install or update, a Flutter the user has to update themselves, or an earlier
-  build's toolchain still to remove. It is named rather than written out,
+- The gate is `ToolsView.needsSetup`: something App Studio can install or
+  update, a Flutter the user has to update themselves, an earlier build's
+  toolchain still to remove (all `ToolchainInventory.needsSetup`), or the
+  one-time Puro/FVM notice still unanswered. It is named rather than written out,
   because three things have to agree on it and would otherwise drift: the screen `main.dart` picks, `MacAppMenu.canOpenProjects` — ⌘O, Open
   Recent and Settings would walk straight past the gate — and
   `StudioShell._showSettings`.
@@ -1339,8 +1363,19 @@ that could not work — there is no Flutter SDK to build with yet.
   hardcodes black.
 - **Setup is a sequence of dialogs over a spinner** (`_drive()` in
   `toolchain_setup_screen.dart`), each blocking on the user so the loop cannot
-  spin: the legacy notice and cleanup first, then the "update your Flutter"
-  prompt, then the plan. The Flutter prompt comes before the plan because the
+  spin: the Puro/FVM notice, then the legacy notice and cleanup, then the
+  "update your Flutter" prompt, then the plan.
+- **The Puro/FVM notice (`FlutterInstallNotice`) is asked once, on a first
+  launch without a standard Flutter.** App Studio does not work with a Flutter
+  managed by Puro or FVM yet, and the notice points those users at Serverpod's
+  Quick Start instead; Quit or Continue. "Standard" is
+  `ToolchainInventory.standardFlutterFound`: a Flutter found outside `fvm`,
+  `.fvm` and `.puro` path segments — both managers resolve their symlinks into
+  their own folders. `ToolchainController.create` records the question as
+  answered (`setup.flutter_notice_seen`) when a standard Flutter is there, so
+  removing one later does not bring it back; Continue records it too. Quit
+  does not, so the next launch asks again. Uninstall clears preferences, so a
+  reinstall is a first launch. The Flutter prompt comes before the plan because the
   Serverpod CLI is installed with that Flutter's `dart`.
 - **The plan is not raised until `ToolsView.preflight()` has answered.** Every
   version in it comes from Flutter's release feed and pub.dev; raising the
@@ -1548,9 +1583,11 @@ switch is the Theme addon in the right-hand panel.
 **Rules — each is about something that happens outside the window:**
 
 - **Never launch while the user has their own `flutter run` of this app
-  going.** Check `pgrep -fl "flutter_tools.snapshot run"` first. Every run
-  builds into the same `build/macos` bundle, so a second one replaces the app
-  they are using. Attach to theirs instead: the inspector, runtime errors and
+  going.** Every run builds into the same `build/macos` bundle, so a second
+  one replaces the app they are using. The `make` run targets refuse on their
+  own (`refuse_second_run`: any `flutter run` whose working directory is this
+  repo) — so launch through them, never with a bare `flutter run`, and treat
+  their refusal as final. Attach to theirs instead: the inspector, runtime errors and
   hot reload all work over DTD, but driver commands do not — a plain
   `make start` has no driver extension. Ask before stopping their run.
 - **Prefer Widgetbook to the real app.** The real app acts on the machine:

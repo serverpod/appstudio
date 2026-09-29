@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../session/external_editors_view.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_dialog.dart';
+import '../widgets/dialog_body.dart';
 
 /// Set once the user ticks "Don't show this again".
 const _kDismissedKey = 'project.started_notice_dismissed';
@@ -127,7 +128,9 @@ class _ProjectStartedDialogState extends State<ProjectStartedDialog> {
           ],
         ),
       ],
-      child: editor?.id == 'cursor' ? const _CursorMcpTip() : null,
+      child: DialogBody(
+        child: editor?.id == 'cursor' ? const _CursorMcpTip() : null,
+      ),
     );
   }
 }

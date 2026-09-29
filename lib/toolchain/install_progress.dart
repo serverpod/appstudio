@@ -39,16 +39,14 @@ enum ToolPhase {
         cancelled => 'Cancelled',
       };
 
-  /// What is actually happening, for the line under the bar. Null for the
-  /// download, which shows its byte count instead.
+  /// The line under the bar, only where it adds something to the status line
+  /// above it — which already says "Setting up Flutter…", "Updating
+  /// Flutter…", "Installing Serverpod…". Repeating that underneath read as a
+  /// stutter, so those steps leave the line empty. Null for the download too,
+  /// which shows its byte count instead.
   String? get hint => switch (this) {
-        waitingForApple =>
-          'Follow the steps in the window Apple opened. This can take several '
-              'minutes.',
+        waitingForApple => 'Follow the installation steps in the pop-up window.',
         verifying || extracting => 'This takes a minute.',
-        configuring => 'Fetching the web components with flutter precache.',
-        upgrading => 'Running flutter upgrade.',
-        installing => 'Running dart install serverpod_cli.',
         _ => null,
       };
 }
@@ -121,14 +119,6 @@ class InstallProgress {
       if (!tool.phase.isTerminal) return tool;
     }
     return null;
-  }
-
-  /// "Step 2 of 3" — null for a run of one.
-  String? get stepLabel {
-    if (tools.length < 2) return null;
-    final at = current;
-    if (at == null) return null;
-    return 'Step ${tools.indexOf(at) + 1} of ${tools.length}';
   }
 
   /// The line above the bar: what is happening to which tool.

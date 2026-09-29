@@ -25,4 +25,35 @@ void main() {
     }
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('a reserved caption line keeps its height while empty',
+      (tester) async {
+    // An install moves between steps with a caption and steps without one;
+    // the dialog around the bar must not jump as it does.
+    Future<double> heightWith(String? caption) async {
+      await tester.pumpWidget(
+        ShadApp(
+          theme: buildLightTheme(),
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(
+                width: 300,
+                child: DeterminateProgress(
+                  key: const ValueKey('bar'),
+                  fraction: 0.5,
+                  caption: caption,
+                  reserveCaptionLine: true,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      return tester.getSize(find.byKey(const ValueKey('bar'))).height;
+    }
+
+    expect(await heightWith(null), await heightWith('This takes a minute.'));
+  });
 }

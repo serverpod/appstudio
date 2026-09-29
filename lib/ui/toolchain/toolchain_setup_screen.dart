@@ -51,7 +51,13 @@ class _ToolchainSetupScreenState extends State<ToolchainSetupScreen> {
   Future<void> _drive() async {
     final toolchains = widget.toolchains;
     while (true) {
-      if (!mounted || !toolchains.inventory.needsSetup) return;
+      if (!mounted || !toolchains.needsSetup) return;
+      if (toolchains.needsFlutterNotice) {
+        await showFlutterInstallNotice(context);
+        if (!mounted) return;
+        await toolchains.acknowledgeFlutterNotice();
+        continue;
+      }
       if (toolchains.inventory.legacyInstallFound) {
         // The notice is about App Studio no longer using its own Flutter. With
         // one already on the Mac, App Studio simply uses that and there is

@@ -181,7 +181,7 @@ class ProjectCreator {
     if (serverpod == null) {
       throw ProjectCreationException(
         toolchain.unavailableReason(ToolId.serverpodCli) ??
-            'The Serverpod CLI is not available.',
+            'Serverpod is not installed.',
       );
     }
 
@@ -200,7 +200,7 @@ class ProjectCreator {
       );
     } catch (e) {
       throw ProjectCreationException(
-        'Could not run the Serverpod CLI:\n$serverpod',
+        'Could not run Serverpod:\n$serverpod',
         log: '$e',
       );
     }

@@ -8,6 +8,7 @@ import 'providers_view.dart';
 import '../toolchain/manage_tools_pane.dart';
 import 'providers_settings_pane.dart';
 import '../../widgets/app_dialog.dart';
+import '../../widgets/dialog_body.dart';
 
 /// Which pane to open on.
 enum SettingsTab { providers, tools }
@@ -92,35 +93,37 @@ class _SettingsDialogState extends State<SettingsDialog> {
           child: const Text('Done'),
         ),
       ],
-      child: SizedBox(
-        width: _kDialogWidth,
-        // A tab strip with one tab in it is a button that does nothing, so with
-        // Providers gone the pane is shown on its own.
-        child: kOpenCodeAgentEnabled
-            ? ShadTabs<SettingsTab>(
-                value: _tab,
-                // Shad defaults to intrinsic-width tabs; ours are a two-up
-                // segmented control that has to fill the dialog width.
-                expandTabs: true,
-                onChanged: (value) => setState(() => _tab = value),
-                tabs: [
-                  ShadTab(
-                    value: SettingsTab.providers,
-                    content: _paneBox(
-                      ProvidersSettingsPane(agent: widget.agent),
+      child: DialogBody(
+        child: SizedBox(
+          width: _kDialogWidth,
+          // A tab strip with one tab in it is a button that does nothing, so
+          // with Providers gone the pane is shown on its own.
+          child: kOpenCodeAgentEnabled
+              ? ShadTabs<SettingsTab>(
+                  value: _tab,
+                  // Shad defaults to intrinsic-width tabs; ours are a two-up
+                  // segmented control that has to fill the dialog width.
+                  expandTabs: true,
+                  onChanged: (value) => setState(() => _tab = value),
+                  tabs: [
+                    ShadTab(
+                      value: SettingsTab.providers,
+                      content: _paneBox(
+                        ProvidersSettingsPane(agent: widget.agent),
+                      ),
+                      child: const Text('Providers'),
                     ),
-                    child: const Text('Providers'),
-                  ),
-                  ShadTab(
-                    value: SettingsTab.tools,
-                    content: _paneBox(
-                      ManageToolsPane(toolchains: widget.toolchains),
+                    ShadTab(
+                      value: SettingsTab.tools,
+                      content: _paneBox(
+                        ManageToolsPane(toolchains: widget.toolchains),
+                      ),
+                      child: const Text('Tools'),
                     ),
-                    child: const Text('Tools'),
-                  ),
-                ],
-              )
-            : _paneBox(ManageToolsPane(toolchains: widget.toolchains)),
+                  ],
+                )
+              : _paneBox(ManageToolsPane(toolchains: widget.toolchains)),
+        ),
       ),
     );
   }

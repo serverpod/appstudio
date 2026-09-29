@@ -247,9 +247,8 @@ class FakeToolsView extends ChangeNotifier implements ToolsView {
     this.preflightError,
     this.preflightDelay = Duration.zero,
     this.preflightNeverAnswers = false,
-    this.flutterInstallLabel = '~/develop/flutter',
-    this.shellProfileLabel = '~/.zprofile',
     this.manualPathLines = const [],
+    this.needsFlutterNotice = false,
   })  : inventory = inventory ?? completeInventory,
         plan = plan ?? previewPlan;
 
@@ -266,11 +265,18 @@ class FakeToolsView extends ChangeNotifier implements ToolsView {
   @override
   bool isInstalling;
   @override
-  String flutterInstallLabel;
-  @override
-  String? shellProfileLabel;
-  @override
   List<String> manualPathLines;
+  @override
+  bool needsFlutterNotice;
+
+  @override
+  bool get needsSetup => inventory.needsSetup || needsFlutterNotice;
+
+  @override
+  Future<void> acknowledgeFlutterNotice() async {
+    needsFlutterNotice = false;
+    notifyListeners();
+  }
 
   /// What [preflight] reports back. Non-null drives the setup screen's failure
   /// path, which is otherwise only reachable by unplugging the network.

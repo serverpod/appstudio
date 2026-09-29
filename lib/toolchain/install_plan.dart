@@ -201,12 +201,12 @@ Future<ToolVersion> fetchServerpodVersion(
     listing = response.body;
   } catch (_) {
     throw const PlanException(
-      'Could not reach pub.dev to look up the Serverpod CLI.',
+      'Could not reach pub.dev to look up the latest Serverpod.',
     );
   }
   final version = pickPubVersion(listing, accepts);
   if (version == null) {
-    throw PlanException('No Serverpod CLI release matches $accepts.');
+    throw PlanException('No Serverpod release matches $accepts.');
   }
   return version;
 }

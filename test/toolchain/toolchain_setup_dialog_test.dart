@@ -96,15 +96,20 @@ void main() {
     await settle(tester);
   }
 
-  testWidgets('the plan names every place it will touch', (tester) async {
-    // It edits the user's machine outside the app, so it says where.
+  testWidgets('the plan is one plain sentence and the tools', (tester) async {
     final tools = _ScriptedTools();
     await pumpDialog(tester, tools);
 
-    expect(find.textContaining('~/develop/flutter'), findsOneWidget);
-    expect(find.textContaining('~/.zprofile'), findsOneWidget);
-    expect(find.textContaining('CLI with dart install'), findsOneWidget);
-    expect(find.textContaining('Apple\'s own installer'), findsOneWidget);
+    expect(
+      find.text('App Studio will install the following developer tools.'),
+      findsOneWidget,
+    );
+    expect(find.text('Apple\'s command line tools'), findsOneWidget);
+    expect(find.text('Flutter'), findsOneWidget);
+    expect(find.text('Serverpod'), findsOneWidget);
+    // Nothing technical on the right: no sizes, no command names.
+    expect(find.textContaining('MB'), findsNothing);
+    expect(find.textContaining('dart install'), findsNothing);
   });
 
   testWidgets('the plan gives way to progress on Install', (tester) async {
@@ -114,7 +119,7 @@ void main() {
     expect(find.text('Install'), findsOneWidget);
     await startDownload(tester, tools);
 
-    expect(find.text('Downloading Flutter SDK…'), findsOneWidget);
+    expect(find.text('Downloading Flutter…'), findsOneWidget);
     expect(find.text('Install'), findsNothing);
   });
 

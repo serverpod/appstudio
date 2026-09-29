@@ -27,8 +27,8 @@ void main() {
     await pumpPane(tester, FakeToolsView(inventory: completeInventory));
 
     expect(find.byType(SettingsTable), findsOneWidget);
-    expect(find.text('Command Line Tools'), findsOneWidget);
-    expect(find.text('Flutter SDK'), findsOneWidget);
+    expect(find.text('Apple\'s command line tools'), findsOneWidget);
+    expect(find.text('Flutter'), findsOneWidget);
     expect(find.text('3.47.5'), findsOneWidget);
     expect(find.text('4.0.3'), findsOneWidget);
     expect(find.text('App Studio'), findsNWidgets(2));
@@ -71,7 +71,10 @@ void main() {
       (tester) async {
     await pumpPane(tester, FakeToolsView(inventory: manualUpdateInventory));
 
-    expect(find.textContaining('leaves updating it to you'), findsOneWidget);
+    expect(
+      find.textContaining('App Studio needs >=3.47.0 on the stable channel'),
+      findsOneWidget,
+    );
     expect(find.byType(CommandBlock), findsOneWidget);
     expect(
       find.text('~/flutter/bin/flutter upgrade'),
@@ -88,7 +91,6 @@ void main() {
       tester,
       FakeToolsView(
         inventory: completeInventory,
-        shellProfileLabel: null,
         manualPathLines: const [line],
       ),
     );

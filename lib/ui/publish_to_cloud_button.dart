@@ -5,6 +5,7 @@ import 'package:shad/shad.dart';
 
 import '../theme/app_theme.dart';
 import '../widgets/app_dialog.dart';
+import '../widgets/dialog_body.dart';
 
 /// Toolbar button for publishing the open project to Serverpod Cloud.
 ///
@@ -70,14 +71,12 @@ class PublishToCloudDialog extends StatelessWidget {
         ),
       ),
       actions: [
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: ShadButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
-          ),
+        ShadButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('OK'),
         ),
       ],
+      child: const DialogBody(),
     );
   }
 }

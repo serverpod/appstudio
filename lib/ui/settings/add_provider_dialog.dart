@@ -4,6 +4,7 @@ import 'package:shad/shad.dart';
 import '../../agent/agent_transcript.dart';
 import '../../widgets/error_banner.dart';
 import '../../widgets/app_dialog.dart';
+import '../../widgets/dialog_body.dart';
 
 /// Stores the key and reports back. Returns null on success, or a message to
 /// show without closing the dialog.
@@ -142,49 +143,49 @@ class _AddProviderDialogState extends State<AddProviderDialog> {
       // short, so a row would give the field that matters the least room. The
       // placeholders name both fields, so headings above them would only repeat
       // themselves.
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (available.isEmpty)
-            Text(
-              'Every provider App Studio knows about already has a key.',
-              style: theme.textTheme.muted,
-            )
-          else
-            ShadSelect<String>(
-              enabled: !_connecting,
-              initialValue: _providerId,
-              placeholder: const Text('Select provider'),
-              options: [
-                for (final p in available)
-                  ShadOption(value: p.id, child: Text(p.label)),
-              ],
-              selectedOptionBuilder: (context, value) => Text(
-                curatedProviders
-                    .firstWhere(
-                      (p) => p.id == value,
-                      orElse: () => CuratedProvider(id: value, label: value),
-                    )
-                    .label,
+      child: DialogBody(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (available.isEmpty)
+              Text(
+                'Every provider App Studio knows about already has a key.',
+                style: theme.textTheme.muted,
+              )
+            else
+              ShadSelect<String>(
+                enabled: !_connecting,
+                initialValue: _providerId,
+                placeholder: const Text('Select provider'),
+                options: [
+                  for (final p in available)
+                    ShadOption(value: p.id, child: Text(p.label)),
+                ],
+                selectedOptionBuilder: (context, value) => Text(
+                  curatedProviders
+                      .firstWhere(
+                        (p) => p.id == value,
+                        orElse: () => CuratedProvider(id: value, label: value),
+                      )
+                      .label,
+                ),
+                onChanged: (value) => setState(() => _providerId = value),
               ),
-              onChanged: (value) => setState(() => _providerId = value),
+            const ShadGap(2),
+            ShadInput(
+              controller: _keyController,
+              obscureText: true,
+              enabled: !_connecting,
+              placeholder: const Text('Paste the API key…'),
+              onSubmitted: (_) => _connect(),
             ),
-          const ShadGap(2),
-          ShadInput(
-            controller: _keyController,
-            obscureText: true,
-            enabled: !_connecting,
-            placeholder: const Text('Paste the API key…'),
-            onSubmitted: (_) => _connect(),
-          ),
-          if (_error case final error?) ...[
-            const ShadGap(3),
-            ErrorBanner(message: error),
+            if (_error case final error?) ...[
+              const ShadGap(3),
+              ErrorBanner(message: error),
+            ],
           ],
-          // Breathing room before the actions row, which sits directly below.
-          const ShadGap(3),
-        ],
+        ),
       ),
     );
   }

@@ -111,4 +111,55 @@ void main() {
       );
     });
   });
+
+  group('standard Flutter', () {
+    ToolchainInventory withFlutterAt(String root) => ToolchainInventory(
+          manifest: manifest,
+          tools: {
+            ToolId.flutter: ToolStatus(
+              spec: manifest[ToolId.flutter]!,
+              candidates: [
+                ToolCandidate(
+                  id: ToolId.flutter,
+                  source: ToolSource.host,
+                  fitness: ToolFitness.satisfied,
+                  root: root,
+                ),
+              ],
+            ),
+          },
+        );
+
+    test('an SDK in an ordinary folder is standard', () {
+      expect(withFlutterAt('/Users/a/develop/flutter').standardFlutterFound,
+          isTrue);
+      expect(withFlutterAt('/opt/homebrew/share/flutter').standardFlutterFound,
+          isTrue);
+    });
+
+    test('an SDK managed by FVM or Puro is not', () {
+      for (final root in [
+        '/Users/a/fvm/versions/3.47.5',
+        '/Users/a/code/app/.fvm/flutter_sdk',
+        '/Users/a/.puro/envs/stable/flutter',
+      ]) {
+        expect(withFlutterAt(root).standardFlutterFound, isFalse,
+            reason: root);
+      }
+    });
+
+    test('a folder that merely mentions fvm is still standard', () {
+      // Whole path segments only.
+      expect(withFlutterAt('/Users/fvmfan/flutter').standardFlutterFound,
+          isTrue);
+    });
+
+    test('no Flutter at all is not a standard one', () {
+      expect(
+        ToolchainInventory(manifest: manifest, tools: const {})
+            .standardFlutterFound,
+        isFalse,
+      );
+    });
+  });
 }

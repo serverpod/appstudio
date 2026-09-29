@@ -30,11 +30,23 @@ class _CommandBlockState extends State<CommandBlock> {
       backgroundColor: theme.colorScheme.muted,
       padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
       child: Row(
+        // Top, so with several lines the copy button stays in the corner
+        // rather than drifting to the middle.
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-            child: SelectableText(
-              widget.command,
-              style: theme.textTheme.small.copyWith(fontFamily: kMacMonoFont),
+            child: Padding(
+              // Centres a single line on the button beside it.
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: SelectableText(
+                widget.command,
+                // `small` is `leading-none`: fine for one line, cramped for
+                // two. Commands wrap onto several lines, so give them room.
+                style: theme.textTheme.small.copyWith(
+                  fontFamily: kMacMonoFont,
+                  height: 1.7,
+                ),
+              ),
             ),
           ),
           ShadTooltip(

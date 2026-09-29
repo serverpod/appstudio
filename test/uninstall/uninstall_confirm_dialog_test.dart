@@ -48,7 +48,6 @@ void main() {
               WidgetsBinding.instance.addPostFrameCallback((_) async {
                 outcome.choice = await showUninstallConfirmDialog(
                   context,
-                  measureBytes: () async => null,
                   removableTools: removable,
                 );
                 outcome.closed = true;
@@ -78,15 +77,18 @@ void main() {
       await settle(tester);
 
       for (final name in [
-        'Uninstall Serverpod CLI',
-        'Uninstall Flutter SDK',
-        'Uninstall Command Line Tools',
+        'Uninstall Serverpod',
+        'Uninstall Flutter',
+        "Uninstall Apple's command line tools",
       ]) {
         expect(checkbox(tester, name).value, isTrue, reason: name);
       }
-      // Each says what removing it breaks.
-      expect(find.textContaining('Homebrew'), findsOneWidget);
-      expect(find.textContaining('Serverpod Cloud login'), findsOneWidget);
+      // Only the command line tools reach past App Studio, so only they say
+      // what removing them affects.
+      expect(
+        find.textContaining('If other apps use them, they may be affected.'),
+        findsOneWidget,
+      );
 
       await tester.tap(find.text('Uninstall'));
       await settle(tester);
@@ -97,7 +99,8 @@ void main() {
         ToolId.flutter,
         ToolId.commandLineTools,
       });
-      expect(choice.clearPubCache, isFalse);
+      // Flutter goes, so the Dart package cache goes with it.
+      expect(choice.clearPubCache, isTrue);
     });
 
     testWidgets('the Serverpod CLI is locked in while Flutter is ticked',
@@ -106,17 +109,17 @@ void main() {
           await pumpDialog(tester, const [ToolId.serverpodCli, ToolId.flutter]);
       await settle(tester);
 
-      final serverpod = checkbox(tester, 'Uninstall Serverpod CLI');
+      final serverpod = checkbox(tester, 'Uninstall Serverpod');
       expect(serverpod.value, isTrue);
       expect(serverpod.enabled, isFalse);
-      expect(find.textContaining('Required when removing Flutter SDK'),
+      expect(find.textContaining('Required when removing Flutter'),
           findsOneWidget);
 
-      await tester.tap(find.text('Uninstall Flutter SDK'));
+      await tester.tap(find.text('Uninstall Flutter'));
       await settle(tester);
-      expect(checkbox(tester, 'Uninstall Serverpod CLI').enabled, isTrue);
+      expect(checkbox(tester, 'Uninstall Serverpod').enabled, isTrue);
 
-      await tester.tap(find.text('Uninstall Serverpod CLI'));
+      await tester.tap(find.text('Uninstall Serverpod'));
       await settle(tester);
       await tester.tap(find.text('Uninstall'));
       await settle(tester);
@@ -131,7 +134,8 @@ void main() {
       await settle(tester);
 
       expect(find.textContaining('Uninstall Flutter'), findsNothing);
-      expect(find.text('Also clear the Dart package cache'), findsOneWidget);
+      // There is no separate package-cache option: it goes with Flutter.
+      expect(find.textContaining('package cache'), findsNothing);
     });
   });
 }

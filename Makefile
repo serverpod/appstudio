@@ -79,7 +79,23 @@ deps:
 	@echo "==> macOS pods / CEF"
 	cd "$(ROOT)/macos" && pod install
 
+# Refuses to start while another `flutter run` of this repo is running. Every
+# run builds into the same build/macos bundle, so a second one rebuilds and
+# replaces the app the first is using. Other projects' runs are left alone:
+# only a run whose working directory is this repo counts.
+define refuse_second_run
+	@for pid in $$(pgrep -f "flutter_tools.snapshot run" || true); do \
+		cwd=$$(lsof -a -p $$pid -d cwd -Fn 2>/dev/null | sed -n 's/^n//p'); \
+		if [ "$$cwd" = "$(ROOT)" ]; then \
+			echo "error: flutter run is already active for this project (pid $$pid)."; \
+			echo "       Stop it first — a second run would replace the app it is using."; \
+			exit 1; \
+		fi; \
+	done
+endef
+
 start: ensure_deps
+	$(refuse_second_run)
 	@echo "==> flutter run -d macos"
 	cd "$(ROOT)" && flutter run -d macos
 
@@ -88,6 +104,7 @@ start: ensure_deps
 # than an app of its own, so it runs in App Studio's own macOS runner — same
 # fonts, assets and plugins — and needs CEF for the same reason `start` does.
 widgetbook: ensure_deps
+	$(refuse_second_run)
 	@echo "==> flutter run -d macos -t widgetbook/main.dart"
 	cd "$(ROOT)" && flutter run -d macos -t widgetbook/main.dart
 
@@ -95,10 +112,12 @@ widgetbook: ensure_deps
 # tap, type and take screenshots through the Dart MCP server. The entry points
 # live in test_driver/, outside lib/, so flutter_driver never ships.
 start_driver: ensure_deps
+	$(refuse_second_run)
 	@echo "==> flutter run -d macos -t test_driver/app.dart"
 	cd "$(ROOT)" && flutter run -d macos -t test_driver/app.dart
 
 widgetbook_driver: ensure_deps
+	$(refuse_second_run)
 	@echo "==> flutter run -d macos -t test_driver/widgetbook.dart"
 	cd "$(ROOT)" && flutter run -d macos -t test_driver/widgetbook.dart
 

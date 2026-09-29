@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'install_plan.dart';
 import 'install_progress.dart';
@@ -17,7 +18,6 @@ import 'toolchain.dart';
 import 'toolchain_installer.dart';
 import 'toolchain_manifest.dart';
 import 'toolchain_paths.dart';
-import '../util/pretty_path.dart';
 import '../ui/toolchain/tools_view.dart';
 
 /// Owns the resolved [Toolchain] and re-resolves it on demand.
@@ -33,7 +33,10 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
     InstallRecord record = InstallRecord.empty,
     ToolchainInstaller? installer,
     this.probeSandbox,
+    bool flutterNoticeSeen = true,
   })  : _current = initial,
+        // ignore: prefer_initializing_formals
+        _flutterNoticeSeen = flutterNoticeSeen,
         // Both fields are mutable and private; initializing formals would leak
         // the underscores into the named-argument list. The ignore only covers
         // the line after it, so each assignment needs its own.
@@ -63,13 +66,26 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
       );
     }
 
+    // The Puro/FVM notice is for a first launch without a standard Flutter.
+    // With one found, the question is answered for good — a Flutter removed
+    // later does not make this a first launch.
+    final prefs = await SharedPreferences.getInstance();
+    var noticeSeen = prefs.getBool(_kFlutterNoticeSeenKey) ?? false;
+    if (!noticeSeen && toolchain.inventory.standardFlutterFound) {
+      noticeSeen = true;
+      await prefs.setBool(_kFlutterNoticeSeenKey, true);
+    }
+
     return ToolchainController(
       initial: toolchain,
       manifest: manifest,
       paths: paths,
       record: record,
+      flutterNoticeSeen: noticeSeen,
     );
   }
+
+  static const _kFlutterNoticeSeenKey = 'setup.flutter_notice_seen';
 
   final ToolManifest manifest;
   final ToolchainPaths paths;
@@ -79,6 +95,7 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
 
   Toolchain _current;
   InstallRecord _record;
+  bool _flutterNoticeSeen;
   InstallPlan _plan = InstallPlan.empty;
   bool _refreshing = false;
   bool _planning = false;
@@ -102,6 +119,25 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
 
   @override
   InstallPlan get plan => _plan;
+
+  @override
+  bool get needsSetup => inventory.needsSetup || needsFlutterNotice;
+
+  @override
+  bool get needsFlutterNotice =>
+      !_flutterNoticeSeen && !inventory.standardFlutterFound;
+
+  @override
+  Future<void> acknowledgeFlutterNotice() async {
+    _flutterNoticeSeen = true;
+    _notify();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kFlutterNoticeSeenKey, true);
+    } catch (e) {
+      debugPrint('ToolchainController: could not save the notice: $e');
+    }
+  }
 
   bool get isRefreshing => _refreshing;
 
@@ -317,14 +353,13 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
         final dart = _current.dartExecutable;
         if (dart == null) {
           throw const ToolInstallException(
-            'The Serverpod CLI is installed with Flutter\'s Dart, and no '
-            'usable Flutter SDK was found.',
+            'Serverpod needs Flutter, and no usable Flutter was found.',
           );
         }
         final version = _plan[id]?.version;
         if (version == null) {
           throw const ToolInstallException(
-            'No Serverpod CLI version was chosen.',
+            'No Serverpod version was chosen.',
           );
         }
         final executable = p.join(paths.dartInstallBinDir, 'serverpod');
@@ -435,14 +470,23 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
     await _saveRecord(_record.without(id));
   }
 
-  /// Runs `dart pub cache clean`, the sanctioned way to empty `~/.pub-cache`.
+  /// Empties the Dart package cache, which goes when Flutter does.
   ///
-  /// Separate from removing tools on purpose: that cache belongs to every
-  /// Dart project on the machine. Returns an error message, or null.
+  /// `dart pub cache clean` is the sanctioned way, and it knows about
+  /// `$PUB_CACHE`. Without a Dart to run it — Flutter already gone, or never
+  /// usable — `~/.pub-cache` is deleted directly instead. That fallback is
+  /// built from [paths], never from `$PUB_CACHE`, so a run against a scratch
+  /// home cannot reach a real cache. Returns an error message, or null.
   Future<String?> clearPubCache() async {
     final dart = _current.dartExecutable;
     if (dart == null) {
-      return 'Dart is not available, so the cache cannot be cleared.';
+      try {
+        final cache = Directory(p.join(paths.home, '.pub-cache'));
+        if (await cache.exists()) await cache.delete(recursive: true);
+        return null;
+      } catch (e) {
+        return '$e';
+      }
     }
     try {
       final result = await Process.run(
@@ -462,13 +506,6 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
   // -- ToolsView ------------------------------------------------------------
 
   ShellProfile get _profile => installer.profile;
-
-  @override
-  String get flutterInstallLabel => prettyPath(paths.flutterInstallDir);
-
-  @override
-  String? get shellProfileLabel =>
-      _profile.path == null ? null : prettyPath(_profile.path!);
 
   @override
   List<String> get manualPathLines {

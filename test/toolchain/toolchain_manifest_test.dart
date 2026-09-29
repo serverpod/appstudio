@@ -37,7 +37,7 @@ void main() {
 
   test('falls back to the built-in display name', () {
     final manifest = ToolManifest.tryParse(jsonEncode(valid()))!;
-    expect(manifest[ToolId.flutter]!.displayName, 'Flutter SDK');
+    expect(manifest[ToolId.flutter]!.displayName, 'Flutter');
   });
 
   test('refuses another schema rather than half-reading it', () {

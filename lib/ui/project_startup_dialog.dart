@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../process/project_ready_view.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_dialog.dart';
+import '../widgets/dialog_body.dart';
 
 /// Set once the user ticks "Don't show this again".
 const _kDismissedKey = 'project.startup_notice_dismissed';
@@ -108,6 +109,7 @@ class _ProjectStartupDialogState extends State<ProjectStartupDialog> {
           child: const Text("Let's Go"),
         ),
       ],
+      child: const DialogBody(),
     );
   }
 }

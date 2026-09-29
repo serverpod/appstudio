@@ -62,7 +62,7 @@ final settingsFolder = WidgetbookFolder(
           builder: (_) => _settings(
             FakeToolsView(
               inventory: mixedInventory,
-              installError: 'dart install serverpod_cli failed.',
+              installError: 'Serverpod could not be installed.',
             ),
           ),
         ),
@@ -71,7 +71,6 @@ final settingsFolder = WidgetbookFolder(
           builder: (_) => _settings(
             FakeToolsView(
               inventory: completeInventory,
-              shellProfileLabel: null,
               manualPathLines: const [
                 r'export PATH="$HOME/develop/flutter/bin:$PATH"',
                 r'export PATH="$PATH":"$HOME/Library/Application Support/Dart/install/bin"',

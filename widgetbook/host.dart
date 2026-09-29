@@ -172,7 +172,18 @@ class AppWindow extends StatelessWidget {
         color: ShadTheme.of(context).colorScheme.muted,
         child: FittedBox(
           fit: BoxFit.scaleDown,
-          child: SizedBox.fromSize(size: size, child: child),
+          child: SizedBox.fromSize(
+            size: size,
+            // The size matters to more than layout: shad switches dialogs to
+            // their phone layout — centred text, stacked full-width buttons —
+            // below a 640-wide *screen*, read from MediaQuery. Widgetbook's
+            // canvas is under that, which is how dialogs came out centred
+            // here and nowhere in the app.
+            child: MediaQuery(
+              data: MediaQuery.of(context).copyWith(size: size),
+              child: child,
+            ),
+          ),
         ),
       ),
     );
@@ -202,18 +213,22 @@ class DialogUseCase extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        // The backdrop is scenery: a click on it would open things the use
-        // case is not about. Drawn at window size like any screen.
-        IgnorePointer(child: AppWindow(child: backdrop)),
-        ColoredBox(
-          color: theme.alertDialogTheme.barrierColor ??
-              Colors.black.withValues(alpha: 0.1),
-        ),
-        Center(child: SingleChildScrollView(child: dialog)),
-      ],
+    // Dialog and backdrop together, at window size: a dialog laid out at the
+    // canvas's width takes shad's phone layout, which the app never shows.
+    return AppWindow(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // The backdrop is scenery: a click on it would open things the use
+          // case is not about.
+          IgnorePointer(child: backdrop),
+          ColoredBox(
+            color: theme.alertDialogTheme.barrierColor ??
+                Colors.black.withValues(alpha: 0.1),
+          ),
+          Center(child: SingleChildScrollView(child: dialog)),
+        ],
+      ),
     );
   }
 }

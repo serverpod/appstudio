@@ -78,7 +78,7 @@ Future<void> main() async {
     ),
   );
   appAnalytics.appOpened(
-    toolchainSetupRequired: toolchains.inventory.needsSetup,
+    toolchainSetupRequired: toolchains.needsSetup,
     toolSources: {
       for (final tool in toolchains.inventory.tools.values)
         tool.id.manifestId: tool.resolved?.source.name ?? 'missing',
@@ -244,11 +244,9 @@ class _AppStudioAppState extends State<AppStudioApp> {
     _syncMenu();
   }
 
-  /// Whether the first-run setup screen owns the window.
-  ///
-  /// See [ToolchainInventory.needsSetup] for why this is gated on what we can
-  /// download rather than on a complete toolchain.
-  bool get _needsToolchainSetup => widget.toolchains.inventory.needsSetup;
+  /// Whether the first-run setup screen owns the window — see
+  /// [ToolchainController.needsSetup].
+  bool get _needsToolchainSetup => widget.toolchains.needsSetup;
 
   /// Opening a project auto-starts the server, so this is the moment the long
   /// first compile begins — say so before it looks like a hang.
@@ -364,7 +362,6 @@ class _AppStudioAppState extends State<AppStudioApp> {
     if (!mounted || !navigatorContext.mounted) return;
     final choice = await showUninstallConfirmDialog(
       navigatorContext,
-      measureBytes: uninstaller.measureSupportBytes,
       removableTools: removable,
     );
     if (choice == null || !mounted) return;

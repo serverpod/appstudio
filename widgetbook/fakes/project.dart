@@ -81,7 +81,7 @@ class FakeNewProject implements NewProjectView {
     final path = p.join(parentDirectory, name);
     switch (outcome) {
       case CreateOutcome.hangs:
-        onStatus?.call('Resolving dependencies… (flutter pub get)');
+        onStatus?.call('Resolving dependencies…');
         return Completer<String>().future;
       case CreateOutcome.fails:
         throw ProjectCreationException(
@@ -99,7 +99,7 @@ class FakeNewProject implements NewProjectView {
       case CreateOutcome.succeeds:
         for (final status in const [
           'Creating project…',
-          'Resolving dependencies… (flutter pub get)',
+          'Resolving dependencies…',
           'Generating code…',
           'Configuring preview…',
         ]) {

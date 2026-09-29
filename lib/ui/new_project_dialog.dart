@@ -15,6 +15,7 @@ import '../util/pretty_path.dart';
 import '../widgets/error_banner.dart';
 import '../widgets/field_label.dart';
 import 'landing_scaffold.dart';
+import '../widgets/dialog_body.dart';
 
 const _kDialogWidth = 460.0;
 
@@ -243,7 +244,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
     final ide = _ide!;
     setState(() {
       _creating = true;
-      _status = 'Starting Serverpod CLI…';
+      _status = 'Starting Serverpod…';
       _error = null;
       _errorLog = null;
       _createdPath = null;
@@ -296,9 +297,11 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
       child: ShadDialog.alert(
         title: const Text('Create Project'),
         actions: _buildActions(),
-        child: SizedBox(
-          width: _kDialogWidth,
-          child: _creating ? _buildProgress(theme) : _buildForm(theme),
+        child: DialogBody(
+          child: SizedBox(
+            width: _kDialogWidth,
+            child: _creating ? _buildProgress(theme) : _buildForm(theme),
+          ),
         ),
       ),
     );
@@ -415,9 +418,6 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
           selected: _ide,
           onChanged: (ide) => setState(() => _ide = ide),
         ),
-        // The dialog's own gap alone leaves the last row of options sitting on
-        // top of the buttons.
-        const SizedBox(height: 16),
       ],
     );
   }
@@ -431,18 +431,16 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
       children: [
         const SizedBox(height: 8),
         Text('Creating $_name', style: textTheme.small.semibold),
-        const SizedBox(height: 6),
+        const SizedBox(height: 14),
+        const ShadProgress(value: null, minHeight: 3),
+        const SizedBox(height: 14),
+        // What the CLI is doing right now — "Resolving dependencies…" — which
+        // says more than a fixed "this can take a minute" did. Two lines, so a
+        // long step does not make the dialog jump by growing a third.
         Text(
           _status ?? 'Working…',
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: textTheme.muted.copyWith(fontSize: 11),
-        ),
-        const SizedBox(height: 14),
-        const ShadProgress(value: null, minHeight: 3),
-        const SizedBox(height: 14),
-        Text(
-          'Fetching dependencies and generating code can take a minute.',
           style: textTheme.muted.copyWith(fontSize: 11),
         ),
       ],

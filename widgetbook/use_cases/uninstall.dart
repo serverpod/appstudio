@@ -9,10 +9,7 @@ import '../studio_window.dart';
 
 DialogUseCase _confirm(List<ToolId> removable) => DialogUseCase(
       backdrop: const StudioWindowMock(),
-      dialog: UninstallConfirmDialog(
-        measureBytes: () async => 48 * 1000 * 1000,
-        removableTools: removable,
-      ),
+      dialog: UninstallConfirmDialog(removableTools: removable),
     );
 
 final uninstallFolder = WidgetbookFolder(
@@ -59,7 +56,7 @@ final uninstallFolder = WidgetbookFolder(
             const UninstalledScreen(
               result: UninstallResult(
                 failures: [
-                  'uninstalling the Command Line Tools',
+                  'uninstalling Apple\'s command line tools',
                   'deleting the App Studio support folder',
                 ],
               ),

@@ -4,8 +4,8 @@ import 'package:shad/shad.dart';
 import '../../theme/app_theme.dart';
 import '../../toolchain/tool_status.dart';
 import '../../uninstall/uninstall_result.dart';
-import '../../util/byte_format.dart';
 import '../../widgets/app_dialog.dart';
+import '../../widgets/dialog_body.dart';
 
 /// Matches the sibling dialogs. Shad caps a dialog at 512 anyway, so this only
 /// has to be wide enough not to shrink the content below that.
@@ -29,23 +29,18 @@ Set<ToolId> effectiveUninstallSelection(
   return result.intersection(offered.toSet());
 }
 
-/// What removing each tool does to everything else on the Mac.
-String uninstallConsequence(ToolId id) => switch (id) {
-      ToolId.serverpodCli =>
-        'Runs dart uninstall serverpod_cli and deletes ~/.serverpod, '
-            'including your Serverpod Cloud login.',
-      ToolId.flutter =>
-        'Deletes the Flutter SDK and its PATH line. Other Flutter projects on '
-            'this Mac will stop building.',
+/// What removing a tool does to everything else on the Mac, where that is
+/// worth saying. Flutter and Serverpod say nothing: removing them is what the
+/// checkbox label already says.
+String? uninstallConsequence(ToolId id) => switch (id) {
       ToolId.commandLineTools =>
-        'Removes git, compilers and the other command line developer tools. '
-            'Homebrew and anything else that builds code on this Mac may stop '
-            'working. Asks for your administrator password.',
+        'Removes git, compilers, and the other command line developer tools. '
+            'If other apps use them, they may be affected.',
+      ToolId.flutter || ToolId.serverpodCli => null,
     };
 
 Future<UninstallChoice?> showUninstallConfirmDialog(
   BuildContext context, {
-  required Future<int?> Function() measureBytes,
   required List<ToolId> removableTools,
 }) {
   return showAppDialog<UninstallChoice>(
@@ -53,30 +48,20 @@ Future<UninstallChoice?> showUninstallConfirmDialog(
     // A stray click on the barrier must not throw away the decision — Cancel
     // is the way out.
     barrierDismissible: false,
-    builder: (context) => UninstallConfirmDialog(
-      measureBytes: measureBytes,
-      removableTools: removableTools,
-    ),
+    builder: (context) =>
+        UninstallConfirmDialog(removableTools: removableTools),
   );
 }
 
-/// Confirms an uninstall, naming exactly what goes and what stays.
+/// Confirms an uninstall.
 ///
 /// App Studio's own data — its Application Support folder and preferences —
 /// always goes, so a relaunch behaves like a fresh install. The tools it
 /// installed are real installs that other things may now depend on, so each
-/// is a checkbox, ticked, with what removing it would break written under it.
+/// is a checkbox, ticked. Removing Flutter also clears the Dart package cache;
+/// with Flutter staying, the cache is left alone.
 class UninstallConfirmDialog extends StatefulWidget {
-  const UninstallConfirmDialog({
-    super.key,
-    required this.measureBytes,
-    this.removableTools = const [],
-  });
-
-  /// Size of App Studio's own data, or null if it could not be measured.
-  /// Injected rather than shelled out to here: `du` is `dart:io`, and this
-  /// dialog has to stay renderable in previews.
-  final Future<int?> Function() measureBytes;
+  const UninstallConfirmDialog({super.key, this.removableTools = const []});
 
   /// Tools App Studio installed that are still here, in removal order.
   final List<ToolId> removableTools;
@@ -86,21 +71,7 @@ class UninstallConfirmDialog extends StatefulWidget {
 }
 
 class _UninstallConfirmDialogState extends State<UninstallConfirmDialog> {
-  bool _clearPubCache = false;
   late Set<ToolId> _picked = widget.removableTools.toSet();
-  int? _supportBytes;
-
-  @override
-  void initState() {
-    super.initState();
-    _measure();
-  }
-
-  Future<void> _measure() async {
-    // Size is a nicety; the dialog works without it.
-    final bytes = await widget.measureBytes();
-    if (bytes != null && mounted) setState(() => _supportBytes = bytes);
-  }
 
   Set<ToolId> get _selection =>
       effectiveUninstallSelection(_picked, widget.removableTools);
@@ -117,14 +88,9 @@ class _UninstallConfirmDialogState extends State<UninstallConfirmDialog> {
     // The alert variant is the one with no close X — Cancel is the way out.
     return ShadDialog.alert(
       title: const Text('Uninstall App Studio'),
-      // The lead paragraph belongs in `description`, which resolves to shad's
-      // body role. Set in `textTheme.small` it picked up the *label* style —
-      // `font-medium leading-none` — and read bold and cramped.
-      description: Text(
-        'This removes all App Studio settings and data'
-        '${_supportBytes == null ? '' : ' (${formatBytes(_supportBytes!)})'}'
-        '${widget.removableTools.isEmpty ? '' : ', and the tools you tick below'}'
-        '. The app itself is not deleted, drag it to the Trash afterwards.',
+      description: const Text(
+        'Uninstall the selected components. Afterward, you can drag the app '
+        'itself to the Trash.',
       ),
       actions: [
         ShadButton.outline(
@@ -132,9 +98,8 @@ class _UninstallConfirmDialogState extends State<UninstallConfirmDialog> {
           child: const Text('Cancel'),
         ),
         ShadButton.destructive(
-          onPressed: () => Navigator.of(context).pop(
-            UninstallChoice(tools: selection, clearPubCache: _clearPubCache),
-          ),
+          onPressed: () =>
+              Navigator.of(context).pop(UninstallChoice(tools: selection)),
           child: const Text('Uninstall'),
         ),
       ],
@@ -144,46 +109,41 @@ class _UninstallConfirmDialogState extends State<UninstallConfirmDialog> {
         // the safe default — keys off the 640 **screen** breakpoint, not this
         // width. Nothing here can prevent it; this only sets content width.
         width: _kDialogWidth,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final id in widget.removableTools) ...[
-              ShadCheckbox(
-                value: selection.contains(id),
-                enabled: !_forced(id),
-                onChanged: (v) => setState(() {
-                  _picked = v ? {..._picked, id} : ({..._picked}..remove(id));
-                }),
-                label: Text(
-                  'Uninstall ${id.displayName}',
-                  style: kWeightMedium,
-                ),
-                sublabel: Text(
-                  _forced(id)
-                      ? '${uninstallConsequence(id)} Required when removing '
-                          '${_requiredBy(id)}.'
-                      : uninstallConsequence(id),
-                ),
-              ),
-              const ShadGap(3),
-            ],
-            ShadCheckbox(
-              value: _clearPubCache,
-              onChanged: (v) => setState(() => _clearPubCache = v),
-              label: Text(
-                'Also clear the Dart package cache',
-                style: kWeightMedium,
-              ),
-              sublabel: const Text(
-                'Runs "dart pub cache clean". This cache is shared with every '
-                'Dart project on your Mac, not just App Studio.',
-              ),
-            ),
-          ],
+        child: DialogBody(
+          child: widget.removableTools.isEmpty ? null : _toolList(selection),
         ),
       ),
     );
+  }
+
+  /// One ticked checkbox per tool App Studio installed.
+  Widget _toolList(Set<ToolId> selection) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final (index, id) in widget.removableTools.indexed) ...[
+            if (index > 0) const ShadGap(3),
+            ShadCheckbox(
+              value: selection.contains(id),
+              enabled: !_forced(id),
+              onChanged: (v) => setState(() {
+                _picked = v ? {..._picked, id} : ({..._picked}..remove(id));
+              }),
+              label: Text('Uninstall ${id.displayName}', style: kWeightMedium),
+              sublabel: _sublabel(id),
+            ),
+          ],
+        ],
+      );
+
+  /// A disabled box needs its reason; otherwise only the tools whose removal
+  /// reaches past App Studio carry a line.
+  Widget? _sublabel(ToolId id) {
+    if (_forced(id)) return Text('Required when removing ${_requiredBy(id)}.');
+    return switch (uninstallConsequence(id)) {
+      final consequence? => Text(consequence),
+      null => null,
+    };
   }
 
   String _requiredBy(ToolId id) => [

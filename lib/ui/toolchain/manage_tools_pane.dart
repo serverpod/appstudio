@@ -196,6 +196,7 @@ class _InstallBanner extends StatelessWidget {
       child: DeterminateProgress(
         fraction: progress.fraction,
         caption: installCaption(progress),
+        reserveCaptionLine: true,
       ),
     );
   }

@@ -88,6 +88,15 @@ final firstRunFolder = WidgetbookFolder(
       ],
     ),
     WidgetbookComponent(
+      name: 'Puro or FVM notice',
+      useCases: [
+        WidgetbookUseCase(
+          name: 'Default',
+          builder: (_) => _onLanding(const FlutterInstallNotice()),
+        ),
+      ],
+    ),
+    WidgetbookComponent(
       name: 'Legacy install notice',
       useCases: [
         WidgetbookUseCase(
@@ -134,12 +143,8 @@ final firstRunFolder = WidgetbookFolder(
             'After a failed install',
             FakeToolsView(
               inventory: emptyInventory,
-              installError: 'dart install serverpod_cli failed.',
+              installError: 'Serverpod could not be installed.',
             ),
-          ),
-          (
-            'Shell App Studio cannot edit',
-            FakeToolsView(inventory: emptyInventory, shellProfileLabel: null),
           ),
         ])
           WidgetbookUseCase(
@@ -155,7 +160,7 @@ final firstRunFolder = WidgetbookFolder(
           ('Waiting for Apple\'s installer', waitingForAppleProgress),
           ('Downloading Flutter', downloadingProgress),
           ('Setting up Flutter', settingUpFlutterProgress),
-          ('Installing the Serverpod CLI', installingServerpodProgress),
+          ('Installing Serverpod', installingServerpodProgress),
           ('Finishing up', finishingProgress),
         ])
           WidgetbookUseCase(

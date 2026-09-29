@@ -6,13 +6,13 @@ import 'package:shad/shad.dart';
 import '../../theme/app_theme.dart';
 import '../../toolchain/install_progress.dart';
 import '../../toolchain/tool_status.dart';
-import '../../util/byte_format.dart';
 import '../../util/quit_app.dart';
 import '../../widgets/determinate_progress.dart';
 import '../../widgets/error_banner.dart';
 import '../../widgets/settings_table.dart';
 import 'tools_view.dart';
 import '../../widgets/app_dialog.dart';
+import '../../widgets/dialog_body.dart';
 
 /// Raises the install plan. Completes when the toolchain is in place — the
 /// dialog closes itself — or never, if the user quits from it.
@@ -150,7 +150,11 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
       canPop: false,
       child: ShadDialog.alert(
         title: const Text('Set up your tools'),
-        description: installing ? null : Text(_planDescription()),
+        description: installing
+            ? null
+            : const Text(
+                'App Studio will install the following developer tools.',
+              ),
         actions: installing
             ? [
                 // Stops after the step in progress. Apple's installer is its
@@ -171,37 +175,14 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
                   child: const Text('Install'),
                 ),
               ],
-        child: SizedBox(
-          width: double.infinity,
-          child: installing ? _buildProgress(theme) : _buildPlan(theme),
+        child: DialogBody(
+          child: SizedBox(
+            width: double.infinity,
+            child: installing ? _buildProgress(theme) : _buildPlan(theme),
+          ),
         ),
       ),
     );
-  }
-
-  /// Says where each tool is about to go — this edits the user's machine
-  /// outside the app, so it names every place it touches.
-  String _planDescription() {
-    final toolchains = widget.toolchains;
-    final ids = {for (final t in toolchains.inventory.installable) t.id};
-    final parts = [
-      if (ids.contains(ToolId.commandLineTools))
-        'Apple\'s Command Line Tools, through Apple\'s own installer',
-      if (toolchains.inventory[ToolId.flutter]?.action == ToolAction.install)
-        'Flutter in ${toolchains.flutterInstallLabel}',
-      if (ids.contains(ToolId.serverpodCli))
-        'the Serverpod CLI with dart install',
-    ];
-    final buffer = StringBuffer('App Studio installs these the standard way');
-    if (parts.isNotEmpty) buffer.write(': ${_sentenceList(parts)}');
-    buffer.write('.');
-    if (toolchains.shellProfileLabel case final profile?) {
-      buffer.write(
-        ' It adds them to your PATH in $profile, so your terminal and '
-        'editors use the same tools.',
-      );
-    }
-    return buffer.toString();
   }
 
   Widget _buildPlan(ShadThemeData theme) {
@@ -245,17 +226,10 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
         final version? => versionBadge(version, replacing: replacing),
         null => null,
       },
-      // How it arrives: the size where there is one to quote, otherwise the
-      // route — neither Apple's installer nor the two commands say up front.
-      trailing: Text(
-        switch ((status.id, planned?.downloadBytes)) {
-          (_, final bytes?) => formatBytes(bytes),
-          (ToolId.commandLineTools, _) => 'From Apple',
-          (ToolId.flutter, _) => 'flutter upgrade',
-          (ToolId.serverpodCli, _) => 'dart install',
-        },
-        style: theme.textTheme.muted,
-      ),
+      // Only an installed tool carries a badge. One still to install says so
+      // by having none — the sentence above the table already names the
+      // action, and a size or a command name beside it was detail for nobody.
+      trailing: const SizedBox.shrink(),
     );
   }
 
@@ -277,8 +251,8 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
         DeterminateProgress(
           fraction: progress?.fraction,
           caption: progress == null ? null : installCaption(progress),
+          reserveCaptionLine: true,
         ),
-        const ShadGap(4),
       ],
     );
   }
@@ -286,23 +260,13 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
 
 /// The line under the bar: bytes while downloading, otherwise what the step
 /// is doing. Shared with the Tools tab's banner.
-String? installCaption(InstallProgress progress) {
-  final detail = progress.isDownloading
-      ? formatTransferCaption(
-          received: progress.bytesReceived,
-          total: progress.bytesTotal,
-          eta: progress.eta,
-        )
-      : progress.hint;
-  final parts = [?progress.stepLabel, ?detail];
-  return parts.isEmpty ? null : parts.join(' · ');
-}
-
-String _sentenceList(List<String> parts) => switch (parts.length) {
-      1 => parts.single,
-      2 => '${parts.first} and ${parts.last}',
-      _ => '${parts.take(parts.length - 1).join(', ')} and ${parts.last}',
-    };
+String? installCaption(InstallProgress progress) => progress.isDownloading
+    ? formatTransferCaption(
+        received: progress.bytesReceived,
+        total: progress.bytesTotal,
+        eta: progress.eta,
+      )
+    : progress.hint;
 
 /// Shown when a setup step could not go ahead — in practice, no network, or
 /// old files that could not be removed.
@@ -327,8 +291,8 @@ class ToolchainSetupErrorDialog extends StatelessWidget {
       child: ShadDialog.alert(
         title: Text(title),
         description: const Text(
-          'App Studio needs Flutter and the Serverpod CLI before it can '
-          'create or open a project.',
+          'App Studio needs Flutter and Serverpod before it can create or '
+          'open a project.',
         ),
         actions: [
           ShadButton.outline(
@@ -340,9 +304,11 @@ class ToolchainSetupErrorDialog extends StatelessWidget {
             child: const Text('Try again'),
           ),
         ],
-        child: SizedBox(
-          width: double.infinity,
-          child: ErrorBanner(message: message),
+        child: DialogBody(
+          child: SizedBox(
+            width: double.infinity,
+            child: ErrorBanner(message: message),
+          ),
         ),
       ),
     );

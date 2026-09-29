@@ -7,6 +7,7 @@ import '../feature_flags.dart';
 import '../mcp/hot_restart_view.dart';
 import '../widgets/toolbar_action_button.dart';
 import '../widgets/app_dialog.dart';
+import '../widgets/dialog_body.dart';
 
 /// Toolbar button that pushes the current code into the running app: it
 /// recompiles and reboots the server, then hot-restarts the Flutter app and
@@ -107,11 +108,13 @@ class HotRestartComingSoonDialog extends StatelessWidget {
           child: const Text('Got it'),
         ),
       ],
-      child: const ShadAlert(
-        icon: Icon(LucideIcons.lightbulb),
-        description: Text(
-          'Full Restart, next to this button, restarts the server and reloads '
-          'the preview from scratch.',
+      child: const DialogBody(
+        child: ShadAlert(
+          icon: Icon(LucideIcons.lightbulb),
+          description: Text(
+            'Full Restart, next to this button, restarts the server and '
+            'reloads the preview from scratch.',
+          ),
         ),
       ),
     );

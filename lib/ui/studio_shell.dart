@@ -84,7 +84,7 @@ class _StudioShellState extends State<StudioShell> {
   /// toolbar's warning badge — and the one thing Settings could offer then is a
   /// Tools tab duplicating the setup screen already on top of it.
   Future<void> _showSettings(SettingsTab tab) async {
-    if (widget.toolchains.inventory.needsSetup) return;
+    if (widget.toolchains.needsSetup) return;
     unawaited(widget.agent.startForSettings());
     try {
       await showSettingsDialog(

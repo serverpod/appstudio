@@ -3,18 +3,18 @@
   "tools": [
     {
       "id": "command_line_tools",
-      "displayName": "Command Line Tools",
+      "displayName": "Apple's command line tools",
       "description": "Apple's git, compilers and linkers. Flutter and Serverpod run on them."
     },
     {
       "id": "flutter",
-      "displayName": "Flutter SDK",
+      "displayName": "Flutter",
       "description": "Builds and serves the Flutter web app shown in the preview pane.",
       "accepts": ">=3.47.0"
     },
     {
       "id": "serverpod_cli",
-      "displayName": "Serverpod CLI",
+      "displayName": "Serverpod",
       "description": "Creates projects, generates code and runs the server.",
       "accepts": ">=4.0.0 <4.1.0"
     }

@@ -93,7 +93,7 @@ void main() {
     expect(find.byType(ToolchainSetupDialog), findsOneWidget);
     expect(find.text('Set up your tools'), findsOneWidget);
     // The plan is fully populated the moment it appears.
-    expect(find.text('Flutter SDK'), findsOneWidget);
+    expect(find.text('Flutter'), findsOneWidget);
     expect(find.text('Install'), findsOneWidget);
   });
 
@@ -102,12 +102,12 @@ void main() {
     final tools = _ScriptedTools(inventory: emptyInventory);
     await pumpScreen(tester, tools);
 
-    tools.answer('Could not reach the download server for Flutter SDK.');
+    tools.answer('Could not reach flutter.dev to look up the latest Flutter release.');
     await settleDialog(tester);
 
     expect(find.byType(ToolchainSetupErrorDialog), findsOneWidget);
     expect(
-      find.text('Could not reach the download server for Flutter SDK.'),
+      find.text('Could not reach flutter.dev to look up the latest Flutter release.'),
       findsOneWidget,
     );
     // No plan is offered on the way past the failure — there is nothing to show.
@@ -241,5 +241,47 @@ void main() {
       '/opt/flutter/bin/flutter channel stable\n'
       '/opt/flutter/bin/flutter upgrade',
     );
+  });
+
+  testWidgets('the Puro/FVM notice comes first, once, on a first launch',
+      (tester) async {
+    final tools = _ScriptedTools(inventory: emptyInventory)
+      ..needsFlutterNotice = true;
+    await pumpScreen(tester, tools);
+    await settleDialog(tester);
+
+    expect(find.byType(FlutterInstallNotice), findsOneWidget);
+    expect(
+      find.textContaining('Quick Start guide', findRichText: true),
+      findsOneWidget,
+    );
+    // Nothing else is started behind it.
+    expect(tools.preflights, 0);
+
+    await tester.tap(find.text('Continue'));
+    await settleDialog(tester);
+    await settleDialog(tester);
+
+    expect(find.byType(FlutterInstallNotice), findsNothing);
+    expect(tools.needsFlutterNotice, isFalse);
+    expect(tools.preflights, 1);
+  });
+
+  testWidgets('the notice on its own still holds the setup screen',
+      (tester) async {
+    // A first launch with a Flutter that is fine but not standard: nothing to
+    // install, and the notice still has to be answered.
+    final tools = _ScriptedTools(inventory: completeInventory)
+      ..needsFlutterNotice = true;
+    expect(tools.needsSetup, isTrue);
+
+    await pumpScreen(tester, tools);
+    await settleDialog(tester);
+    expect(find.byType(FlutterInstallNotice), findsOneWidget);
+
+    await tester.tap(find.text('Continue'));
+    await settleDialog(tester);
+    expect(tools.needsSetup, isFalse);
+    expect(tools.preflights, 0);
   });
 }

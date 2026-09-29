@@ -81,13 +81,8 @@ void main() {
         mcp: mcp,
       );
 
-  Future<UninstallResult> run({
-    Set<ToolId> tools = const {},
-    bool clearPubCache = false,
-  }) =>
-      uninstaller().run(
-        UninstallChoice(tools: tools, clearPubCache: clearPubCache),
-      );
+  Future<UninstallResult> run({Set<ToolId> tools = const {}}) =>
+      uninstaller().run(UninstallChoice(tools: tools));
 
   /// App Studio's own data: something in the support directory.
   Future<File> seedSupportDir() async {
@@ -229,8 +224,24 @@ void main() {
     expect(prefs.getString('theme_mode'), isNull);
   });
 
-  test('does not touch the pub cache unless asked', () async {
-    final result = await run();
-    expect(result.failures, isNot(contains('clearing the Dart package cache')));
+  test('leaves the Dart package cache alone while Flutter stays', () async {
+    final cache = Directory(p.join(tmp.path, '.pub-cache', 'hosted'));
+    await cache.create(recursive: true);
+
+    await run(tools: {ToolId.serverpodCli});
+
+    expect(await cache.exists(), isTrue);
+  });
+
+  test('clears the Dart package cache along with Flutter', () async {
+    final zprofile = p.join(tmp.path, '.zprofile');
+    await seedOwnedFlutter(zprofile);
+    final cache = Directory(p.join(tmp.path, '.pub-cache', 'hosted'));
+    await cache.create(recursive: true);
+
+    final result = await run(tools: {ToolId.flutter});
+
+    expect(result.failures, isEmpty, reason: result.failures.join(', '));
+    expect(await Directory(p.join(tmp.path, '.pub-cache')).exists(), isFalse);
   });
 }

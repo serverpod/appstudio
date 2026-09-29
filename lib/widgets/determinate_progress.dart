@@ -12,11 +12,17 @@ class DeterminateProgress extends StatelessWidget {
     super.key,
     required this.fraction,
     this.caption,
+    this.reserveCaptionLine = false,
   });
 
   /// 0..1, or null while the total is unknown.
   final double? fraction;
   final String? caption;
+
+  /// Keeps the caption's line even while there is no caption, so a run whose
+  /// steps come and go with and without one does not make the dialog around
+  /// it jump.
+  final bool reserveCaptionLine;
 
   @override
   Widget build(BuildContext context) {
@@ -39,12 +45,13 @@ class DeterminateProgress extends StatelessWidget {
           value: value,
           minHeight: 3,
         ),
-        if (caption != null && caption!.isNotEmpty) ...[
+        if ((caption?.isNotEmpty ?? false) || reserveCaptionLine) ...[
           const SizedBox(height: 6),
           Align(
             alignment: Alignment.centerRight,
+            // An empty Text still lays out one line, which is the reservation.
             child: Text(
-              caption!,
+              caption ?? '',
               style: theme.textTheme.muted.copyWith(fontSize: 11),
             ),
           ),

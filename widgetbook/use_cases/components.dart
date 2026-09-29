@@ -81,7 +81,7 @@ final componentsFolder = WidgetbookFolder(
           builder: (_) => const ComponentCanvas(
             child: DeterminateProgress(
               fraction: null,
-              caption: 'Step 3 of 3 · Running dart install serverpod_cli.',
+              caption: 'Follow the installation steps in the pop-up window.',
             ),
           ),
         ),
@@ -99,14 +99,14 @@ final componentsFolder = WidgetbookFolder(
                 return SettingsTable(
                   rows: [
                     SettingsTableRow(
-                      name: 'Command Line Tools',
+                      name: 'Apple\'s command line tools',
                       trailing: appSuccessBadge(
                         theme,
                         child: const Text('Native'),
                       ),
                     ),
                     SettingsTableRow(
-                      name: 'Flutter SDK',
+                      name: 'Flutter',
                       badge: versionBadge('3.47.5'),
                       trailing: appSuccessBadge(
                         theme,
@@ -114,7 +114,7 @@ final componentsFolder = WidgetbookFolder(
                       ),
                     ),
                     SettingsTableRow(
-                      name: 'Serverpod CLI',
+                      name: 'Serverpod',
                       badge: versionBadge('4.0.3', replacing: '3.4.1'),
                       trailing: appWarningBadge(
                         theme,
