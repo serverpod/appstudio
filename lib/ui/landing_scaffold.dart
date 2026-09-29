@@ -13,9 +13,6 @@ const _kLogoAsset = 'assets/logo-horizontal.webp';
 /// two states of the same moment — the app open with no project — and giving
 /// them different backdrops made moving between them look like a different app.
 ///
-/// Free of `dart:io` on purpose: [child] is what varies, so this stays
-/// previewable even though `StartPage` itself is not.
-///
 /// [child] is given [buildLandingTheme] rather than the app's, so these screens
 /// look the same in light mode as in dark — the backdrop is one fixed image
 /// either way.

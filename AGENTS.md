@@ -17,6 +17,7 @@ lib/
   theme/                 # Shad themes, layout constants, ThemeController
   toolchain/             # Probe + install CLT, Flutter, Serverpod CLI (official sources)
   widgets/               # Shared UI (IconSegmentedControl, MenuItemTile)
+widgetbook/              # `make widgetbook`: catalog, host, fakes (see Widgetbook)
 packages/
   mac_menu_bar/            # Local fork — SF Symbol icons, separators, reset()
   webview_cef/             # Local fork — CEF resize + skip Helper (Alerts)
@@ -1159,60 +1160,73 @@ class.
   toolchain is gone and preferences are cleared, so any control would either
   fail or silently recreate what was just removed.
 
-## Previews
+## Widgetbook
 
 ```bash
-make previews    # browser previews of the toolchain install, hot-reloading
+make widgetbook    # every screen and dialog, in every state, light and dark
 ```
 
-- **The previews cover the first-run toolchain install and nothing else** — the
-  legacy notice, the "update your Flutter" prompt, the plan, the install
-  states, the failure paths and the setup screen, each emitted light and dark.
-  That is the flow that is genuinely hard to look at: it needs a machine with
-  no tools, Apple's installer and a 2 GB download to reach the middle, and a
-  dead network for the failures. Everything else in the app can be
-  reached by hand in a running copy, so it does not earn a preview.
-- **`dialog_previews.dart` warms the theme from `BrightnessPreview.transform`,
-  and every preview fails without it.** Building a `ShadThemeData` reads
-  `LucideIcons.x`, which is the first touch of `lucide_icons_flutter` — one
-  generated library with ~27,900 `static const IconData` fields. DDC has to
-  link the whole thing at that moment, and on the web (the scaffold's only
-  device) that overflows the JS stack if it happens deep inside a widget build.
-  The scaffold reports it per preview as `Failed to initialize widget tree:
-  Stack Overflow` pointing into shad's theme code, which says nothing about
-  stack depth being the cause. Linking from a shallow frame is fine and happens
-  once, so the fix is to get there first: the scaffold calls `transform()` from
-  `main()`. See `warmThemes` in `preview_app.dart` before moving it.
-- **Brightness is the scaffold's, not ours.** `previewShell` leaves `ShadApp`
-  on `ThemeMode.system`, which resolves against
-  `MediaQuery.platformBrightnessOf` — exactly what the preview scaffold
-  overrides — so `brightness:` on the annotation and the scaffold's own
-  light/dark toggle both drive it. A `dark` flag of our own could only fight
-  them.
-- **The UI talks to interfaces, not controllers.** `ToolsView`
-  (`ui/toolchain/tools_view.dart`) and `ProvidersView`
-  (`ui/settings/providers_view.dart`) are implemented directly by
-  `ToolchainController` and `AgentController` — no adapters, no copying — but
-  the panes import only the interface. That is what keeps them free of
-  `dart:io`, which is non-negotiable: **the widget preview scaffold only
-  supports the web device**, so anything reaching `Platform` or `File` cannot
-  be previewed at all.
-- Keep those interfaces narrow. Path prettifying stays out of the widget layer
-  (`flutterInstallLabel`, `shellProfileLabel`, `manualPathLines`), and so does
-  anything that reads the filesystem.
-- `dart:io` is kept out of shared value types by conditional imports:
-  `platform_key.dart` and `util/home_dir.dart`. `install_plan.dart`,
-  `toolchain_manifest.dart` and `UninstallResult` / `UninstallChoice` are
-  `dart:io`-free for the same reason. Before adding
-  an import to a widget file, check it does not drag `dart:io` in — the whole
-  preview surface is one careless import away from breaking.
-- `lib/previews/preview_data.dart` holds the fakes and fixtures for the
-  previews.
-- `InstallProgress` fixtures pin `startedAt` *and* `now`, so the banner's
-  elapsed-time text is stable across runs.
-
-`ui/new_project_dialog.dart` uses `dart:io` directly, so it could not be
-previewed even if the set were widened again.
+- **It is for reviewing copy and layout without reaching each state by hand** —
+  a clean Mac, a failed install, Apple's installer, an old Flutter, a partly
+  created project. The catalog (`widgetbook/catalog.dart`) is ordered the way a
+  user meets things: First run → Start → Open project → Settings → Uninstall,
+  then the shared Components.
+- **It is a second entry point into this package, not an app of its own**
+  (`flutter run -d macos -t widgetbook/main.dart`). It runs in App Studio's own
+  macOS runner, so the fonts, the `assets/` images and every plugin are the
+  real ones — and `webview_cef` needs no second CEF setup. `widgetbook` is a
+  dev dependency and nothing under `lib/` imports it, so release builds do not
+  carry it. It replaced Flutter's widget previews, which only ran on the web:
+  anything that reached `dart:io` could not be shown, which is why they
+  covered first-run setup and nothing else.
+- **Every use case is hosted in the app's own `ShadApp`** (`widgetbook/host.dart`,
+  `UseCaseHost`), keyed by the Widgetbook URL — use case *and* theme — so each
+  view starts fresh. The theme switch is Widgetbook's Theme addon; there are no
+  knobs, because every state worth reviewing is its own use case.
+- **One use case is one screen or one dialog, in one state — never a flow.**
+  `DialogUseCase` draws the dialog *in place* over a realistic backdrop
+  (`landingBackdrop` for first-run dialogs, `StudioWindowMock` for anything
+  shown with a project open) behind the theme's barrier colour. Nothing is
+  pushed, so nothing sits over Widgetbook's controls. An earlier version drove
+  the real `show…` functions and a simulated install; it opened dialog after
+  dialog on top of Widgetbook and was replaced for exactly that. States that
+  sit behind a button are reached with a constructor parameter instead —
+  `NewProjectDialog.createOnOpen` is the one that exists.
+- **The use case lives on a page above a "Closed." page.** A dialog's Cancel or
+  Done pops it, as in the app, and leaves **Show again** rather than an empty
+  navigator. Quit is the exception: it is `exit(0)`, and closes Widgetbook.
+- **Every dialog goes through `showAppDialog`** (`widgets/app_dialog.dart`),
+  never `showShadDialog` directly. shad defaults to the *root* navigator, which
+  in the app is the only one but in Widgetbook is Widgetbook's: a dialog
+  opened from inside a use case — the toolbar's Publish to Cloud, say — would
+  cover Widgetbook's own UI and outlive the use case that opened it, which
+  surfaces as a cascade of `Duplicate GlobalKey` assertions.
+- **`StudioWindowMock` is an open project assembled from the real parts** —
+  `StudioToolbar`, `TerminalPaneHeader`, `PreviewHeaderBar`,
+  `PreviewStatusOverlay`, `RegistrationCodeToast`. Two parts are stand-ins
+  because they are native: the server log is an xterm with sample output, and
+  the preview is a placeholder where CEF would draw the app. As a use case of
+  its own it is live — hover shows tooltips, the toolbar's dialogs open inside
+  the canvas; as a dialog's backdrop it ignores the pointer.
+- **The widgets take narrow interfaces so they can be faked**, the pattern
+  `ToolsView` started: `RecentProjectsView` (start page), `NewProjectView`
+  (Create Project — the folder picker, `serverpod create`, opening the result),
+  `FullRestartView`, `HotRestartView`, `ExternalEditorsView`,
+  `ProjectReadyView`, `ProvidersView`. The real controllers implement them
+  directly. Anything that was private only for tidiness and is worth reviewing
+  on its own — the toolbar, the pane headers, the uninstalling screen — is
+  public in its own file.
+- **The fakes live in `widgetbook/fakes/`** and the widget tests import them
+  from there too, so the states Widgetbook shows and the states the tests pin
+  are the same objects.
+- **`test/widgetbook/catalog_test.dart` builds every use case in both themes**
+  inside the same host, under an outer navigator standing in for Widgetbook's.
+  A use case that throws on build, overflows at desktop size, closes itself,
+  or pushes anything onto that outer navigator fails there rather than the
+  next time someone opens Widgetbook. Add new screens to the catalog; the test
+  picks them up.
+- **Not covered:** the agent pane (switched off, and it takes a concrete
+  `AgentController`), the live terminal and CEF itself. Their surroundings are.
 
 ## Architecture notes
 
@@ -1423,7 +1437,7 @@ succeeds (`session/project_settings.dart`). It records which editors the user
 
 - Opening one auto-starts the server (`ServerpodProcessController._onSessionChanged`), which compiles the whole stack before anything reaches the preview. `ui/project_startup_dialog.dart` says so up front, because the first minute or two is otherwise indistinguishable from a hang.
 - It is triggered in `main.dart` from a `ProjectSession` listener that tracks the **project path**, not `hasProject` — switching straight from one project to another recompiles just as much, and the boolean never changes across that. The dialog is pushed from a post-frame callback: the session can notify mid-build, and pushing a route from inside a build is illegal.
-- "Don't show this again" is written to `project.startup_notice_dismissed` **only when the box is ticked**, and by the caller — the widget just pops the bool, which keeps it `dart:io`-free and previewable. This is a one-way door, so `test/project_startup_dialog_test.dart` covers both directions: OK alone must leave the pref unset.
+- "Don't show this again" is written to `project.startup_notice_dismissed` **only when the box is ticked**, and by the caller — the widget just pops the bool, which keeps it `dart:io`-free and easy to show in Widgetbook. This is a one-way door, so `test/project_startup_dialog_test.dart` covers both directions: OK alone must leave the pref unset.
 - The dialog is `barrierDismissible: false`. With the confirm button as the only action, a stray click on the barrier would otherwise silently discard a ticked checkbox.
 - It styles nothing itself. Two shad details make that possible, and both generalise:
   - **`ShadDialog.alert` has no close X**; `ShadDialog` (primary) does. The only difference is that `primaryDialogTheme` sets `closeIconData` and `alertDialogTheme` does not, and there is no flag to turn it off — so pick the variant, don't fight it. Alert is also the right semantics for a notice you acknowledge rather than dismiss.

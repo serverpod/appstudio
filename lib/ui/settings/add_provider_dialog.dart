@@ -3,6 +3,7 @@ import 'package:shad/shad.dart';
 
 import '../../agent/agent_transcript.dart';
 import '../../widgets/error_banner.dart';
+import '../../widgets/app_dialog.dart';
 
 /// Stores the key and reports back. Returns null on success, or a message to
 /// show without closing the dialog.
@@ -30,7 +31,7 @@ Future<bool> showAddProviderDialog(
   required Set<String> connected,
   required ConnectProvider onConnect,
 }) async {
-  final added = await showShadDialog<bool>(
+  final added = await showAppDialog<bool>(
     context: context,
     builder: (context) => AddProviderDialog(
       connected: connected,

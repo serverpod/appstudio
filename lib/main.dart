@@ -21,7 +21,6 @@ import 'toolchain/toolchain_controller.dart';
 import 'update/session_teardown.dart';
 import 'update/update_controller.dart';
 import 'platform/macos_app_menu.dart';
-import 'ui/landing_scaffold.dart';
 import 'ui/new_project_dialog.dart';
 import 'ui/project_started_dialog.dart';
 import 'ui/project_startup_dialog.dart';
@@ -458,7 +457,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
             // The teardown stops the server and the agent, which takes a
             // moment; the shell would otherwise keep rendering panes for a
             // session that is being dismantled underneath it.
-            null when _uninstalling => const _UninstallingScreen(),
+            null when _uninstalling => const UninstallingScreen(),
             // Before the start page, not over it: there is nothing to create or
             // open a project with yet.
             null when _needsToolchainSetup => ToolchainSetupScreen(
@@ -478,37 +477,6 @@ class _AppStudioAppState extends State<AppStudioApp> {
           },
         );
       },
-    );
-  }
-}
-
-/// Shown while the uninstall runs. Brief, but the teardown can take a few
-/// seconds and a frozen IDE would read as a hang.
-///
-/// On the same backdrop as [UninstalledScreen], which it hands straight over
-/// to: two treatments across one uninstall would read as the window being
-/// replaced twice.
-class _UninstallingScreen extends StatelessWidget {
-  const _UninstallingScreen();
-
-  @override
-  Widget build(BuildContext context) {
-    return LandingScaffold(
-      // Built under the scaffold, so it is the landing theme being read here
-      // and the colour is white rather than the app's foreground.
-      child: Builder(
-        builder: (context) {
-          final theme = ShadTheme.of(context);
-          return Center(
-            child: Text(
-              'Uninstalling…',
-              style: theme.textTheme.muted.copyWith(
-                color: theme.colorScheme.foreground,
-              ),
-            ),
-          );
-        },
-      ),
     );
   }
 }

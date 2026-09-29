@@ -10,7 +10,8 @@ import '../theme/app_theme.dart';
 import '../widgets/text_segmented_control.dart';
 import 'agent/agent_pane.dart';
 
-enum _TerminalTab { agent, serverLogs }
+/// The left panel's tabs. With the agent switched off, only the server log.
+enum TerminalPaneTab { agent, serverLogs }
 
 /// What this pane holds, for the toolbar's show/hide tooltip. It is named after
 /// its contents, and with the agent switched off the server log is all of them.
@@ -131,10 +132,10 @@ class TerminalPane extends StatefulWidget {
 
 class _TerminalPaneState extends State<TerminalPane> {
   /// With the agent switched off there is only one tab, and the server log is
-  /// it — starting on [_TerminalTab.agent] would show a pane that is no longer
+  /// it — starting on [TerminalPaneTab.agent] would show a pane that is no longer
   /// reachable.
-  _TerminalTab _selectedTab =
-      kOpenCodeAgentEnabled ? _TerminalTab.agent : _TerminalTab.serverLogs;
+  TerminalPaneTab _selectedTab =
+      kOpenCodeAgentEnabled ? TerminalPaneTab.agent : TerminalPaneTab.serverLogs;
 
   @override
   Widget build(BuildContext context) {
@@ -151,40 +152,16 @@ class _TerminalPaneState extends State<TerminalPane> {
         fontFamily: kMacMonoFont,
       ),
       padding: const EdgeInsets.all(_kTerminalPadding),
-      autofocus: _selectedTab == _TerminalTab.serverLogs,
+      autofocus: _selectedTab == TerminalPaneTab.serverLogs,
       hardwareKeyboardOnly: true,
     );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Container(
-          height: kPaneHeaderHeight,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(
-            color: scheme.muted,
-            border: Border(bottom: paneBorderSide(scheme.border)),
-          ),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: TextSegmentedControl<_TerminalTab>(
-              value: _selectedTab,
-              onChanged: (tab) => setState(() => _selectedTab = tab),
-              // One segment left, so there is nothing to switch to. Drawn the
-              // same way the preview pane draws its own header label rather
-              // than as plain text, so the two pane headers still match.
-              interactive: showsAgent,
-              onMutedSurface: true,
-              segments: const [
-                if (kOpenCodeAgentEnabled)
-                  TextSegment(value: _TerminalTab.agent, label: 'Agent'),
-                TextSegment(
-                  value: _TerminalTab.serverLogs,
-                  label: 'Server logs',
-                ),
-              ],
-            ),
-          ),
+        TerminalPaneHeader(
+          tab: _selectedTab,
+          onChanged: (tab) => setState(() => _selectedTab = tab),
         ),
         Expanded(
           child: ColoredBox(
@@ -194,7 +171,7 @@ class _TerminalPaneState extends State<TerminalPane> {
             // switch between it is just overhead.
             child: showsAgent
                 ? IndexedStack(
-                    index: _selectedTab == _TerminalTab.agent ? 0 : 1,
+                    index: _selectedTab == TerminalPaneTab.agent ? 0 : 1,
                     sizing: StackFit.expand,
                     children: [
                       AgentPane(
@@ -208,6 +185,52 @@ class _TerminalPaneState extends State<TerminalPane> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// The left panel's header: its tabs, or with the agent switched off the one
+/// label.
+class TerminalPaneHeader extends StatelessWidget {
+  const TerminalPaneHeader({
+    super.key,
+    required this.tab,
+    required this.onChanged,
+  });
+
+  final TerminalPaneTab tab;
+  final ValueChanged<TerminalPaneTab> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = ShadTheme.of(context).colorScheme;
+    return Container(
+      height: kPaneHeaderHeight,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: scheme.muted,
+        border: Border(bottom: paneBorderSide(scheme.border)),
+      ),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: TextSegmentedControl<TerminalPaneTab>(
+          value: tab,
+          onChanged: onChanged,
+          // One segment left, so there is nothing to switch to. Drawn the
+          // same way the preview pane draws its own header label rather
+          // than as plain text, so the two pane headers still match.
+          interactive: kOpenCodeAgentEnabled,
+          onMutedSurface: true,
+          segments: const [
+            if (kOpenCodeAgentEnabled)
+              TextSegment(value: TerminalPaneTab.agent, label: 'Agent'),
+            TextSegment(
+              value: TerminalPaneTab.serverLogs,
+              label: 'Server logs',
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

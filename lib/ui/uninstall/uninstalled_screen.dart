@@ -106,3 +106,34 @@ class _UninstalledContent extends StatelessWidget {
     );
   }
 }
+
+/// Shown while the uninstall runs. Brief, but the teardown can take a few
+/// seconds and a frozen IDE would read as a hang.
+///
+/// On the same backdrop as [UninstalledScreen], which it hands straight over
+/// to: two treatments across one uninstall would read as the window being
+/// replaced twice.
+class UninstallingScreen extends StatelessWidget {
+  const UninstallingScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return LandingScaffold(
+      // Built under the scaffold, so it is the landing theme being read here
+      // and the colour is white rather than the app's foreground.
+      child: Builder(
+        builder: (context) {
+          final theme = ShadTheme.of(context);
+          return Center(
+            child: Text(
+              'Uninstalling…',
+              style: theme.textTheme.muted.copyWith(
+                color: theme.colorScheme.foreground,
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}

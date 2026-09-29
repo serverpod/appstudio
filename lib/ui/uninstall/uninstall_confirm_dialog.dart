@@ -5,6 +5,7 @@ import '../../theme/app_theme.dart';
 import '../../toolchain/tool_status.dart';
 import '../../uninstall/uninstall_result.dart';
 import '../../util/byte_format.dart';
+import '../../widgets/app_dialog.dart';
 
 /// Matches the sibling dialogs. Shad caps a dialog at 512 anyway, so this only
 /// has to be wide enough not to shrink the content below that.
@@ -47,7 +48,7 @@ Future<UninstallChoice?> showUninstallConfirmDialog(
   required Future<int?> Function() measureBytes,
   required List<ToolId> removableTools,
 }) {
-  return showShadDialog<UninstallChoice>(
+  return showAppDialog<UninstallChoice>(
     context: context,
     // A stray click on the barrier must not throw away the decision — Cancel
     // is the way out.

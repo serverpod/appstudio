@@ -1,4 +1,4 @@
-import 'package:appstudio/previews/preview_data.dart';
+import '../../widgetbook/fakes/tools.dart';
 import 'package:appstudio/theme/app_theme.dart';
 import 'package:appstudio/toolchain/install_plan.dart';
 import 'package:appstudio/toolchain/tool_status.dart';
@@ -74,7 +74,7 @@ void main() {
     expect(find.textContaining('leaves updating it to you'), findsOneWidget);
     expect(find.byType(CommandBlock), findsOneWidget);
     expect(
-      find.text('/Users/preview/flutter/bin/flutter upgrade'),
+      find.text('~/flutter/bin/flutter upgrade'),
       findsOneWidget,
     );
     // Not also the generic "missing" banner — the specific one says it all.

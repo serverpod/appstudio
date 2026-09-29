@@ -5,7 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
-class ProjectSession extends ChangeNotifier {
+import 'recent_projects_view.dart';
+
+class ProjectSession extends ChangeNotifier implements RecentProjectsView {
   ProjectSession();
 
   static const _recentsKey = 'recent_projects';
@@ -19,7 +21,9 @@ class ProjectSession extends ChangeNotifier {
   String? _newProjectDirectory;
 
   String? get projectPath => _projectPath;
+  @override
   String? get error => _error;
+  @override
   List<String> get recents => List.unmodifiable(_recents);
   bool get hasProject => _projectPath != null;
 
@@ -61,6 +65,7 @@ class ProjectSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  @override
   Future<void> clearRecents() async {
     if (_recents.isEmpty) return;
     _recents = [];
@@ -69,12 +74,14 @@ class ProjectSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  @override
   Future<void> openProjectPicker() async {
     final path = await getDirectoryPath(confirmButtonText: 'Open Project');
     if (path == null) return;
     await openPath(path);
   }
 
+  @override
   Future<void> openPath(String path) async {
     _error = null;
     final normalized = p.normalize(path);

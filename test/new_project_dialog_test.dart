@@ -36,7 +36,12 @@ Future<void> _pumpDialog(WidgetTester tester) async {
     ShadApp(
       theme: buildLightTheme(),
       home: Scaffold(
-        body: NewProjectDialog(toolchains: toolchains, session: session),
+        body: NewProjectDialog(
+          actions: SessionNewProjectView(
+            toolchains: toolchains,
+            session: session,
+          ),
+        ),
       ),
     ),
   );

@@ -5,7 +5,7 @@
 # Run locally:
 #   make start             Run the app (flutter run -d macos)
 #   make deps              flutter pub get + CEF/pods
-#   make previews          Browser previews of the first-run dialogs
+#   make widgetbook        Every screen and dialog, in every state (Widgetbook)
 #   make clean             Drop build output and dist artifacts
 #   make clean_all         Also drop CEF and Pods
 #
@@ -29,14 +29,14 @@ SHELL := /bin/bash
 ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 CEF_STAMP := $(ROOT)/packages/webview_cef/macos/third/cef/version.txt
 
-.PHONY: help start deps ensure_deps previews clean clean_all \
+.PHONY: help start deps ensure_deps widgetbook clean clean_all \
         set_version release build build_debug publish promote
 
 help:
 	@echo "Run locally:"
 	@echo "  make start             Run the app (flutter run -d macos)"
 	@echo "  make deps              flutter pub get + CEF/pods"
-	@echo "  make previews          Browser previews of the first-run dialogs"
+	@echo "  make widgetbook        Every screen and dialog, in every state"
 	@echo "  make clean             Remove build/ and dist/ (keeps CEF)"
 	@echo "  make clean_all         Also remove CEF and Pods"
 	@echo ""
@@ -78,11 +78,13 @@ start: ensure_deps
 	@echo "==> flutter run -d macos"
 	cd "$(ROOT)" && flutter run -d macos
 
-# Widget previews for iterating on copy and layout. Runs in a browser — the
-# only target the preview scaffold supports — which is why everything under
-# lib/previews/ and the UI it renders must stay free of dart:io.
-previews:
-	cd "$(ROOT)" && flutter widget-preview start
+# Widgetbook: every screen and dialog in every state, in both themes, for
+# reviewing copy and layout. A second entry point into this package rather
+# than an app of its own, so it runs in App Studio's own macOS runner — same
+# fonts, assets and plugins — and needs CEF for the same reason `start` does.
+widgetbook: ensure_deps
+	@echo "==> flutter run -d macos -t widgetbook/main.dart"
+	cd "$(ROOT)" && flutter run -d macos -t widgetbook/main.dart
 
 # Xcode leaves unknown files under Contents/Resources between builds, so a tree
 # from before the toolchain moved out keeps a ~1.8 GB embed alive. distribute

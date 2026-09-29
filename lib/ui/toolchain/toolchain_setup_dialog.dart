@@ -12,6 +12,7 @@ import '../../widgets/determinate_progress.dart';
 import '../../widgets/error_banner.dart';
 import '../../widgets/settings_table.dart';
 import 'tools_view.dart';
+import '../../widgets/app_dialog.dart';
 
 /// Raises the install plan. Completes when the toolchain is in place — the
 /// dialog closes itself — or never, if the user quits from it.
@@ -23,7 +24,7 @@ Future<void> showToolchainSetupDialog(
   BuildContext context, {
   required ToolsView toolchains,
 }) async {
-  await showShadDialog<void>(
+  await showAppDialog<void>(
     context: context,
     barrierDismissible: false,
     barrierBlurSigma: 0,
@@ -40,7 +41,7 @@ Future<void> showToolchainSetupErrorDialog(
   required String message,
   String title = 'Could not prepare the install',
 }) async {
-  await showShadDialog<void>(
+  await showAppDialog<void>(
     context: context,
     barrierDismissible: false,
     barrierBlurSigma: 0,

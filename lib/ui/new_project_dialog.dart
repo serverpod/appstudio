@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:shad/shad.dart';
 
+import '../process/new_project_view.dart';
 import '../process/project_creator.dart';
 import '../session/project_session.dart';
 import '../theme/app_theme.dart';
@@ -29,17 +30,59 @@ Future<void> showNewProjectScreen(
   required ToolchainController toolchains,
   required ProjectSession session,
 }) {
+  final actions = SessionNewProjectView(
+    toolchains: toolchains,
+    session: session,
+  );
   return Navigator.of(context).push(
     PageRouteBuilder<void>(
       barrierDismissible: false,
       transitionDuration: const Duration(milliseconds: 150),
       reverseTransitionDuration: const Duration(milliseconds: 150),
-      pageBuilder: (context, _, _) =>
-          NewProjectScreen(toolchains: toolchains, session: session),
+      pageBuilder: (context, _, _) => NewProjectScreen(actions: actions),
       transitionsBuilder: (context, animation, _, child) =>
           FadeTransition(opacity: animation, child: child),
     ),
   );
+}
+
+/// The real [NewProjectView]: `serverpod create` through [ProjectCreator], and
+/// the folder picker and remembered location through [ProjectSession].
+class SessionNewProjectView implements NewProjectView {
+  SessionNewProjectView({required this.toolchains, required this.session});
+
+  final ToolchainController toolchains;
+  final ProjectSession session;
+
+  @override
+  String get suggestedDirectory => session.suggestedNewProjectDirectory;
+
+  @override
+  Future<String?> pickDirectory(String current) => getDirectoryPath(
+        confirmButtonText: 'Choose',
+        initialDirectory: Directory(current).existsSync() ? current : null,
+      );
+
+  @override
+  Future<String> create({
+    required String name,
+    required String parentDirectory,
+    required Set<IdeIntegration> ides,
+    void Function(String status)? onStatus,
+  }) =>
+      ProjectCreator(toolchains: toolchains).create(
+        name: name,
+        parentDirectory: parentDirectory,
+        ides: ides,
+        onStatus: onStatus,
+      );
+
+  @override
+  Future<void> rememberDirectory(String path) =>
+      session.setNewProjectDirectory(path);
+
+  @override
+  void openProject(String path) => session.openPath(path);
 }
 
 /// The Create Project form on the shared landing backdrop.
@@ -57,12 +100,18 @@ Future<void> showNewProjectScreen(
 class NewProjectScreen extends StatelessWidget {
   const NewProjectScreen({
     super.key,
-    required this.toolchains,
-    required this.session,
+    required this.actions,
+    this.initialName = '',
+    this.initialIde,
+    this.createOnOpen = false,
   });
 
-  final ToolchainController toolchains;
-  final ProjectSession session;
+  final NewProjectView actions;
+
+  /// Passed through to [NewProjectDialog].
+  final String initialName;
+  final IdeIntegration? initialIde;
+  final bool createOnOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -79,8 +128,10 @@ class NewProjectScreen extends StatelessWidget {
           child: ShadTheme(
             data: appTheme,
             child: NewProjectDialog(
-              toolchains: toolchains,
-              session: session,
+              actions: actions,
+              initialName: initialName,
+              initialIde: initialIde,
+              createOnOpen: createOnOpen,
             ),
           ),
         ),
@@ -94,26 +145,37 @@ class NewProjectScreen extends StatelessWidget {
 class NewProjectDialog extends StatefulWidget {
   const NewProjectDialog({
     super.key,
-    required this.toolchains,
-    required this.session,
+    required this.actions,
+    this.initialName = '',
+    this.initialIde,
+    this.createOnOpen = false,
   });
 
-  final ToolchainController toolchains;
-  final ProjectSession session;
+  final NewProjectView actions;
+
+  /// Prefills the form. Widgetbook uses these, with [createOnOpen], to show
+  /// each of the form's states on its own.
+  final String initialName;
+  final IdeIntegration? initialIde;
+
+  /// Presses Create as soon as the form is up, so the progress and failure
+  /// states can be looked at without anything to click. Ignored unless the
+  /// prefill makes Create available.
+  final bool createOnOpen;
 
   @override
   State<NewProjectDialog> createState() => _NewProjectDialogState();
 }
 
 class _NewProjectDialogState extends State<NewProjectDialog> {
-  final _nameController = TextEditingController();
-  late String _directory = widget.session.suggestedNewProjectDirectory;
+  late final _nameController = TextEditingController(text: widget.initialName);
+  late String _directory = widget.actions.suggestedDirectory;
   late final _directoryController = TextEditingController(
     text: prettyPath(_directory),
   );
   /// The one editor to configure. Picking one is mandatory, so this is null
   /// only until the user has answered — which is what holds Create disabled.
-  IdeIntegration? _ide;
+  late IdeIntegration? _ide = widget.initialIde;
 
   bool _creating = false;
   String? _status;
@@ -127,6 +189,11 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
   void initState() {
     super.initState();
     _nameController.addListener(_onNameChanged);
+    if (widget.createOnOpen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _create();
+      });
+    }
   }
 
   @override
@@ -160,10 +227,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
       !_creating && _name.isNotEmpty && _nameError == null && _ide != null;
 
   Future<void> _chooseDirectory() async {
-    final path = await getDirectoryPath(
-      confirmButtonText: 'Choose',
-      initialDirectory: Directory(_directory).existsSync() ? _directory : null,
-    );
+    final path = await widget.actions.pickDirectory(_directory);
     if (path == null || !mounted) return;
     setState(() {
       _directory = p.normalize(path);
@@ -186,7 +250,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
     });
 
     try {
-      final path = await ProjectCreator(toolchains: widget.toolchains).create(
+      final path = await widget.actions.create(
         name: name,
         parentDirectory: _directory,
         ides: {ide},
@@ -194,7 +258,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
           if (mounted) setState(() => _status = status);
         },
       );
-      await widget.session.setNewProjectDirectory(_directory);
+      await widget.actions.rememberDirectory(_directory);
       _openProject(path);
     } on ProjectCreationException catch (e) {
       if (!mounted) return;
@@ -218,7 +282,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
   void _openProject(String path) {
     if (!mounted) return;
     Navigator.of(context).pop();
-    widget.session.openPath(path);
+    widget.actions.openProject(path);
   }
 
   @override

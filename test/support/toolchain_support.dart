@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:appstudio/toolchain/tool_probe.dart';
 import 'package:appstudio/toolchain/tool_status.dart';
 import 'package:appstudio/toolchain/toolchain.dart';
 import 'package:appstudio/toolchain/toolchain_controller.dart';
@@ -13,7 +14,7 @@ Future<ToolManifest> loadTestManifest() async =>
     ToolManifest.tryParse(await loadTestManifestSource())!;
 
 /// A controller with nothing resolved. Instant, and correct for tests that only
-/// need a controller to exist — they never spawn a tool.
+/// need a controller to exist — it never spawns a tool, even when re-probed.
 ///
 /// [paths] defaults to the real home: nothing here writes to it unless a test
 /// installs or uninstalls, and those pass a scratch one.
@@ -27,6 +28,8 @@ Future<ToolchainController> emptyToolchainController({
     ),
     manifest: manifest,
     paths: paths ?? ToolchainPaths.resolve(),
+    // A re-probe must never run the real tools — see [ProbeSandbox].
+    probeSandbox: ProbeSandbox.empty,
   );
 }
 

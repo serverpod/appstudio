@@ -11,6 +11,7 @@ import 'install_progress.dart';
 import 'install_record.dart';
 import 'platform_key.dart';
 import 'shell_profile.dart';
+import 'tool_probe.dart';
 import 'tool_status.dart';
 import 'toolchain.dart';
 import 'toolchain_installer.dart';
@@ -31,6 +32,7 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
     required this.paths,
     InstallRecord record = InstallRecord.empty,
     ToolchainInstaller? installer,
+    this.probeSandbox,
   })  : _current = initial,
         // Both fields are mutable and private; initializing formals would leak
         // the underscores into the named-argument list. The ignore only covers
@@ -71,6 +73,9 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
 
   final ToolManifest manifest;
   final ToolchainPaths paths;
+
+  /// Replaces the machine for every re-probe. Tests only — see [ProbeSandbox].
+  final ProbeSandbox? probeSandbox;
 
   Toolchain _current;
   InstallRecord _record;
@@ -491,6 +496,7 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
         paths: paths,
         record: _record,
         deep: deep,
+        sandbox: probeSandbox,
       );
     } catch (e) {
       debugPrint('ToolchainController: refresh failed: $e');

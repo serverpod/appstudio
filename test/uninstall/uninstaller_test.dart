@@ -9,6 +9,7 @@ import 'package:appstudio/toolchain/toolchain_controller.dart';
 import 'package:appstudio/toolchain/tool_status.dart';
 import 'package:appstudio/toolchain/toolchain_paths.dart';
 import 'package:appstudio/toolchain/install_record.dart';
+import 'package:appstudio/toolchain/tool_probe.dart';
 import 'package:appstudio/toolchain/toolchain.dart';
 import 'package:appstudio/uninstall/uninstaller.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -49,6 +50,7 @@ void main() {
       manifest: manifest,
       paths: paths,
       record: await InstallRecord.load(paths.installRecordFile),
+      probeSandbox: ProbeSandbox.empty,
     );
     final session = ProjectSession();
     process = ServerpodProcessController(
@@ -115,6 +117,7 @@ void main() {
       manifest: toolchains.manifest,
       paths: paths,
       record: record,
+      probeSandbox: ProbeSandbox.empty,
     );
     return line;
   }

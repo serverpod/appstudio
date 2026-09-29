@@ -27,7 +27,18 @@ class DeterminateProgress extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        ShadProgress(value: value, minHeight: 3),
+        ShadProgress(
+          // A fresh State whenever the bar switches between determinate and
+          // indeterminate. `ShadProgress` builds a new AnimationController on
+          // every switch to indeterminate, but its State only mixes in
+          // SingleTickerProviderStateMixin — so the second such switch in one
+          // State asserts. An install does exactly that: Apple's installer
+          // (indeterminate), the download (determinate), verifying
+          // (indeterminate).
+          key: ValueKey(value == null),
+          value: value,
+          minHeight: 3,
+        ),
         if (caption != null && caption!.isNotEmpty) ...[
           const SizedBox(height: 6),
           Align(

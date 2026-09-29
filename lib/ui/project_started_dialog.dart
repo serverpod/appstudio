@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../session/external_editors_view.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_dialog.dart';
 
 /// Set once the user ticks "Don't show this again".
 const _kDismissedKey = 'project.started_notice_dismissed';
@@ -38,7 +39,7 @@ Future<void> maybeShowProjectStartedNotice(
   if (prefs.getBool(_kDismissedKey) ?? false) return;
   if (!context.mounted) return;
 
-  final result = await showShadDialog<ProjectStartedResult>(
+  final result = await showAppDialog<ProjectStartedResult>(
     context: context,
     // The buttons are the only way out, so a stray click on the barrier cannot
     // throw away a ticked "don't show this again".
@@ -67,7 +68,7 @@ ExternalEditor? featuredEditor(ExternalEditorsView editors) =>
     editors.editors.isEmpty ? null : editors.editors.first;
 
 /// Pops a [ProjectStartedResult]; persisting and opening are the caller's job,
-/// which keeps this widget free of `dart:io` and previewable.
+/// which keeps this widget free of `dart:io` and easy to show in Widgetbook.
 class ProjectStartedDialog extends StatefulWidget {
   const ProjectStartedDialog({super.key, required this.editor});
 

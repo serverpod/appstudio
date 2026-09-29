@@ -8,9 +8,9 @@ import '../../toolchain/tool_status.dart';
 ///
 /// `ToolchainController` implements this directly — no copying, no adapter
 /// layer — but the panes import only this file. That is the whole point: the
-/// controller spawns processes and reads the filesystem, so a pane that
-/// imported it could never compile for the widget preview environment, which
-/// builds for web.
+/// controller spawns processes and reads the filesystem, and a pane that only
+/// knows this interface can be driven by a fake — in Widgetbook and in the
+/// widget tests — through every state without installing anything.
 ///
 /// It is a [Listenable] so the panes can rebuild on change.
 abstract interface class ToolsView implements Listenable {

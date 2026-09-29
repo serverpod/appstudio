@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:appstudio/previews/preview_data.dart';
+import '../../widgetbook/fakes/tools.dart';
 import 'package:appstudio/theme/app_theme.dart';
 import 'package:appstudio/toolchain/install_progress.dart';
 import 'package:appstudio/toolchain/tool_status.dart';

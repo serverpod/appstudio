@@ -9,11 +9,12 @@ import '../../util/quit_app.dart';
 import '../../widgets/command_block.dart';
 import '../../widgets/error_banner.dart';
 import 'tools_view.dart';
+import '../../widgets/app_dialog.dart';
 
 /// Tells a user upgrading from a build that kept its own tools that this one
 /// installs them the standard way, before it removes the old copies.
 Future<void> showLegacyInstallNotice(BuildContext context) async {
-  await showShadDialog<void>(
+  await showAppDialog<void>(
     context: context,
     barrierDismissible: false,
     barrierBlurSigma: 0,
@@ -96,7 +97,7 @@ Future<void> showManualUpdateDialog(
   BuildContext context, {
   required ToolsView toolchains,
 }) async {
-  await showShadDialog<void>(
+  await showAppDialog<void>(
     context: context,
     barrierDismissible: false,
     barrierBlurSigma: 0,

@@ -1,24 +1,22 @@
-/// Stand-ins for the real controllers, used by the widget previews.
+/// Toolchain fixtures and a [ToolsView] whose state is whatever you pass in —
+/// shared by Widgetbook and the widget tests.
 ///
-/// They implement [ToolsView] and [ProvidersView] — the same interfaces the UI
-/// talks to — so nothing here can drift from what the app renders without the
-/// analyzer noticing. Free of `dart:io`, which is what makes the previews (a
-/// web build) possible at all.
-///
-/// This lives under `lib/` rather than `test/` because the widget preview
-/// scaffold only compiles the package's own sources. It is unreferenced by
-/// `main.dart`, so it is tree-shaken out of release builds.
+/// They implement the same interface the UI talks to, so nothing here can
+/// drift from what the app renders without the analyzer noticing.
 library;
+
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import '../toolchain/install_plan.dart';
-import '../toolchain/install_progress.dart';
-import '../toolchain/tool_status.dart';
-import '../toolchain/tool_version.dart';
-import '../toolchain/toolchain_manifest.dart';
-import '../ui/settings/providers_view.dart';
-import '../ui/toolchain/tools_view.dart';
+import 'package:appstudio/toolchain/install_plan.dart';
+import 'package:appstudio/toolchain/install_progress.dart';
+import 'package:appstudio/toolchain/tool_status.dart';
+import 'package:appstudio/toolchain/tool_version.dart';
+import 'package:appstudio/toolchain/toolchain_manifest.dart';
+import 'package:appstudio/ui/toolchain/tools_view.dart';
+
+import 'project.dart';
 
 // -----------------------------------------------------------------------------
 // Fixtures
@@ -123,7 +121,7 @@ final manualUpdateInventory = _inventory({
     ToolAction.none,
   ),
   ToolId.flutter: (
-    [_tooOld(ToolId.flutter, '3.41.2', root: '/Users/preview/flutter')],
+    [_tooOld(ToolId.flutter, '3.41.2', root: homePath('flutter'))],
     ToolAction.manual,
   ),
   ToolId.serverpodCli: (
@@ -187,6 +185,28 @@ final waitingForAppleProgress = InstallProgress(
   ],
 );
 
+/// Flutter unpacked and fetching its web components.
+final settingUpFlutterProgress = InstallProgress(
+  startedAt: DateTime.utc(2026, 1, 1, 12),
+  now: DateTime.utc(2026, 1, 1, 12, 3),
+  tools: const [
+    ToolProgress(id: ToolId.commandLineTools, phase: ToolPhase.done),
+    ToolProgress(id: ToolId.flutter, phase: ToolPhase.configuring),
+    ToolProgress(id: ToolId.serverpodCli, phase: ToolPhase.queued),
+  ],
+);
+
+/// The last step: `dart install serverpod_cli`.
+final installingServerpodProgress = InstallProgress(
+  startedAt: DateTime.utc(2026, 1, 1, 12),
+  now: DateTime.utc(2026, 1, 1, 12, 5),
+  tools: const [
+    ToolProgress(id: ToolId.commandLineTools, phase: ToolPhase.done),
+    ToolProgress(id: ToolId.flutter, phase: ToolPhase.done),
+    ToolProgress(id: ToolId.serverpodCli, phase: ToolPhase.installing),
+  ],
+);
+
 /// The tail of an install: every step has finished and the re-probe is still
 /// running. The UI stays on the progress view here rather than dropping back
 /// to the plan for a second.
@@ -218,6 +238,7 @@ class FakeToolsView extends ChangeNotifier implements ToolsView {
     this.isInstalling = false,
     this.preflightError,
     this.preflightDelay = Duration.zero,
+    this.preflightNeverAnswers = false,
     this.flutterInstallLabel = '~/develop/flutter',
     this.shellProfileLabel = '~/.zprofile',
     this.manualPathLines = const [],
@@ -251,6 +272,11 @@ class FakeToolsView extends ChangeNotifier implements ToolsView {
   /// long enough to look at.
   Duration preflightDelay;
 
+  /// Never answer [preflight] at all — the setup screen's spinner, held for as
+  /// long as anyone looks. A completer rather than a long delay, so a test
+  /// that builds it is not left with a pending timer.
+  bool preflightNeverAnswers;
+
   /// Counts the calls, for tests that drive the setup screen.
   int legacyRemovals = 0;
 
@@ -258,6 +284,7 @@ class FakeToolsView extends ChangeNotifier implements ToolsView {
   Future<void> refreshDeep() async => notifyListeners();
   @override
   Future<String?> preflight() async {
+    if (preflightNeverAnswers) return Completer<String?>().future;
     if (preflightDelay > Duration.zero) await Future.delayed(preflightDelay);
     notifyListeners();
     return preflightError;
@@ -278,72 +305,3 @@ class FakeToolsView extends ChangeNotifier implements ToolsView {
     return null;
   }
 }
-
-/// A [ProvidersView] with a fixed set of keys and models.
-class FakeProvidersView extends ChangeNotifier implements ProvidersView {
-  FakeProvidersView({
-    Set<String>? connected,
-    this.defaultModel,
-    this.models = const [],
-    this.agentReady = true,
-  }) : _connected = connected ?? <String>{};
-
-  final Set<String> _connected;
-
-  /// False reproduces the pane's waiting state — what Settings shows while
-  /// `opencode serve` is still coming up, or with no project open.
-  @override
-  final bool agentReady;
-
-  @override
-  Iterable<String> get connectedProviders => _connected;
-
-  @override
-  String? defaultModel;
-
-  List<ProviderModel> models;
-
-  @override
-  Future<List<ProviderModel>> listModels() async => models;
-
-  @override
-  Future<void> saveApiKey(String providerId, String key) async {
-    _connected.add(providerId);
-    notifyListeners();
-  }
-
-  @override
-  Future<void> removeApiKey(String providerId) async {
-    _connected.remove(providerId);
-    notifyListeners();
-  }
-
-  @override
-  void setDefaultModel(String value) {
-    defaultModel = value;
-    notifyListeners();
-  }
-}
-
-/// A couple of providers connected, with models to choose between.
-FakeProvidersView connectedProvidersFake() => FakeProvidersView(
-      connected: {'anthropic', 'openai'},
-      defaultModel: 'anthropic/claude-opus-5',
-      models: const [
-        ProviderModel(
-          providerId: 'anthropic',
-          modelId: 'claude-opus-5',
-          label: 'Claude Opus 5',
-        ),
-        ProviderModel(
-          providerId: 'anthropic',
-          modelId: 'claude-sonnet-5',
-          label: 'Claude Sonnet 5',
-        ),
-        ProviderModel(
-          providerId: 'openai',
-          modelId: 'gpt-5',
-          label: 'GPT-5',
-        ),
-      ],
-    );

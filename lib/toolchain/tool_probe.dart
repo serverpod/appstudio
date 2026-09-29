@@ -176,6 +176,33 @@ ToolAction serverpodAction(List<ToolCandidate> candidates) {
   return found ? ToolAction.update : ToolAction.install;
 }
 
+/// Everything a probe reads from or runs on the machine, replaced.
+///
+/// For tests. A probe run against a scratch home still finds the *real* tools
+/// through `PATH` and the login shell, and runs them with that scratch home as
+/// `HOME` — which the Serverpod CLI takes for a first run, and answers by
+/// opening its welcome page in the browser. Once per test.
+class ProbeSandbox {
+  const ProbeSandbox({
+    required this.runner,
+    required this.loginShellPath,
+    required this.environment,
+  });
+
+  /// Nothing on `PATH`, no login shell, and every command fails without
+  /// running — the machine looks like it has no tools at all.
+  static final ProbeSandbox empty = ProbeSandbox(
+    runner: (executable, arguments, {environment}) async =>
+        ProcessResult(0, 1, '', ''),
+    loginShellPath: () async => null,
+    environment: const {'PATH': ''},
+  );
+
+  final ProcessRunner runner;
+  final LoginShellPathReader loginShellPath;
+  final Map<String, String> environment;
+}
+
 // ---------------------------------------------------------------------------
 // Probing — the IO half.
 // ---------------------------------------------------------------------------
@@ -188,9 +215,11 @@ class ToolProbe {
     ProcessRunner? runner,
     LoginShellPathReader? loginShellPath,
     Map<String, String>? environment,
-  })  : _run = runner ?? _defaultRunner,
-        _loginShellPath = loginShellPath ?? captureLoginShellPath,
-        _env = environment ?? Platform.environment;
+    ProbeSandbox? sandbox,
+  })  : _run = runner ?? sandbox?.runner ?? _defaultRunner,
+        _loginShellPath =
+            loginShellPath ?? sandbox?.loginShellPath ?? captureLoginShellPath,
+        _env = environment ?? sandbox?.environment ?? Platform.environment;
 
   final ToolchainPaths paths;
   final ToolManifest manifest;

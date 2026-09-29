@@ -41,13 +41,6 @@ class Toolchain {
   String? get serverpodCliVersion =>
       resolvedTool(ToolId.serverpodCli)?.detectedVersion?.toString();
 
-  /// Short status for the toolbar badge.
-  String get badgeLabel {
-    final missing = inventory.missingRequired.length;
-    if (missing > 0) return '$missing missing';
-    return flutterVersion == null ? 'ready' : 'Flutter $flutterVersion';
-  }
-
   /// Why [id] cannot be used right now, or null when it is fine.
   ///
   /// Spawn sites call this *before* `Process.start` so a missing tool reads as
@@ -119,6 +112,7 @@ class Toolchain {
     ToolchainPaths? paths,
     InstallRecord? record,
     bool deep = false,
+    ProbeSandbox? sandbox,
   }) async {
     final resolvedPaths = paths ?? ToolchainPaths.resolve();
     final probe = ToolProbe(
@@ -126,6 +120,7 @@ class Toolchain {
       manifest: manifest,
       record:
           record ?? await InstallRecord.load(resolvedPaths.installRecordFile),
+      sandbox: sandbox,
     );
     return Toolchain(await probe.inventory(deep: deep));
   }

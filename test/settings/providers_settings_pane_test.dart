@@ -1,4 +1,4 @@
-import 'package:appstudio/previews/preview_data.dart';
+import '../../widgetbook/fakes/providers.dart';
 import 'package:appstudio/theme/app_theme.dart';
 import 'package:appstudio/ui/settings/add_provider_dialog.dart';
 import 'package:appstudio/ui/settings/providers_settings_pane.dart';

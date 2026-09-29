@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:shad/shad.dart';
 
-import '../session/project_session.dart';
+import '../session/recent_projects_view.dart';
 import '../theme/app_theme.dart';
 import 'landing_scaffold.dart';
 
 /// Most recent projects offered on the start page.
 ///
-/// [ProjectSession] already keeps no more than this, so the take below is a
+/// `ProjectSession` already keeps no more than this, so the take below is a
 /// guard rather than the rule — the list is a shortcut, not a history.
 const _kMaxRecentsShown = 5;
 
@@ -24,7 +24,7 @@ class StartPage extends StatelessWidget {
     required this.onNewProject,
   });
 
-  final ProjectSession session;
+  final RecentProjectsView session;
   final VoidCallback onNewProject;
 
   @override
@@ -38,7 +38,7 @@ class StartPage extends StatelessWidget {
 class _StartPageContent extends StatelessWidget {
   const _StartPageContent({required this.session, required this.onNewProject});
 
-  final ProjectSession session;
+  final RecentProjectsView session;
   final VoidCallback onNewProject;
 
   @override

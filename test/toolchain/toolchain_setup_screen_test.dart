@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:appstudio/previews/preview_data.dart';
+import '../../widgetbook/fakes/tools.dart';
 import 'package:appstudio/theme/app_theme.dart';
 import 'package:appstudio/toolchain/tool_status.dart';
 import 'package:appstudio/ui/toolchain/toolchain_notices.dart';
@@ -53,10 +53,9 @@ void main() {
   Future<void> settleDialog(WidgetTester tester) =>
       tester.pump(const Duration(milliseconds: 400));
 
-  testWidgets('survives the widget preview scaffold', (tester) async {
+  testWidgets('survives being centred in a loose parent', (tester) async {
     // LandingScaffold is a Column with an Expanded, so it needs a bounded
-    // height. `previewShell` centres its child, and a preview that throws on
-    // layout is a surface with no other automated coverage.
+    // height — which a caller that centres it does not give it.
     final tools = _ScriptedTools(inventory: emptyInventory);
     await tester.pumpWidget(
       ShadApp(
@@ -198,7 +197,7 @@ void main() {
     await settleDialog(tester);
 
     expect(find.byType(ManualUpdateDialog), findsOneWidget);
-    expect(find.text('/Users/preview/flutter/bin/flutter upgrade'),
+    expect(find.text('~/flutter/bin/flutter upgrade'),
         findsOneWidget);
     expect(tools.preflights, 0);
 

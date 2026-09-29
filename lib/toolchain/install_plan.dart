@@ -1,7 +1,7 @@
 /// What an install would fetch, worked out from the tools' official sources.
 ///
-/// Free of `dart:io` — the setup dialog renders versions and sizes from this,
-/// and it has to stay previewable.
+/// Free of `dart:io` — plain data the setup dialog renders versions and sizes
+/// from, which Widgetbook's fakes build by hand.
 library;
 
 import 'dart:convert';

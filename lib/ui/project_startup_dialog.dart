@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../process/project_ready_view.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_dialog.dart';
 
 /// Set once the user ticks "Don't show this again".
 const _kDismissedKey = 'project.startup_notice_dismissed';
@@ -24,7 +25,7 @@ Future<void> maybeShowProjectStartupNotice(
   if (prefs.getBool(_kDismissedKey) ?? false) return;
   if (!context.mounted) return;
 
-  final dismissForever = await showShadDialog<bool>(
+  final dismissForever = await showAppDialog<bool>(
     context: context,
     // The button is the only way out, so a stray click on the barrier cannot
     // throw away a ticked "don't show this again".
@@ -40,7 +41,8 @@ Future<void> maybeShowProjectStartupNotice(
 /// Sets expectations for the first build after a project is opened.
 ///
 /// Pops `true` when the user asked not to see it again; persisting that is the
-/// caller's job, which keeps this widget free of `dart:io` and previewable.
+/// caller's job, which keeps this widget free of `dart:io` and easy to show in
+/// Widgetbook.
 class ProjectStartupDialog extends StatefulWidget {
   const ProjectStartupDialog({super.key, required this.process});
 

@@ -16,14 +16,11 @@ import '../terminal/studio_terminal.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import '../toolchain/toolchain_controller.dart';
-import 'full_restart_button.dart';
-import 'hot_restart_button.dart';
 import 'new_project_dialog.dart';
-import 'open_in_editor_buttons.dart';
 import 'preview_pane.dart';
-import 'publish_to_cloud_button.dart';
 import 'settings/settings_dialog.dart';
 import 'start_page.dart';
+import 'studio_toolbar.dart';
 import 'terminal_pane.dart';
 
 class StudioShell extends StatefulWidget {
@@ -143,14 +140,14 @@ class _StudioShellState extends State<StudioShell> {
             // Minimized desktop preview keeps the whole workspace and only
             // drops the toolbar.
             if (!widget.previewMode.minimized)
-              _Toolbar(
-                toolchains: widget.toolchains,
+              StudioToolbar(
+                projectName: widget.session.projectName,
+                projectPath: widget.session.projectPath,
+                tools: widget.toolchains,
                 onManageTools: _openManageTools,
-                session: widget.session,
                 process: widget.process,
                 mcp: widget.mcp,
                 editors: widget.editors,
-                leftPanelVisible: _leftPanelVisible,
                 onToggleLeftPanel: () {
                   setState(() {
                     _leftPanelVisible = !_leftPanelVisible;
@@ -185,87 +182,6 @@ class _StudioShellState extends State<StudioShell> {
           ],
         );
       },
-    );
-  }
-}
-
-class _Toolbar extends StatelessWidget {
-  const _Toolbar({
-    required this.toolchains,
-    required this.session,
-    required this.process,
-    required this.mcp,
-    required this.editors,
-    required this.leftPanelVisible,
-    required this.onToggleLeftPanel,
-    required this.onManageTools,
-  });
-
-  final ToolchainController toolchains;
-  final ProjectSession session;
-  final ServerpodProcessController process;
-  final McpController mcp;
-  final ExternalEditorsView editors;
-  final bool leftPanelVisible;
-  final VoidCallback? onToggleLeftPanel;
-  final VoidCallback onManageTools;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    final scheme = theme.colorScheme;
-    final textTheme = theme.textTheme;
-
-    return Container(
-      height: 48,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(
-        color: scheme.background,
-        border: Border(bottom: paneBorderSide(scheme.border)),
-      ),
-      child: Row(
-        children: [
-          _IconAction(
-            icon: LucideIcons.panelLeft,
-            onPressed: onToggleLeftPanel,
-          ),
-          const SizedBox(width: 12),
-          if (session.hasProject)
-            Expanded(
-              child: Row(
-                children: [
-                  Flexible(
-                    child: Text(
-                      session.projectName ?? '',
-                      style: textTheme.small.medium,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      session.projectPath ?? '',
-                      style: textTheme.muted.copyWith(
-                        fontFamily: kMacMonoFont,
-                        fontSize: 11,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            )
-          else
-            const Spacer(),
-          _ToolchainWarningBadge(toolchains: toolchains, onTap: onManageTools),
-          OpenInEditorButtons(editors: editors),
-          const PublishToCloudButton(),
-          const SizedBox(width: 8),
-          HotRestartButton(mcp: mcp),
-          const SizedBox(width: 8),
-          FullRestartButton(process: process),
-        ],
-      ),
     );
   }
 }
@@ -362,89 +278,6 @@ class _Workspace extends StatelessWidget {
               ),
             ],
           ],
-        );
-      },
-    );
-  }
-}
-
-class _IconAction extends StatelessWidget {
-  const _IconAction({
-    required this.icon,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return ShadIconButton.ghost(
-      icon: Icon(icon, size: 16),
-      // A null handler alone leaves the button inert but undimmed, which
-      // reads as a broken click rather than an unavailable action.
-      enabled: onPressed != null,
-      onPressed: onPressed,
-      width: kToolbarIconButtonSize,
-      height: kToolbarIconButtonSize,
-    );
-  }
-}
-
-/// Destructive toolbar badge for a required tool that could not be resolved,
-/// opening the Tools Manager.
-///
-/// Nothing is drawn while the toolchain is complete. It used to sit there
-/// permanently reading "managed 3.35.0" — a version the user cannot act on, in
-/// the spot the Open in … buttons now occupy. The warning half stays: a
-/// required tool we cannot supply never reaches the first-run setup screen, so
-/// this badge is the only place it surfaces.
-class _ToolchainWarningBadge extends StatelessWidget {
-  const _ToolchainWarningBadge({required this.toolchains, required this.onTap});
-
-  final ToolchainController toolchains;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: toolchains,
-      builder: (context, _) {
-        final theme = ShadTheme.of(context);
-        final scheme = theme.colorScheme;
-        if (toolchains.inventory.missingRequired.isEmpty) {
-          return const SizedBox.shrink();
-        }
-        final color = scheme.destructive;
-
-        return Padding(
-          padding: const EdgeInsets.only(right: 10),
-          child: ShadTooltip(
-            builder: (context) => const Text(
-              'Some tools are missing — open Settings \u2192 Tools',
-            ),
-            child: MouseRegion(
-              cursor: SystemMouseCursors.click,
-              child: GestureDetector(
-                onTap: onTap,
-                child: ShadBadge.secondary(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(LucideIcons.circleAlert, size: 12, color: color),
-                      const SizedBox(width: 6),
-                      Text(
-                        toolchains.current.badgeLabel,
-                        style: theme.textTheme.small
-                            .copyWith(color: color)
-                            .medium,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
         );
       },
     );

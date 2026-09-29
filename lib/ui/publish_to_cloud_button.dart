@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 
 import '../theme/app_theme.dart';
+import '../widgets/app_dialog.dart';
 
 /// Toolbar button for publishing the open project to Serverpod Cloud.
 ///
@@ -30,7 +31,7 @@ class PublishToCloudButton extends StatelessWidget {
 /// rather than asking for a decision, so nothing is lost to a stray click on
 /// the barrier.
 Future<void> showPublishToCloudDialog(BuildContext context) =>
-    showShadDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (context) => const PublishToCloudDialog(),
     );

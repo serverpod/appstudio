@@ -7,6 +7,7 @@ import '../toolchain/tools_view.dart';
 import 'providers_view.dart';
 import '../toolchain/manage_tools_pane.dart';
 import 'providers_settings_pane.dart';
+import '../../widgets/app_dialog.dart';
 
 /// Which pane to open on.
 enum SettingsTab { providers, tools }
@@ -25,7 +26,7 @@ Future<void> showSettingsDialog(
   required ToolsView toolchains,
   SettingsTab initialTab = SettingsTab.providers,
 }) {
-  return showShadDialog<void>(
+  return showAppDialog<void>(
     context: context,
     builder: (context) => SettingsDialog(
       agent: agent,

@@ -6,6 +6,7 @@ import 'package:shad/shad.dart';
 import '../feature_flags.dart';
 import '../mcp/hot_restart_view.dart';
 import '../widgets/toolbar_action_button.dart';
+import '../widgets/app_dialog.dart';
 
 /// Toolbar button that pushes the current code into the running app: it
 /// recompiles and reboots the server, then hot-restarts the Flutter app and
@@ -75,7 +76,7 @@ class HotRestartButton extends StatelessWidget {
 /// something rather than asking for a decision, so there is nothing to lose to
 /// a stray click on the barrier.
 Future<void> showHotRestartComingSoonDialog(BuildContext context) =>
-    showShadDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (context) => const HotRestartComingSoonDialog(),
     );
