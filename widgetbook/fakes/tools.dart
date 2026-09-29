@@ -136,6 +136,14 @@ final legacyInventory = _inventory(
   legacy: true,
 );
 
+/// An earlier build's toolchain, on a Mac that has its own Flutter and
+/// Serverpod CLI — the old copies can go without a word.
+final legacyWithFlutterInventory = ToolchainInventory(
+  manifest: completeInventory.manifest,
+  tools: completeInventory.tools,
+  legacyInstallFound: true,
+);
+
 /// What preflight finds for [emptyInventory].
 final previewPlan = InstallPlan({
   ToolId.commandLineTools: const PlannedTool(id: ToolId.commandLineTools),

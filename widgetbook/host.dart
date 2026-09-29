@@ -141,8 +141,46 @@ class _InstantRoute extends PageRoute<void> {
       _page.child;
 }
 
+/// The window size full-window screens are drawn at: a common laptop window,
+/// comfortably above App Studio's 1024×720 minimum (`MainFlutterWindow`).
+const kAppWindowSize = Size(1280, 800);
+
+/// The smallest window App Studio allows — `test/widgetbook` builds the studio
+/// window at this size to catch overflows a real user could hit.
+const kMinAppWindowSize = Size(1024, 720);
+
+/// A full-window screen, drawn at a real window size and scaled down to fit
+/// the canvas.
+///
+/// Widgetbook's canvas is narrower than any window App Studio allows, so laid
+/// out at canvas size the toolbar overflowed and truncated text that never
+/// truncates in the app. Laid out at [kAppWindowSize] instead, the screen is
+/// the real layout, only smaller — hover, tooltips and clicks still work
+/// through the scaling.
+class AppWindow extends StatelessWidget {
+  const AppWindow({super.key, required this.child, this.size = kAppWindowSize});
+
+  final Widget child;
+  final Size size;
+
+  @override
+  Widget build(BuildContext context) {
+    // Expanded first: Widgetbook hands a use case loose constraints, and a
+    // FittedBox under those shrinks to its child and sits at the top-left.
+    return SizedBox.expand(
+      child: ColoredBox(
+        color: ShadTheme.of(context).colorScheme.muted,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: SizedBox.fromSize(size: size, child: child),
+        ),
+      ),
+    );
+  }
+}
+
 /// A full-window screen.
-Widget screen(Widget child) => SizedBox.expand(child: child);
+Widget screen(Widget child) => AppWindow(child: child);
 
 /// One dialog, drawn in place over [backdrop] behind the app's own dialog
 /// barrier colour.
@@ -168,8 +206,8 @@ class DialogUseCase extends StatelessWidget {
       fit: StackFit.expand,
       children: [
         // The backdrop is scenery: a click on it would open things the use
-        // case is not about.
-        IgnorePointer(child: backdrop),
+        // case is not about. Drawn at window size like any screen.
+        IgnorePointer(child: AppWindow(child: backdrop)),
         ColoredBox(
           color: theme.alertDialogTheme.barrierColor ??
               Colors.black.withValues(alpha: 0.1),

@@ -6,6 +6,8 @@
 #   make start             Run the app (flutter run -d macos)
 #   make deps              flutter pub get + CEF/pods
 #   make widgetbook        Every screen and dialog, in every state (Widgetbook)
+#   make start_driver      The app, drivable by an agent through the Dart MCP server
+#   make widgetbook_driver Widgetbook, drivable the same way
 #   make clean             Drop build output and dist artifacts
 #   make clean_all         Also drop CEF and Pods
 #
@@ -29,7 +31,8 @@ SHELL := /bin/bash
 ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 CEF_STAMP := $(ROOT)/packages/webview_cef/macos/third/cef/version.txt
 
-.PHONY: help start deps ensure_deps widgetbook clean clean_all \
+.PHONY: help start deps ensure_deps widgetbook start_driver widgetbook_driver \
+        clean clean_all \
         set_version release build build_debug publish promote
 
 help:
@@ -37,6 +40,8 @@ help:
 	@echo "  make start             Run the app (flutter run -d macos)"
 	@echo "  make deps              flutter pub get + CEF/pods"
 	@echo "  make widgetbook        Every screen and dialog, in every state"
+	@echo "  make start_driver      The app, drivable through the Dart MCP server"
+	@echo "  make widgetbook_driver Widgetbook, drivable through the Dart MCP server"
 	@echo "  make clean             Remove build/ and dist/ (keeps CEF)"
 	@echo "  make clean_all         Also remove CEF and Pods"
 	@echo ""
@@ -85,6 +90,17 @@ start: ensure_deps
 widgetbook: ensure_deps
 	@echo "==> flutter run -d macos -t widgetbook/main.dart"
 	cd "$(ROOT)" && flutter run -d macos -t widgetbook/main.dart
+
+# The same two, with Flutter Driver's extension switched on, so an agent can
+# tap, type and take screenshots through the Dart MCP server. The entry points
+# live in test_driver/, outside lib/, so flutter_driver never ships.
+start_driver: ensure_deps
+	@echo "==> flutter run -d macos -t test_driver/app.dart"
+	cd "$(ROOT)" && flutter run -d macos -t test_driver/app.dart
+
+widgetbook_driver: ensure_deps
+	@echo "==> flutter run -d macos -t test_driver/widgetbook.dart"
+	cd "$(ROOT)" && flutter run -d macos -t test_driver/widgetbook.dart
 
 # Xcode leaves unknown files under Contents/Resources between builds, so a tree
 # from before the toolchain moved out keeps a ~1.8 GB embed alive. distribute

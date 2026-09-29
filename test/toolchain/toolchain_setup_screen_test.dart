@@ -190,6 +190,19 @@ void main() {
     expect(tools.preflights, 1);
   });
 
+  testWidgets('with a Flutter already on the Mac, the old tools go without '
+      'a notice', (tester) async {
+    // The notice announces that App Studio stopped using its own Flutter. Here
+    // it just uses the one the user has, so there is nothing to tell them.
+    final tools = _ScriptedTools(inventory: legacyWithFlutterInventory);
+    await pumpScreen(tester, tools);
+    await settleDialog(tester);
+
+    expect(find.byType(LegacyInstallNotice), findsNothing);
+    expect(tools.legacyRemovals, 1);
+    expect(tools.inventory.needsSetup, isFalse);
+  });
+
   testWidgets('a Flutter the user must update blocks until they have',
       (tester) async {
     final tools = _ScriptedTools(inventory: manualUpdateInventory);

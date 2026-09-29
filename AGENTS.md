@@ -17,6 +17,7 @@ lib/
   theme/                 # Shad themes, layout constants, ThemeController
   toolchain/             # Probe + install CLT, Flutter, Serverpod CLI (official sources)
   widgets/               # Shared UI (IconSegmentedControl, MenuItemTile)
+test_driver/             # Driver-enabled entry points for the Dart MCP server
 widgetbook/              # `make widgetbook`: catalog, host, fakes (see Widgetbook)
 packages/
   mac_menu_bar/            # Local fork — SF Symbol icons, separators, reset()
@@ -493,8 +494,11 @@ Earlier builds kept every tool under
 
 - **`ToolchainInventory.legacyInstallFound` is part of `needsSetup`**, so a
   legacy user always lands on the setup screen — even when every tool is
-  already on the Mac — and step one there is `LegacyInstallNotice`, which says
-  what changed. Continue runs `removeLegacyInstall()`: the three legacy
+  already on the Mac. Step one there is `LegacyInstallNotice`, which says what
+  changed, **but only when no Flutter is on the Mac** (`flutterFound`). With
+  one already there — usable or too old — App Studio just uses it, so there is
+  nothing to announce; an old one gets the update prompt next, which says what
+  it needs. Either way `removeLegacyInstall()` then runs: the three legacy
   directories (`ToolchainPaths.legacyPaths`, including the pre-rename
   `AppStudio` directory) and the fenced block in every rc file it could be in.
   Then setup carries on as a first run.
@@ -1201,6 +1205,12 @@ make widgetbook    # every screen and dialog, in every state, light and dark
   opened from inside a use case — the toolbar's Publish to Cloud, say — would
   cover Widgetbook's own UI and outlive the use case that opened it, which
   surfaces as a cascade of `Duplicate GlobalKey` assertions.
+- **Full-window screens are drawn at a real window size and scaled down**
+  (`AppWindow`, `kAppWindowSize` 1280×800). Widgetbook's canvas is narrower
+  than App Studio's 1024×720 minimum, so laid out at canvas size the toolbar
+  overflowed and truncated text that never truncates in the app. The catalog
+  test also builds the studio window at exactly the minimum
+  (`kMinAppWindowSize`), which is the overflow a real user could hit.
 - **`StudioWindowMock` is an open project assembled from the real parts** —
   `StudioToolbar`, `TerminalPaneHeader`, `PreviewHeaderBar`,
   `PreviewStatusOverlay`, `RegistrationCodeToast`. Two parts are stand-ins
@@ -1481,8 +1491,81 @@ after the other.
   `project.started_notice_dismissed`. Opening the editor is the caller's job for
   the same reason — it keeps the dialogs clear of `dart:io`.
 
+## Testing with the Dart MCP server
+
+The Dart MCP server (`dart mcp-server`) is configured for this repo in
+`.mcp.json` (Claude Code) and `.cursor/mcp.json` (Cursor). It connects to a
+running debug build and can inspect it, read its errors, hot reload it and —
+with Flutter Driver's extension on — tap, type and take screenshots.
+**Use it to check UI and behaviour changes in the running app, not only in
+widget tests.** Tests stay the gate; this is how you look at the result.
+
+**Launch a driver build, in the background, then attach:**
+
+1. `make widgetbook_driver` for a screen or dialog; `make start_driver` only
+   for a flow Widgetbook cannot show. Both are `flutter run` with the driver
+   extension (`test_driver/`). Run it in the background and wait for
+   `Flutter run key commands` in its output — the first build takes minutes.
+2. **Bring the window to the front**, and again whenever you come back to it:
+   `osascript -e 'tell application "System Events" to set frontmost of (first
+   process whose unix id is <pid>) to true'`, with the pid from
+   `pgrep -f 'Debug/App Studio.app/Contents/MacOS/App Studio'`. A window
+   behind others stops drawing frames: screenshots come back stale — the
+   *launch* screen, long after you navigated away — and frame-synced commands
+   time out. `flutter run` itself reports `Failed to foreground app`.
+3. `dtd` → `listDtdUris`, pick the instance whose workspace root is this repo
+   (not the IDE's, rooted at `/`), `connect`. Then `flutter_driver_command` →
+   `get_health` should answer `ok`.
+4. `get_runtime_errors` first, and again after every step.
+5. `widget_inspector` → `get_widget_tree` with `summaryOnly: true` before any
+   driver command. **Never guess a finder**: use the text, tooltip or widget
+   type the tree actually shows. The tree is 200 KB of JSON; search it
+   (`textPreview` holds a widget's text) rather than reading it whole. Hint
+   text is not in it — a text field is found `ByType`.
+6. **`waitFor` with a short `timeout` (3000) before every `tap`**, and only tap
+   what it found. A tap whose finder never matches does not end when the MCP
+   call times out: it keeps waiting inside the app, and every later tap fails
+   with `Guarded function conflict`. `hot_restart` is the only way out of
+   that; `get_health` works again a moment after it.
+7. `flutter_driver_command` → `tap` (`ByText`, `ByTooltipMessage`, `ByType`),
+   then `screenshot` **twice and trust the second** — on macOS the first
+   returns the frame before your action. `enter_text` needs
+   `set_text_entry_emulation` with `enabled: true` first — it is off at launch
+   so a human can still type in the window — and `ByText` then also matches
+   the text you typed into the field.
+8. After editing code: `hot_reload`, or `hot_restart` for changes to `main()`,
+   globals or consts. Then `get_runtime_errors` again.
+9. Stop the `flutter run` when done (`q`, or kill it). Do not leave it running.
+
+**In Widgetbook, reach a use case through the Search field**, not by
+scrolling the tree: the tree is a lazy list, so an item below the fold does
+not exist until it is scrolled to, and a finder for it just waits. Tap
+`ByType` `SearchField`, `enter_text` a word from the use case's name — a
+prefix like `Runnin`, so the field's own text does not also match the name —
+tap the component to expand it, then `waitFor` and tap the use case. The theme
+switch is the Theme addon in the right-hand panel.
+
+**Rules — each is about something that happens outside the window:**
+
+- **Never launch while the user has their own `flutter run` of this app
+  going.** Check `pgrep -fl "flutter_tools.snapshot run"` first. Every run
+  builds into the same `build/macos` bundle, so a second one replaces the app
+  they are using. Attach to theirs instead: the inspector, runtime errors and
+  hot reload all work over DTD, but driver commands do not — a plain
+  `make start` has no driver extension. Ask before stopping their run.
+- **Prefer Widgetbook to the real app.** The real app acts on the machine:
+  `main()` reclaims processes left in the dev-session pid files (it will kill a
+  `serverpod start` another App Studio session owns), opening a project runs
+  `serverpod start`, the setup screen installs the Command Line Tools and
+  Flutter and edits `~/.zprofile`, and Uninstall deletes tools. Do not press
+  Install, Uninstall or Create Project in the real app without asking.
+- **Quit is `exit(0)` everywhere**, Widgetbook included — pressing it ends the
+  session you are driving.
+
 ## Conventions for agents
 
+- After a UI change, look at it running — Widgetbook through the Dart MCP
+  server (see Testing with the Dart MCP server) — as well as running the tests.
 - Keep diffs small; match existing naming and file placement.
 - Reuse `shad` components and cloudui patterns before inventing new ones.
 - Only commit or open PRs when explicitly asked.

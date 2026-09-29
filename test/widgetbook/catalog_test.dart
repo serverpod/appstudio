@@ -6,6 +6,7 @@ import 'package:appstudio/ui/publish_to_cloud_button.dart';
 
 import '../../widgetbook/catalog.dart';
 import '../../widgetbook/host.dart';
+import '../../widgetbook/studio_window.dart';
 
 /// Every use case in the Widgetbook catalog, with its path.
 Iterable<(String, WidgetbookUseCase)> _useCases(
@@ -38,6 +39,27 @@ NavigatorState _widgetbookNavigator(WidgetTester tester) =>
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('the studio window fits App Studio\'s smallest window',
+      (tester) async {
+    // Use cases draw the window at kAppWindowSize; this is the size a user can
+    // actually shrink it to, and the one the toolbar has to survive.
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      const UseCaseHost(
+        brightness: Brightness.light,
+        child: AppWindow(size: kMinAppWindowSize, child: StudioWindowMock()),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
+  });
 
   testWidgets('a dialog opened from inside a use case stays in the canvas',
       (tester) async {

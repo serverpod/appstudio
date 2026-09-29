@@ -38,7 +38,8 @@ class _ToolchainSetupScreenState extends State<ToolchainSetupScreen> {
   /// quits:
   ///
   ///  1. Tools an earlier build installed into Application Support: say that
-  ///     this is changing, then remove them.
+  ///     this is changing — unless a Flutter is already on the Mac, in which
+  ///     case nothing changes for the user — then remove them.
   ///  2. A Flutter the user installed that is too old: ask them to update it.
   ///     It comes before the install, because the Serverpod CLI is installed
   ///     with that Flutter's `dart`.
@@ -52,8 +53,14 @@ class _ToolchainSetupScreenState extends State<ToolchainSetupScreen> {
     while (true) {
       if (!mounted || !toolchains.inventory.needsSetup) return;
       if (toolchains.inventory.legacyInstallFound) {
-        await showLegacyInstallNotice(context);
-        if (!mounted) return;
+        // The notice is about App Studio no longer using its own Flutter. With
+        // one already on the Mac, App Studio simply uses that and there is
+        // nothing to announce — the old copies go quietly. A Flutter that is
+        // too old gets the update prompt next, which says what it needs.
+        if (!toolchains.inventory.flutterFound) {
+          await showLegacyInstallNotice(context);
+          if (!mounted) return;
+        }
         final error = await toolchains.removeLegacyInstall();
         if (!mounted) return;
         if (error != null) {

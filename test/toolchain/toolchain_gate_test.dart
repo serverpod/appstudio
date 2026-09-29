@@ -73,4 +73,42 @@ void main() {
       [ToolId.commandLineTools, ToolId.flutter, ToolId.serverpodCli],
     );
   });
+
+  group('flutterFound', () {
+    ToolchainInventory withFlutter(List<ToolCandidate> candidates) =>
+        ToolchainInventory(
+          manifest: manifest,
+          tools: {
+            ToolId.flutter: ToolStatus(
+              spec: manifest[ToolId.flutter]!,
+              candidates: candidates,
+            ),
+          },
+        );
+
+    test('is false with nothing on the Mac', () {
+      expect(withFlutter(const []).flutterFound, isFalse);
+      expect(
+        withFlutter(const [
+          ToolCandidate.notFound(ToolId.flutter, ToolSource.host),
+        ]).flutterFound,
+        isFalse,
+      );
+    });
+
+    test('is true for a Flutter too old to use', () {
+      // It is still the user's own Flutter; setup asks them to update it
+      // rather than announcing that App Studio stopped shipping one.
+      expect(
+        withFlutter(const [
+          ToolCandidate(
+            id: ToolId.flutter,
+            source: ToolSource.host,
+            fitness: ToolFitness.wrongVersion,
+          ),
+        ]).flutterFound,
+        isTrue,
+      );
+    });
+  });
 }

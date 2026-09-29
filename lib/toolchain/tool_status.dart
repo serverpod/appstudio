@@ -209,6 +209,14 @@ class ToolchainInventory {
 
   bool get isComplete => missingRequired.isEmpty;
 
+  /// Whether a Flutter SDK was found on this Mac at all — usable, too old, or
+  /// broken. The copy an earlier build kept in Application Support does not
+  /// count: the probe never looks there.
+  bool get flutterFound => tools[ToolId.flutter]?.candidates.any(
+            (c) => c.fitness != ToolFitness.notFound,
+          ) ??
+      false;
+
   /// Whether first-run setup still owns the window.
   ///
   /// Named because three things have to agree on it: the screen `main.dart`
