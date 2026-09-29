@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 
+import '../analytics/app_analytics.dart';
 import '../session/project_settings.dart';
 import '../toolchain/tool_status.dart';
 import '../toolchain/toolchain_controller.dart';
@@ -59,10 +60,46 @@ class ProjectCreator {
 
   /// Runs `serverpod create` inside [parentDirectory] and returns the path of
   /// the new project. [onStatus] receives CLI progress lines.
+  ///
+  /// Reports `app_studio.project_created` either way. The stage a failure
+  /// came from is the one property worth having there: "the CLI failed" and
+  /// "the CLI succeeded and our pubspec patch did not" are different bugs.
   Future<String> create({
     required String name,
     required String parentDirectory,
     Set<IdeIntegration> ides = const {},
+    void Function(String status)? onStatus,
+  }) async {
+    final started = DateTime.now();
+    var stage = 'validation';
+    void report({required bool success}) => appAnalytics.projectCreated(
+      ides: [for (final ide in ides) ide.name]..sort(),
+      success: success,
+      duration: DateTime.now().difference(started),
+      failureStage: success ? null : stage,
+    );
+
+    try {
+      final path = await _create(
+        name: name,
+        parentDirectory: parentDirectory,
+        ides: ides,
+        onStatus: onStatus,
+        onStage: (next) => stage = next,
+      );
+      report(success: true);
+      return path;
+    } catch (_) {
+      report(success: false);
+      rethrow;
+    }
+  }
+
+  Future<String> _create({
+    required String name,
+    required String parentDirectory,
+    required Set<IdeIntegration> ides,
+    required void Function(String stage) onStage,
     void Function(String status)? onStatus,
   }) async {
     final nameError = validateProjectName(name);
@@ -83,6 +120,7 @@ class ProjectCreator {
       );
     }
 
+    onStage('cli');
     final log = StringBuffer();
     final code = await _runCreate(
       name: name,
@@ -100,6 +138,7 @@ class ProjectCreator {
       );
     }
 
+    onStage('configure_preview');
     onStatus?.call('Configuring preview…');
     await _configureFlutterAppForPreview(projectPath: projectPath, name: name);
     await recordProjectSettings(projectPath: projectPath, ides: ides);

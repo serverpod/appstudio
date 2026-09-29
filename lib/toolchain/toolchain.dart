@@ -2,19 +2,17 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'install_record.dart';
 import 'tool_probe.dart';
 import 'tool_status.dart';
 import 'toolchain_manifest.dart';
 import 'toolchain_paths.dart';
-import 'toolchain_requirements.dart';
 
 /// A resolved view of the tools App Studio needs, built from a
 /// [ToolchainInventory].
 ///
-/// Resolution is **per tool**: a missing OpenCode no longer invalidates
-/// Flutter, and each executable can come from a different source. Every
-/// executable getter is nullable — a bare command name would only defer the
-/// failure to `Process.start`, where it surfaces as an unexplainable crash.
+/// Every executable getter is nullable — a bare command name would only defer
+/// the failure to `Process.start`, where it surfaces as an unexplainable crash.
 class Toolchain {
   const Toolchain(this.inventory);
 
@@ -37,29 +35,17 @@ class Toolchain {
 
   String? get serverpodExecutable =>
       resolvedTool(ToolId.serverpodCli)?.executable;
-  String? get opencodeExecutable => resolvedTool(ToolId.opencode)?.executable;
-  String? get gitExecutable => resolvedTool(ToolId.git)?.executable;
-  String? get otoolExecutable => resolvedTool(ToolId.llvmTools)?.executable;
 
   String? get flutterVersion =>
       resolvedTool(ToolId.flutter)?.detectedVersion?.toString();
   String? get serverpodCliVersion =>
       resolvedTool(ToolId.serverpodCli)?.detectedVersion?.toString();
-  String? get opencodeVersion =>
-      resolvedTool(ToolId.opencode)?.detectedVersion?.toString();
-  String? get gitVersion =>
-      resolvedTool(ToolId.git)?.detectedVersion?.toString();
 
   /// Short status for the toolbar badge.
   String get badgeLabel {
     final missing = inventory.missingRequired.length;
     if (missing > 0) return '$missing missing';
-    final source = sourceOf(ToolId.flutter);
-    final version = flutterVersion;
-    if (source == null) return 'no tools';
-    return version == null
-        ? source.label.toLowerCase()
-        : '${source.label.toLowerCase()} $version';
+    return flutterVersion == null ? 'ready' : 'Flutter $flutterVersion';
   }
 
   /// Why [id] cannot be used right now, or null when it is fine.
@@ -80,23 +66,16 @@ class Toolchain {
   }
 
   /// Directories prepended to `PATH` for every spawned process, highest
-  /// priority first. Derived from the resolved executables so a host tool and
-  /// a managed tool are handled identically.
+  /// priority first, so the copies we resolved win over whatever else the
+  /// user's `PATH` holds.
   List<String> get binPathPrefix {
     final dirs = <String>[];
     void add(String? executable) {
       if (executable == null) return;
       final dir = p.dirname(executable);
-      // /usr/bin must never be prepended — it would put the CLT shims ahead of
-      // the real tools we just resolved.
-      if (dir == kCltShimDir || dirs.contains(dir)) return;
-      dirs.add(dir);
+      if (!dirs.contains(dir)) dirs.add(dir);
     }
 
-    // Real otool / install_name_tool and git before anything else, so Apple's
-    // stubs are never reached.
-    add(otoolExecutable);
-    add(gitExecutable);
     add(flutterExecutable);
     add(serverpodExecutable);
     return dirs;
@@ -115,36 +94,11 @@ class Toolchain {
     if (root != null) {
       env['FLUTTER_ROOT'] = root;
       // serverpod_cli (AOT) resolves the SDK via DART_SDK or by probing `dart`
-      // on PATH. Pin explicitly so compile/run never pick a host stub.
+      // on PATH. Pin explicitly so compile/run never pick another copy.
       final dartSdk = p.join(root, 'bin', 'cache', 'dart-sdk');
       if (Directory(dartSdk).existsSync()) {
         env['DART_SDK'] = dartSdk;
       }
-    }
-
-    // Prefer pinned engine artifacts over git triangulation. Only ever set for
-    // an SDK we control: a host SDK may sit at a different revision than its
-    // engine.version implies after a channel switch, and forcing the variable
-    // would make it fetch artifacts for the wrong engine.
-    final engineVersion = resolvedTool(ToolId.flutter)?.facts['engineVersion'];
-    if (engineVersion != null && engineVersion.isNotEmpty) {
-      env['FLUTTER_PREBUILT_ENGINE_VERSION'] = engineVersion;
-    }
-
-    // Only for a git we ship — a Homebrew git finds its own libexec, and
-    // overriding it would break that install.
-    final gitExecPath = resolvedTool(ToolId.git)?.facts['gitExecPath'];
-    if (gitExecPath != null && gitExecPath.isNotEmpty) {
-      env['GIT_EXEC_PATH'] = gitExecPath;
-    }
-
-    // The prebuilt Serverpod bundle ships sqlite dylibs next to the binary.
-    // Its @rpath already finds them; this is insurance.
-    final libDir = resolvedTool(ToolId.serverpodCli)?.facts['libDir'];
-    if (libDir != null && libDir.isNotEmpty) {
-      final existing = env['DYLD_LIBRARY_PATH'];
-      env['DYLD_LIBRARY_PATH'] =
-          existing == null || existing.isEmpty ? libDir : '$libDir:$existing';
     }
 
     // PUB_CACHE is deliberately NOT set. package_config.json stores absolute
@@ -157,55 +111,22 @@ class Toolchain {
     return env;
   }
 
-  /// Probes every source and builds a toolchain. [deep] enumerates all
-  /// candidates for the Tools Manager; the default stops at the first
-  /// satisfied one per tool because this runs before the first frame.
+  /// Probes this Mac and builds a toolchain. [deep] enumerates all candidates
+  /// for the Tools tab; the default stops at the first satisfied one per tool
+  /// because this runs before the first frame.
   static Future<Toolchain> resolve({
-    ToolManifest? manifest,
-    ToolchainRequirements? requirements,
+    required ToolManifest manifest,
     ToolchainPaths? paths,
+    InstallRecord? record,
     bool deep = false,
   }) async {
     final resolvedPaths = paths ?? ToolchainPaths.resolve();
-    final resolvedManifest = manifest ?? await _loadManifestFromDisk();
     final probe = ToolProbe(
       paths: resolvedPaths,
-      manifest: resolvedManifest,
-      requirements:
-          requirements ?? await ToolchainRequirements.load(resolvedPaths.requirementsFile),
+      manifest: manifest,
+      record:
+          record ?? await InstallRecord.load(resolvedPaths.installRecordFile),
     );
     return Toolchain(await probe.inventory(deep: deep));
   }
-
-  /// Fallback used when no manifest is injected — reads the asset straight
-  /// from disk so this works in tests and plain Dart scripts too.
-  static Future<ToolManifest> _loadManifestFromDisk() async {
-    for (final candidate in [
-      p.join(Directory.current.path, kBakedManifestAsset),
-      if (devRepoRoot() case final root?) p.join(root, kBakedManifestAsset),
-    ]) {
-      final file = File(candidate);
-      if (await file.exists()) {
-        final manifest = ToolManifest.tryParse(await file.readAsString());
-        if (manifest != null) return manifest;
-      }
-    }
-    throw StateError('Could not load $kBakedManifestAsset');
-  }
 }
-
-/// Walks up from the cwd looking for the repo root (pubspec.yaml + toolchain/).
-String? devRepoRoot() {
-  var dir = Directory.current;
-  for (var i = 0; i < 8; i++) {
-    if (File(p.join(dir.path, 'pubspec.yaml')).existsSync() &&
-        Directory(p.join(dir.path, 'toolchain')).existsSync()) {
-      return dir.path;
-    }
-    final parent = dir.parent;
-    if (parent.path == dir.path) break;
-    dir = parent;
-  }
-  return null;
-}
-

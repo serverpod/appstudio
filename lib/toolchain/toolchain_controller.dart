@@ -3,17 +3,19 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
 
+import 'install_plan.dart';
 import 'install_progress.dart';
-import 'shell_path_integration.dart';
-import 'shim_writer.dart';
+import 'install_record.dart';
+import 'platform_key.dart';
+import 'shell_profile.dart';
 import 'tool_status.dart';
-import 'tool_version.dart';
 import 'toolchain.dart';
 import 'toolchain_installer.dart';
 import 'toolchain_manifest.dart';
 import 'toolchain_paths.dart';
-import 'toolchain_requirements.dart';
 import '../util/pretty_path.dart';
 import '../ui/toolchain/tools_view.dart';
 
@@ -25,50 +27,32 @@ import '../ui/toolchain/tools_view.dart';
 class ToolchainController extends ChangeNotifier implements ToolsView {
   ToolchainController({
     required Toolchain initial,
-    required ToolManifest manifest,
+    required this.manifest,
     required this.paths,
-    required ToolchainRequirements requirements,
-  })  : // Both fields are mutable and private; initializing formals would leak
+    InstallRecord record = InstallRecord.empty,
+    ToolchainInstaller? installer,
+  })  : _current = initial,
+        // Both fields are mutable and private; initializing formals would leak
         // the underscores into the named-argument list. The ignore only covers
         // the line after it, so each assignment needs its own.
         // ignore: prefer_initializing_formals
-        _manifest = manifest,
-        _current = initial,
+        _record = record,
         // ignore: prefer_initializing_formals
-        _requirements = requirements;
+        _installer = installer;
 
-  /// Resolves everything needed to start. Never throws: a failure here would
-  /// stop the app from launching, and "no tools" is a state the UI can explain.
+  /// Resolves everything needed to start. Probe failures do not throw: "no
+  /// tools" is a state the UI can explain, a failed launch is not.
   static Future<ToolchainController> create() async {
     final paths = ToolchainPaths.resolve();
-    // The product was renamed AppStudio → App Studio. Move an existing install
-    // instead of stranding it; a same-volume rename, so instant even at 1.9 GB.
-    final migrated = await paths.migrateLegacyDirectory();
-    ToolManifest? manifest;
-    try {
-      manifest = await ToolManifest.loadBaked(rootBundle.loadString);
-    } catch (e) {
-      debugPrint('ToolchainController: could not load the baked manifest: $e');
-    }
-    final requirements =
-        await ToolchainRequirements.load(paths.requirementsFile);
-
-    if (manifest == null) {
-      // Without a manifest nothing can be resolved or offered for install.
-      throw StateError('Missing $kBakedManifestAsset');
-    }
-
-    final cached = await ToolManifest.loadCached(paths.cachedManifestFile);
-    if (cached != null && cached.isNewerThan(manifest)) {
-      manifest = cached;
-    }
+    final manifest = await ToolManifest.loadBaked(rootBundle.loadString);
+    final record = await InstallRecord.load(paths.installRecordFile);
 
     Toolchain toolchain;
     try {
       toolchain = await Toolchain.resolve(
         manifest: manifest,
-        requirements: requirements,
         paths: paths,
+        record: record,
       );
     } catch (e) {
       debugPrint('ToolchainController: probe failed: $e');
@@ -77,27 +61,22 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
       );
     }
 
-    final controller = ToolchainController(
+    return ToolchainController(
       initial: toolchain,
       manifest: manifest,
       paths: paths,
-      requirements: requirements,
+      record: record,
     );
-    if (migrated) {
-      // Shims and the shell rc block embed absolute paths that just moved.
-      unawaited(controller._repairAfterMigration());
-    }
-    return controller;
   }
 
-  ToolManifest _manifest;
-  ToolManifest get manifest => _manifest;
+  final ToolManifest manifest;
   final ToolchainPaths paths;
 
   Toolchain _current;
-  ToolchainRequirements _requirements;
+  InstallRecord _record;
+  InstallPlan _plan = InstallPlan.empty;
   bool _refreshing = false;
-  bool _fetchingManifest = false;
+  bool _planning = false;
   bool _disposed = false;
 
   ToolchainInstaller? _installer;
@@ -106,146 +85,171 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
   String? _installError;
   bool _finalizing = false;
 
+  ToolchainInstaller get installer =>
+      _installer ??= ToolchainInstaller(paths: paths);
+
   Toolchain get current => _current;
   @override
   ToolchainInventory get inventory => _current.inventory;
-  ToolchainRequirements get requirements => _requirements;
+
+  /// What App Studio has installed, per `~/.serverpod`.
+  InstallRecord get record => _record;
+
+  @override
+  InstallPlan get plan => _plan;
+
   bool get isRefreshing => _refreshing;
 
   /// Non-null while an install is running, and until the next one starts.
   @override
   InstallProgress? get progress => _progress;
 
-  /// True from the moment [install] is called until every step it owns has
-  /// finished — including the deep re-probe that runs after the last tool
-  /// lands. Dropping it the instant the downloads were terminal put the setup
-  /// dialog back on its download plan for the second the re-probe took, which
-  /// read as the install having been thrown away.
+  /// True from the moment [installMissing] is called until every step it owns
+  /// has finished — including the deep re-probe after the last tool lands.
+  /// Dropping it the instant the steps were terminal put the setup dialog back
+  /// on its plan for the second the re-probe took, which read as the install
+  /// having been thrown away.
   @override
   bool get isInstalling =>
       _finalizing || (_progress != null && !_progress!.isDone);
   @override
   String? get installError => _installError;
 
-  /// Blocks a second install and the "remove" buttons while work is in flight.
   @override
-  bool get isBusy => isInstalling || _refreshing;
+  bool get isBusy => isInstalling || _refreshing || _planning;
 
-  ToolchainInstaller get _requireInstaller =>
-      _installer ??= ToolchainInstaller(paths: paths, manifest: _manifest);
+  // -- plan -----------------------------------------------------------------
 
-  /// Pulls the live manifest from the bucket when it is newer than the current
-  /// pin, HEADs each artifact we would download for its current size, then
-  /// re-probes so the UI shows what would actually be fetched.
-  ///
-  /// **A failed manifest fetch is not an error here.** `manifest.json` is an
-  /// optional upgrade over the pin baked into the app; it is not published
-  /// today, so treating its absence as fatal would mean no first run ever gets
-  /// past this. An unreachable *artifact* is fatal — that download is about to
-  /// fail — and that is what this reports.
   @override
   Future<String?> preflight() async {
-    if (_fetchingManifest || isInstalling) return null;
-    _fetchingManifest = true;
+    if (_planning || isInstalling) return null;
+    _planning = true;
     notifyListeners();
+    final client = http.Client();
     try {
-      final fetched = await ToolManifest.fetchPublished(
-        _manifest.baseUrl,
-        cacheFile: paths.cachedManifestFile,
-      );
-      if (fetched != null && fetched.isNewerThan(_manifest)) {
-        _manifest = fetched;
-        _installer = null;
-        // Re-resolve before reading `installable`: a newer pin can change which
-        // tools qualify, and those are the only ones worth probing.
-        await refresh(deep: false);
+      final tools = <ToolId, PlannedTool>{};
+      for (final status in inventory.installable) {
+        tools[status.id] = await _planFor(client, status);
       }
-
-      final wanted = [for (final t in inventory.installable) t.id];
-      if (wanted.isEmpty) return null;
-
-      final probe = await _manifest.probeArtifacts(only: wanted);
-      if (!identical(probe.manifest, _manifest)) {
-        _manifest = probe.manifest;
-        _installer = null;
-        // Sizes live on the specs the inventory holds, so the dialog would
-        // quote the baked numbers without this.
-        await refresh(deep: false);
-      }
-      if (probe.unreachable.isEmpty) return null;
-      return _unreachableMessage(probe.unreachable);
+      _plan = InstallPlan(Map.unmodifiable(tools));
+      return null;
+    } on PlanException catch (e) {
+      return e.message;
     } catch (e) {
       debugPrint('ToolchainController: preflight failed: $e');
-      return 'Could not prepare the download: $e';
+      return 'Could not prepare the install: $e';
     } finally {
-      _fetchingManifest = false;
+      client.close();
+      _planning = false;
       _notify();
     }
   }
 
-  String _unreachableMessage(List<ToolId> ids) {
-    final names = [for (final id in ids) id.displayName];
-    final list = switch (names.length) {
-      1 => names.single,
-      2 => '${names.first} and ${names.last}',
-      _ => '${names.take(names.length - 1).join(', ')} and ${names.last}',
-    };
-    return 'Could not reach the download server for $list. '
-        'Check your internet connection and try again.';
+  Future<PlannedTool> _planFor(http.Client client, ToolStatus status) async {
+    switch (status.id) {
+      case ToolId.commandLineTools:
+        return const PlannedTool(id: ToolId.commandLineTools);
+      case ToolId.flutter:
+        final release = await fetchFlutterRelease(
+          client,
+          accepts: status.spec.accepts,
+          arch: currentPlatformKey() == 'macos-arm64' ? 'arm64' : 'x64',
+        );
+        // An update runs `flutter upgrade`, which picks its own release; the
+        // feed only says what that will be.
+        return status.action == ToolAction.update
+            ? PlannedTool(id: ToolId.flutter, version: release.version)
+            : PlannedTool(
+                id: ToolId.flutter,
+                version: release.version,
+                flutterRelease: release,
+              );
+      case ToolId.serverpodCli:
+        return PlannedTool(
+          id: ToolId.serverpodCli,
+          version: await fetchServerpodVersion(
+            client,
+            accepts: status.spec.accepts,
+          ),
+        );
+    }
   }
+
+  // -- install --------------------------------------------------------------
 
   /// Clears crashed installs left behind by a previous run. Cheap; fire and
   /// forget at startup.
-  Future<void> collectGarbage() => _requireInstaller.collectGarbage();
+  Future<void> collectGarbage() async {
+    try {
+      await installer.collectGarbage();
+    } catch (e) {
+      debugPrint('ToolchainController: garbage collection failed: $e');
+    }
+  }
 
-  /// Downloads and installs everything required that we can supply.
   @override
-  Future<void> installMissing() =>
-      install([for (final t in inventory.installable) t.id]);
-
-  @override
-  Future<void> install(List<ToolId> ids) async {
+  Future<void> installMissing() async {
     if (isInstalling) return;
-    final specs = [
-      for (final id in ids)
-        if (_manifest[id] case final spec?)
-          if (spec.artifactForCurrentPlatform != null) spec,
-    ];
-    if (specs.isEmpty) return;
+    final ids = [for (final t in inventory.installable) t.id];
+    if (ids.isEmpty) return;
+
+    if (!_plan.covers(ids)) {
+      final error = await preflight();
+      if (error != null) {
+        _installError = error;
+        _notify();
+        return;
+      }
+    }
 
     _installError = null;
     _finalizing = true;
-    _cancel = CancelToken();
-    _progress = InstallProgress(
-      tools: [
-        for (final spec in specs)
-          ToolProgress(
-            id: spec.id,
-            phase: ToolPhase.queued,
-            totalBytes: spec.artifactForCurrentPlatform!.downloadBytes,
-          ),
-      ],
-      startedAt: DateTime.now(),
-    );
-    notifyListeners();
-
-    try {
-      await _requireInstaller.installAll(
-        specs,
-        cancel: _cancel,
-        onProgress: (progress) {
-          _progress = progress;
-          notifyListeners();
-        },
+    final cancel = _cancel = CancelToken();
+    final startedAt = DateTime.now();
+    final state = <ToolId, ToolProgress>{
+      for (final id in ids) id: ToolProgress(id: id, phase: ToolPhase.queued),
+    };
+    void report() {
+      _progress = InstallProgress(
+        tools: state.values.toList(growable: false),
+        startedAt: startedAt,
       );
+      _notify();
+    }
 
-      final failed = _progress?.tools.where((t) => t.phase == ToolPhase.failed);
-      if (failed != null && failed.isNotEmpty) {
-        _installError =
-            failed.first.error ?? 'Some tools could not be installed.';
+    report();
+    try {
+      String? failure;
+      for (final id in ids) {
+        if (failure != null || cancel.isCancelled) {
+          state[id] = state[id]!.copyWith(phase: ToolPhase.cancelled);
+          report();
+          continue;
+        }
+        try {
+          await _installOne(id, cancel, (progress) {
+            state[id] = progress;
+            report();
+          });
+          state[id] = state[id]!.copyWith(phase: ToolPhase.done);
+        } on InstallCancelled {
+          state[id] = state[id]!.copyWith(phase: ToolPhase.cancelled);
+        } catch (e) {
+          // Each step needs the one before it — Flutter's `git`, the
+          // Serverpod CLI's `dart` — so the first failure ends the run.
+          failure = e is ToolInstallException ? e.message : '$e';
+          if (e is ToolInstallException && e.detail != null) {
+            debugPrint('ToolchainController: ${e.message}\n${e.detail}');
+          }
+          state[id] =
+              state[id]!.copyWith(phase: ToolPhase.failed, error: failure);
+        }
+        report();
+        // The next step reads what this one installed.
+        await refresh();
       }
+      _installError = failure;
       _cancel = null;
-      // Pick up whatever landed, even on partial failure.
       await refresh(deep: true);
     } finally {
       // A throw here would otherwise leave the UI reporting an install that is
@@ -255,98 +259,181 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
     }
   }
 
+  Future<void> _installOne(
+    ToolId id,
+    CancelToken cancel,
+    ProgressSink onProgress,
+  ) async {
+    switch (id) {
+      case ToolId.commandLineTools:
+        await _remember(await installer.installCommandLineTools(
+          onProgress: onProgress,
+          cancel: cancel,
+        ));
+
+      case ToolId.flutter:
+        final owned = _record[ToolId.flutter];
+        if (inventory[id]?.action == ToolAction.update && owned != null) {
+          await _remember(
+            await installer.upgradeFlutter(owned, onProgress: onProgress),
+          );
+          return;
+        }
+        final release = _plan[id]?.flutterRelease;
+        if (release == null) {
+          throw const ToolInstallException('No Flutter release was chosen.');
+        }
+        final installed = await installer.installFlutter(
+          release,
+          onProgress: onProgress,
+          cancel: cancel,
+          owned: owned,
+        );
+        // Recorded before the first run, so an install interrupted during the
+        // precache is still one App Studio knows it owns.
+        final kept = owned?.pathLines ?? const <RecordedPathLine>[];
+        final entry = RecordedInstall(
+          id: installed.id,
+          path: installed.path,
+          version: installed.version,
+          installedAt: installed.installedAt,
+          pathLines: kept,
+        );
+        await _remember(entry);
+        final line = await installer.configureFlutter(
+          entry.path!,
+          onProgress: onProgress,
+        );
+        if (line != null && !kept.contains(line)) {
+          await _remember(entry.copyWith(pathLines: [...kept, line]));
+        }
+
+      case ToolId.serverpodCli:
+        final dart = _current.dartExecutable;
+        if (dart == null) {
+          throw const ToolInstallException(
+            'The Serverpod CLI is installed with Flutter\'s Dart, and no '
+            'usable Flutter SDK was found.',
+          );
+        }
+        final version = _plan[id]?.version;
+        if (version == null) {
+          throw const ToolInstallException(
+            'No Serverpod CLI version was chosen.',
+          );
+        }
+        final executable = p.join(paths.dartInstallBinDir, 'serverpod');
+        final existedBefore = await File(executable).exists();
+        final previous = _record[ToolId.serverpodCli];
+        final installed = await installer.installServerpod(
+          version,
+          dartExecutable: dart,
+          onProgress: onProgress,
+        );
+        // A copy the user had put there with `dart install` themselves stays
+        // theirs; updating it does not make it ours to offer for removal.
+        if (previous == null &&
+            existedBefore &&
+            installed.pathLines.isEmpty) {
+          return;
+        }
+        await _remember(installed.copyWith(pathLines: {
+          ...?previous?.pathLines,
+          ...installed.pathLines,
+        }.toList()));
+    }
+  }
+
+  Future<void> _remember(RecordedInstall install) => _saveRecord(
+        _record.withTool(install),
+      );
+
+  Future<void> _saveRecord(InstallRecord record) async {
+    _record = record;
+    try {
+      await record.save(paths.installRecordFile);
+    } catch (e) {
+      // The tool is installed either way; losing the record only costs the
+      // uninstall prefill.
+      debugPrint('ToolchainController: could not save the install record: $e');
+    }
+  }
+
+  /// Writes the in-memory record back to disk — after an uninstall deleted
+  /// `~/.serverpod` out from under it.
+  Future<void> persistRecord() => _saveRecord(_record);
+
   @override
   void cancelInstall() {
     _cancel?.cancel();
     notifyListeners();
   }
 
-  @override
-  Future<void> uninstall(ToolId id) async {
-    final spec = _manifest[id];
-    if (spec == null || isBusy) return;
-    await _requireInstaller.uninstall(spec);
-    await refresh(deep: true);
-  }
-
-  // -- shell PATH -----------------------------------------------------------
-
-  ShellPathIntegration get shellPath => ShellPathIntegration(
-        binDir: paths.shimBinDir,
-        target: ShellTarget.resolve(),
-      );
+  // -- legacy ---------------------------------------------------------------
 
   @override
-  ShellPathState get shellPathState => _shellPathState;
-  ShellPathState _shellPathState = ShellPathState.absent;
-
-  @override
-  Future<void> refreshShellPathState() async {
-    _shellPathState = await shellPath.state();
-    notifyListeners();
-  }
-
-  /// Adds or removes the managed block in the user's shell config.
-  ///
-  /// App Studio does not need this — it sets PATH for everything it spawns.
-  /// It exists so an external editor or AI agent can find the tools, which is
-  /// why it is opt-in and never implied by installing.
-  @override
-  Future<String?> setShellPathEnabled(bool enabled, {bool force = false}) async {
+  Future<String?> removeLegacyInstall() async {
     try {
-      if (enabled) {
-        await ShimWriter(binDir: paths.shimBinDir).write(_current);
-        await shellPath.enable(force: force);
-      } else {
-        await shellPath.disable();
-        await ShimWriter(binDir: paths.shimBinDir).removeAll();
-      }
-      await refreshShellPathState();
+      await installer.removeLegacyInstall();
       return null;
-    } on ShellPathException catch (e) {
-      await refreshShellPathState();
-      return e.message;
     } catch (e) {
-      return '$e';
-    }
-  }
-
-  /// Rewrites everything that hardcoded the pre-rename directory.
-  Future<void> _repairAfterMigration() async {
-    try {
-      await refreshShellPathState();
-      if (_shellPathState == ShellPathState.present) {
-        // Re-render both the shims and the rc block against the new root.
-        await setShellPathEnabled(true);
-      } else {
-        await ShimWriter(binDir: paths.shimBinDir).write(_current);
-      }
+      debugPrint('ToolchainController: legacy cleanup failed: $e');
+      return 'Could not remove the tools an earlier version installed: $e';
+    } finally {
       await refresh();
-    } catch (e) {
-      debugPrint('ToolchainController: post-migration repair failed: $e');
     }
   }
 
-  /// Keeps the shims pointing at what is actually installed.
-  Future<void> _refreshShimsIfEnabled() async {
-    try {
-      // Read the rc file rather than trusting `_shellPathState`: at startup
-      // nothing has populated it yet, so a launch-time refresh would skip the
-      // rewrite and strand shims written while a tool was still unresolved —
-      // a `flutter` shim that answers "not installed" after the tool arrived.
-      _shellPathState = await shellPath.state();
-      if (_shellPathState != ShellPathState.present) return;
-      await ShimWriter(binDir: paths.shimBinDir).write(_current);
-    } catch (e) {
-      debugPrint('ToolchainController: could not refresh shims: $e');
+  // -- uninstall ------------------------------------------------------------
+
+  /// Tools App Studio installed that are still on this Mac — what uninstall
+  /// offers, in the order it removes them.
+  Future<List<ToolId>> removableTools() async {
+    final found = <ToolId>[];
+    for (final id in const [
+      ToolId.serverpodCli,
+      ToolId.flutter,
+      ToolId.commandLineTools,
+    ]) {
+      final entry = _record[id];
+      if (entry == null) continue;
+      final present = switch (id) {
+        // Only the standalone tools — a full Xcode is never ours.
+        ToolId.commandLineTools =>
+          await Directory('/Library/Developer/CommandLineTools').exists(),
+        ToolId.flutter =>
+          entry.path != null && await Directory(entry.path!).exists(),
+        ToolId.serverpodCli =>
+          entry.path != null && await File(entry.path!).exists(),
+      };
+      if (present) found.add(id);
     }
+    return found;
+  }
+
+  /// Removes one tool App Studio installed, and forgets it. Throws on failure,
+  /// so the uninstall can name what did not go.
+  Future<void> uninstallTool(ToolId id) async {
+    final entry = _record[id];
+    if (entry == null) return;
+    switch (id) {
+      case ToolId.serverpodCli:
+        await installer.uninstallServerpod(
+          entry,
+          dartExecutable: _current.dartExecutable,
+        );
+      case ToolId.flutter:
+        await installer.uninstallFlutter(entry);
+      case ToolId.commandLineTools:
+        await installer.uninstallCommandLineTools();
+    }
+    await _saveRecord(_record.without(id));
   }
 
   /// Runs `dart pub cache clean`, the sanctioned way to empty `~/.pub-cache`.
   ///
-  /// Separate from [uninstallAll] on purpose: that cache belongs to every Dart
-  /// project on the machine, so emptying it is never implied by removing our
-  /// tools. Returns an error message, or null on success.
+  /// Separate from removing tools on purpose: that cache belongs to every
+  /// Dart project on the machine. Returns an error message, or null.
   Future<String?> clearPubCache() async {
     final dart = _current.dartExecutable;
     if (dart == null) {
@@ -367,45 +454,42 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
     }
   }
 
-  // --- ToolsView -----------------------------------------------------------
-  //
-  // The tools pane talks to this interface rather than to the controller, so
-  // it never imports dart:io and stays previewable. What is left exists only so
-  // the widget layer does not have to reach through `paths` and `shellPath` to
-  // build strings.
+  // -- ToolsView ------------------------------------------------------------
+
+  ShellProfile get _profile => installer.profile;
+
+  @override
+  String get flutterInstallLabel => prettyPath(paths.flutterInstallDir);
+
+  @override
+  String? get shellProfileLabel =>
+      _profile.path == null ? null : prettyPath(_profile.path!);
+
+  @override
+  List<String> get manualPathLines {
+    if (_profile.isSupported) return const [];
+    return [
+      if (_record[ToolId.flutter]?.path case final root?)
+        flutterPathLine(p.join(root, 'bin'), home: paths.home),
+      if (_record.owns(ToolId.serverpodCli))
+        dartInstallPathLine(paths.dartInstallBinDir, home: paths.home),
+    ];
+  }
 
   @override
   Future<void> refreshDeep() => refresh(deep: true);
 
-  @override
-  String get shellName => shellPath.target.shell;
-
-  @override
-  String get shellRcLabel => prettyPath(shellPath.target.rcPath ?? '');
-
-  @override
-  String get shellExportLine => shellPath.exportLine;
-
-  /// Removes every managed tool. Host copies and `~/.pub-cache` are untouched.
-  Future<void> uninstallAll() async {
-    if (isBusy) return;
-    await _requireInstaller.uninstallAll();
-    _progress = null;
-    _installError = null;
-    await refresh(deep: true);
-  }
-
   /// Re-probes every tool. [deep] enumerates all candidates — used by the Tools
-  /// Manager, which shows alternatives; the startup path uses the fast form.
+  /// tab; the startup path uses the fast form.
   Future<void> refresh({bool deep = false}) async {
     if (_refreshing) return;
     _refreshing = true;
     notifyListeners();
     try {
       _current = await Toolchain.resolve(
-        manifest: _manifest,
-        requirements: _requirements,
+        manifest: manifest,
         paths: paths,
+        record: _record,
         deep: deep,
       );
     } catch (e) {
@@ -414,16 +498,6 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
       _refreshing = false;
       _notify();
     }
-    // Shims embed absolute paths, so they go stale after an install or removal.
-    await _refreshShimsIfEnabled();
-  }
-
-  /// Raises (or clears) the minimum version the user will accept for a tool,
-  /// then re-resolves so the change is visible immediately.
-  Future<void> setMinimumVersion(ToolId id, ToolVersion? version) async {
-    _requirements = _requirements.withMinimum(id, version);
-    await _requirements.save(paths.requirementsFile);
-    await refresh(deep: true);
   }
 
   void _notify() {

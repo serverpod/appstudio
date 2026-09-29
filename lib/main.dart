@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 
 import 'agent/agent_controller.dart';
+import 'analytics/app_analytics.dart';
 import 'mcp/mcp_controller.dart';
 import 'platform/compact_window.dart';
 import 'preview/compact_dialog_yield.dart';
@@ -66,6 +67,24 @@ Future<void> main() async {
     process: process,
     agent: agent,
     mcp: mcp,
+  );
+
+  // Installed before the first event so nothing fires into the no-op default.
+  // Debug builds send nothing unless APPSTUDIO_ANALYTICS=1 is set; see
+  // AppAnalytics.create.
+  installAppAnalytics(
+    AppAnalytics.create(
+      appVersion: updates.state.currentVersion,
+      appBuild: updates.state.currentBuild,
+    ),
+  );
+  appAnalytics.appOpened(
+    toolchainSetupRequired: toolchains.inventory.needsSetup,
+    toolSources: {
+      for (final tool in toolchains.inventory.tools.values)
+        tool.id.manifestId: tool.resolved?.source.name ?? 'missing',
+    },
+    recentProjectCount: session.recents.length,
   );
 
   runApp(
@@ -238,6 +257,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
     final path = widget.session.projectPath;
     if (path == _noticedProjectPath) return;
     _noticedProjectPath = path;
+    if (path != null) appAnalytics.projectOpened();
     // A compact window must not outlive the preview it was framing: closing or
     // switching projects goes back to the full window before anything else. A
     // no-op when not minimized.
@@ -341,9 +361,12 @@ class _AppStudioAppState extends State<AppStudioApp> {
       agent: widget.agent,
       mcp: widget.mcp,
     );
+    final removable = await widget.toolchains.removableTools();
+    if (!mounted || !navigatorContext.mounted) return;
     final choice = await showUninstallConfirmDialog(
       navigatorContext,
       measureBytes: uninstaller.measureSupportBytes,
+      removableTools: removable,
     );
     if (choice == null || !mounted) return;
 
@@ -351,7 +374,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
     // user still has open.
     _clearPushedRoutes();
     setState(() => _uninstalling = true);
-    final result = await uninstaller.run(clearPubCache: choice.clearPubCache);
+    final result = await uninstaller.run(choice);
 
     if (!mounted) return;
     setState(() {
@@ -427,8 +450,9 @@ class _AppStudioAppState extends State<AppStudioApp> {
           // ShadApp paints an opaque ColoredBox behind every route; in the
           // compact preview the native window is transparent and that box is
           // the one thing left that would hide the desktop behind the frame.
-          backgroundColor:
-              widget.previewMode.compactWindow ? Colors.transparent : null,
+          backgroundColor: widget.previewMode.compactWindow
+              ? Colors.transparent
+              : null,
           home: switch (_uninstalled) {
             final result? => UninstalledScreen(result: result),
             // The teardown stops the server and the agent, which takes a

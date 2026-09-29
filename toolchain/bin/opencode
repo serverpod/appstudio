@@ -1,9 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OC_VER="$(tr -d '[:space:]' < "$ROOT/pins/opencode")"
-if [[ -z "$OC_VER" ]]; then
-  echo "opencode pin missing at $ROOT/pins/opencode" >&2
-  exit 1
-fi
-exec "$ROOT/opencode/$OC_VER/opencode" "$@"

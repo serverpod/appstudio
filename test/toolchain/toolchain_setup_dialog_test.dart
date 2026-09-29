@@ -11,16 +11,13 @@ import 'package:shad/shad.dart';
 
 /// A [ToolsView] whose install is advanced a step at a time by the test.
 ///
-/// The tail of a real install — the deep re-probe, then the shell PATH write —
-/// is the whole subject here, and it is over in about a second on a real
-/// machine, which is exactly why it needs pinning.
+/// The tail of a real install — the deep re-probe after the last step — is the
+/// whole subject here, and it is over in about a second on a real machine,
+/// which is exactly why it needs pinning.
 class _ScriptedTools extends FakeToolsView {
   _ScriptedTools() : super(inventory: emptyInventory);
 
   final _install = Completer<void>();
-  final _shellPath = Completer<String?>();
-
-  bool shellPathRequested = false;
 
   static const _ids = [ToolId.flutter, ToolId.serverpodCli];
 
@@ -46,7 +43,7 @@ class _ScriptedTools extends FakeToolsView {
     return _install.future;
   }
 
-  /// Every download has landed. The controller holds `isInstalling` through the
+  /// Every step has finished. The controller holds `isInstalling` through the
   /// re-probe that follows, so this does not clear it.
   void landDownloads() {
     progress = _progressAt(ToolPhase.done);
@@ -61,14 +58,6 @@ class _ScriptedTools extends FakeToolsView {
     notifyListeners();
     _install.complete();
   }
-
-  @override
-  Future<String?> setShellPathEnabled(bool enabled, {bool force = false}) {
-    shellPathRequested = true;
-    return _shellPath.future;
-  }
-
-  void finishShellPath() => _shellPath.complete(null);
 }
 
 /// Stands in for `ShadApp.home` — the screen the dialog is raised over, and the
@@ -103,22 +92,33 @@ void main() {
   }
 
   Future<void> startDownload(WidgetTester tester, _ScriptedTools tools) async {
-    await tester.tap(find.text('Download'));
+    await tester.tap(find.text('Install'));
     await settle(tester);
   }
 
-  testWidgets('the plan gives way to progress on Download', (tester) async {
+  testWidgets('the plan names every place it will touch', (tester) async {
+    // It edits the user's machine outside the app, so it says where.
     final tools = _ScriptedTools();
     await pumpDialog(tester, tools);
 
-    expect(find.text('Download'), findsOneWidget);
+    expect(find.textContaining('~/develop/flutter'), findsOneWidget);
+    expect(find.textContaining('~/.zprofile'), findsOneWidget);
+    expect(find.textContaining('CLI with dart install'), findsOneWidget);
+    expect(find.textContaining('Apple\'s own installer'), findsOneWidget);
+  });
+
+  testWidgets('the plan gives way to progress on Install', (tester) async {
+    final tools = _ScriptedTools();
+    await pumpDialog(tester, tools);
+
+    expect(find.text('Install'), findsOneWidget);
     await startDownload(tester, tools);
 
     expect(find.text('Downloading Flutter SDK…'), findsOneWidget);
-    expect(find.text('Download'), findsNothing);
+    expect(find.text('Install'), findsNothing);
   });
 
-  testWidgets('the tail after the last download is "Finishing up", not the plan',
+  testWidgets('the tail after the last step is "Finishing up", not the plan',
       (tester) async {
     // The bug this pins: the plan came back for the second the re-probe took,
     // so the last thing the user saw before the dialog closed was the screen
@@ -131,11 +131,11 @@ void main() {
     await settle(tester);
 
     expect(find.text('Finishing up…'), findsOneWidget);
-    expect(find.text('Download'), findsNothing);
+    expect(find.text('Install'), findsNothing);
     expect(find.text('Quit'), findsNothing);
   });
 
-  testWidgets('cancel dims once there is no download left to stop',
+  testWidgets('cancel dims once there is no step left to stop',
       (tester) async {
     final tools = _ScriptedTools();
     await pumpDialog(tester, tools);
@@ -153,8 +153,7 @@ void main() {
     expect(cancel().enabled, isFalse);
   });
 
-  testWidgets('the shell PATH write is covered by the progress view too',
-      (tester) async {
+  testWidgets('closes itself once the install has returned', (tester) async {
     final tools = _ScriptedTools();
     await pumpDialog(tester, tools);
     await startDownload(tester, tools);
@@ -162,21 +161,11 @@ void main() {
     tools.landDownloads();
     tools.finishReprobe();
     await settle(tester);
-
-    // `installMissing` has returned and the inventory is complete, so the close
-    // condition is met — but the dialog owns one more step.
-    expect(tools.shellPathRequested, isTrue);
-    expect(find.byType(ToolchainSetupDialog), findsOneWidget);
-    expect(find.text('Finishing up…'), findsOneWidget);
-    expect(find.text('Download'), findsNothing);
-
-    tools.finishShellPath();
-    await settle(tester);
-    // A second pump for the route's exit transition: the pop lands in the first
-    // one's microtask drain, after that frame is already laid out.
+    // A second pump for the route's exit transition.
     await settle(tester);
 
     expect(find.byType(ToolchainSetupDialog), findsNothing);
+    expect(find.byKey(homeKey), findsOneWidget);
   });
 
   testWidgets('being closed from outside does not take the screen with it',
@@ -191,17 +180,16 @@ void main() {
     await startDownload(tester, tools);
 
     tools.landDownloads();
-    tools.finishReprobe();
     await settle(tester);
 
     // Taken off in the window where the route is gone from the history but this
     // dialog's State has not been unmounted yet — one frame wide, and the one
-    // the shell PATH write lands in.
+    // the end of the install lands in.
     final route = ModalRoute.of(
       tester.element(find.byType(ToolchainSetupDialog)),
     )!;
     tester.state<NavigatorState>(find.byType(Navigator)).removeRoute(route);
-    tools.finishShellPath();
+    tools.finishReprobe();
 
     await tester.pump();
     // Long enough for a page transition to have finished, which is what made
@@ -219,15 +207,14 @@ void main() {
     await startDownload(tester, tools);
 
     tools.landDownloads();
-    tools.installError = 'Git could not be installed.';
+    tools.installError = 'dart install serverpod_cli failed.';
     tools.finishReprobe();
-    tools.finishShellPath();
     await settle(tester);
 
     // The dialog is the only thing on screen, so a failure has to leave the
     // user something to press.
     expect(find.byType(ToolchainSetupDialog), findsOneWidget);
-    expect(find.text('Git could not be installed.'), findsOneWidget);
-    expect(find.text('Download'), findsOneWidget);
+    expect(find.text('dart install serverpod_cli failed.'), findsOneWidget);
+    expect(find.text('Install'), findsOneWidget);
   });
 }

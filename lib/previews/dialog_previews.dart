@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/widget_previews.dart';
 
+import '../ui/toolchain/toolchain_notices.dart';
 import '../ui/toolchain/toolchain_setup_dialog.dart';
 import '../ui/toolchain/toolchain_setup_screen.dart';
 import 'preview_app.dart';
@@ -11,8 +12,8 @@ import 'preview_data.dart';
 /// Run with `make previews`.
 ///
 /// This is the flow that is hardest to look at for real: it only happens on a
-/// machine with no toolchain, it takes a 662 MB download to reach the middle of
-/// it, and the failure states need a broken network. Everything here is driven
+/// machine with no toolchain, it takes Apple's installer and a 2 GB download to reach the
+/// middle of it, and the failure states need a broken network. Everything here is driven
 /// by the fakes in `preview_data.dart`, which implement the same [ToolsView]
 /// interface the app uses, so nothing can drift from what ships without the
 /// analyzer noticing.
@@ -69,43 +70,67 @@ const _kDialogSize = Size(720, 560);
 /// proportions.
 const _kScreenSize = Size(1000, 700);
 
+// --- Before the install -----------------------------------------------------
+
+/// Upgrading from a build that kept its own tools in Application Support.
+@BrightnessPreview(name: 'Legacy install notice')
+Widget toolchainLegacyNotice() => previewShell(const LegacyInstallNotice());
+
+/// The user's own Flutter is too old. App Studio did not install it, so it
+/// asks rather than touching it.
+@BrightnessPreview(name: 'Flutter needs updating')
+Widget toolchainManualUpdate() => previewShell(
+  ManualUpdateDialog(
+    toolchains: FakeToolsView(inventory: manualUpdateInventory),
+  ),
+);
+
 // --- The plan ---------------------------------------------------------------
 
-/// First run on a clean Mac: nothing found anywhere, so every tool is a
-/// download. The common case, and the one the copy is written for.
+/// First run on a clean Mac: nothing found anywhere, so everything is
+/// installed. The common case, and the one the copy is written for.
 @BrightnessPreview(name: 'Plan — nothing installed')
 Widget toolchainSetupPlan() => previewShell(
   ToolchainSetupDialog(toolchains: FakeToolsView(inventory: emptyInventory)),
 );
 
-/// The awkward middle: a host Git we can reuse, a Serverpod CLI too old to use
-/// (so the row reads `4.0.0-beta.0 → 4.0.0-beta.2`), and a missing OpenCode.
-/// This is the only state that shows the "Installed" badge and the replacing
-/// form of the version badge at the same time.
+/// The awkward middle: developer tools already there, Flutter to download, and
+/// a Serverpod CLI too old to use (so the row reads `3.4.1 → 4.0.3`).
 @BrightnessPreview(name: 'Plan — partly satisfied')
 Widget toolchainSetupPlanMixed() => previewShell(
   ToolchainSetupDialog(toolchains: FakeToolsView(inventory: mixedInventory)),
 );
 
-/// A download that died partway. The dialog comes back to the plan with the
+/// A step that failed partway. The dialog comes back to the plan with the
 /// banner over it, because the remaining tools are still the thing to do.
-@BrightnessPreview(name: 'Plan — after a failed download')
+@BrightnessPreview(name: 'Plan — after a failed install')
 Widget toolchainSetupPlanError() => previewShell(
   ToolchainSetupDialog(
     toolchains: FakeToolsView(
       inventory: emptyInventory,
       installError:
-          'Download failed: connection closed before the '
-          'archive finished (Flutter SDK).',
+          'Download failed. Check your internet connection and try again.',
     ),
   ),
 );
 
 // --- The install ------------------------------------------------------------
 
-/// Mid-download, with Flutter in flight and the Serverpod CLI queued behind it.
-/// Cancel is live here — this is the last point where there is anything to
-/// call off.
+/// Apple's installer is up; nothing to measure, so the bar is indeterminate
+/// and the caption says what to do.
+@BrightnessPreview(name: 'Installing — waiting for Apple')
+Widget toolchainSetupWaitingForApple() => previewShell(
+  ToolchainSetupDialog(
+    toolchains: FakeToolsView(
+      inventory: emptyInventory,
+      progress: waitingForAppleProgress,
+      isInstalling: true,
+      isBusy: true,
+    ),
+  ),
+);
+
+/// Mid-download, with the Serverpod CLI queued behind Flutter.
 @BrightnessPreview(name: 'Installing — downloading')
 Widget toolchainSetupDownloading() => previewShell(
   ToolchainSetupDialog(
@@ -118,10 +143,10 @@ Widget toolchainSetupDownloading() => previewShell(
   ),
 );
 
-/// The tail: every byte has landed and the re-probe and the shell `PATH` write
-/// are still out. The plan must *not* come back here — it is the last thing
-/// seen before the dialog closes, and it reads as the install being discarded.
-/// Cancel dims rather than disappearing, because there is nothing left to stop.
+/// The tail: every step has finished and the re-probe is still out. The plan
+/// must *not* come back here — it is the last thing seen before the dialog
+/// closes, and it reads as the install being discarded. Cancel dims rather
+/// than disappearing, because there is nothing left to stop.
 @BrightnessPreview(name: 'Installing — finishing up')
 Widget toolchainSetupFinishing() => previewShell(
   ToolchainSetupDialog(
@@ -136,14 +161,13 @@ Widget toolchainSetupFinishing() => previewShell(
 
 // --- Preflight --------------------------------------------------------------
 
-/// No route to the bucket, so there is no plan to show. Try again and Quit are
-/// the only honest choices: nothing downstream works without these tools.
+/// No route to flutter.dev or pub.dev, so there is no plan to show. Try again
+/// and Quit are the only honest choices.
 @BrightnessPreview(name: 'Preflight failed')
 Widget toolchainSetupPreflightError() => previewShell(
   const ToolchainSetupErrorDialog(
     message:
-        'Could not reach the download server for Flutter SDK and '
-        'Serverpod CLI. Check your internet connection and try again.',
+        'Could not reach flutter.dev to look up the latest Flutter release.',
   ),
 );
 

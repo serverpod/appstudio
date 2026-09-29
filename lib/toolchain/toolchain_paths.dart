@@ -2,83 +2,80 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
-import 'toolchain_manifest.dart';
-
 /// Directory name under `~/Library/Application Support`.
 const kAppSupportDirName = 'App Studio';
 
-/// What the directory was called before the product was renamed. Kept so
-/// [ToolchainPaths.migrateLegacyDirectory] can move an existing install rather
-/// than stranding up to ~1.9 GB of downloaded tools.
+/// What the directory was called before the product was renamed. Only ever
+/// deleted now — see [ToolchainPaths.legacyPaths].
 const kLegacyAppSupportDirName = 'AppStudio';
 
-/// Every managed path App Studio owns.
+/// Every path the toolchain reads or writes.
 ///
 /// Deliberately built from `HOME` rather than `path_provider`, which resolves
 /// to `~/Library/Application Support/dev.serverpod.appstudio` — a bundle id,
 /// not a name anyone recognises in Finder.
 class ToolchainPaths {
-  const ToolchainPaths(this.appSupportRoot);
+  const ToolchainPaths({required this.home, required this.appSupportRoot});
 
   /// Resolves from `HOME`. Falls back to a temp dir so a missing HOME degrades
   /// to "nothing installed" instead of throwing during startup.
   factory ToolchainPaths.resolve() {
-    final home = Platform.environment['HOME'];
-    if (home == null || home.isEmpty) {
-      return ToolchainPaths(
-        p.join(Directory.systemTemp.path, kAppSupportDirName),
-      );
-    }
-    return ToolchainPaths(
-      p.join(home, 'Library', 'Application Support', kAppSupportDirName),
-    );
+    final env = Platform.environment['HOME'];
+    final home = env == null || env.isEmpty ? Directory.systemTemp.path : env;
+    return ToolchainPaths.forHome(home);
   }
 
+  factory ToolchainPaths.forHome(String home) => ToolchainPaths(
+        home: home,
+        appSupportRoot:
+            p.join(home, 'Library', 'Application Support', kAppSupportDirName),
+      );
+
+  final String home;
+
+  /// App Studio's own data. No tools live here any more.
   final String appSupportRoot;
 
-  /// Old location, alongside the current one.
-  String get legacyAppSupportRoot =>
-      p.join(p.dirname(appSupportRoot), kLegacyAppSupportDirName);
+  /// Where a Flutter SDK App Studio installs goes: the directory Flutter's own
+  /// macOS instructions extract into, so the result is indistinguishable from
+  /// an install done by hand.
+  String get flutterInstallDir => p.join(home, 'develop', 'flutter');
 
-  /// Moves a pre-rename install into place.
-  ///
-  /// A same-volume rename, so it is instant even with a full toolchain. Returns
-  /// true when something was moved. Never throws: failing to migrate must
-  /// degrade to "nothing installed", not to a broken launch.
-  Future<bool> migrateLegacyDirectory() async {
-    if (appSupportRoot == legacyAppSupportRoot) return false;
-    try {
-      final legacy = Directory(legacyAppSupportRoot);
-      if (!await legacy.exists()) return false;
-      // Never clobber a real current directory; the user would lose it.
-      if (await Directory(appSupportRoot).exists()) return false;
-      await legacy.rename(appSupportRoot);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
+  /// Where `dart install` puts executables on macOS.
+  String get dartInstallBinDir =>
+      p.join(home, 'Library', 'Application Support', 'Dart', 'install', 'bin');
 
-  String get toolchainRoot => p.join(appSupportRoot, 'toolchain');
+  /// The Serverpod CLI's own state directory. The install record lives here
+  /// too, because it is about Serverpod tooling rather than about App Studio.
+  String get serverpodStateDir => p.join(home, '.serverpod');
 
-  /// Shim wrappers, outside `toolchain/` so "uninstall all" can wipe the
-  /// toolchain while leaving a shim that explains what happened.
-  String get shimBinDir => p.join(appSupportRoot, 'bin');
+  /// What App Studio installed, and which `PATH` lines it added for it.
+  String get installRecordFile =>
+      p.join(serverpodStateDir, 'app_studio_installs.json');
 
-  /// Dot-prefixed working directories, skipped by resolution so a crashed
-  /// install can never be mistaken for an installed tool.
-  String get downloadsDir => p.join(toolchainRoot, '.downloads');
-  String get stagingDir => p.join(toolchainRoot, '.staging');
-  String get trashDir => p.join(toolchainRoot, '.trash');
-  String get lockFile => p.join(toolchainRoot, '.lock');
+  /// Scratch space for the Flutter archive while it downloads.
+  String get downloadsDir => p.join(appSupportRoot, 'downloads');
 
-  String get requirementsFile => p.join(toolchainRoot, 'requirements.json');
-  String get installedFile => p.join(toolchainRoot, 'installed.json');
-  String get cachedManifestFile => p.join(toolchainRoot, 'manifest.json');
+  // -- legacy ---------------------------------------------------------------
 
-  String installDirFor(ToolSpec spec) =>
-      p.join(toolchainRoot, spec.installDir);
+  /// Where earlier builds kept their own copies of every tool.
+  String get legacyToolchainRoot => p.join(appSupportRoot, 'toolchain');
 
-  /// True for the scratch directories that resolution must ignore.
-  static bool isWorkingDir(String name) => name.startsWith('.');
+  /// Where earlier builds wrote wrapper scripts, for the shell `PATH` block.
+  String get legacyShimDir => p.join(appSupportRoot, 'bin');
+
+  /// Everything a build before this one may have left behind for tools. The
+  /// pre-rename directory goes whole: nothing current reads it.
+  List<String> get legacyPaths => [
+        legacyToolchainRoot,
+        legacyShimDir,
+        p.join(p.dirname(appSupportRoot), kLegacyAppSupportDirName),
+      ];
+
+  /// Every rc file an earlier build could have put its `PATH` block in.
+  List<String> get legacyShellFiles => [
+        p.join(home, '.zshrc'),
+        p.join(home, '.bash_profile'),
+        p.join(home, '.profile'),
+      ];
 }

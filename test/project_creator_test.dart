@@ -2,10 +2,12 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:appstudio/analytics/app_analytics.dart';
 import 'package:appstudio/process/project_creator.dart';
 import 'package:appstudio/session/project_settings.dart';
 
 import 'support/agent_flag.dart';
+import 'support/recording_analytics.dart';
 import 'support/toolchain_support.dart';
 
 /// Tail of a pubspec written by `serverpod create` (4.0.0-beta.1).
@@ -96,6 +98,74 @@ void main() {
 
       final settings = await ProjectSettings.load(project.path);
       expect(settings.editors, isEmpty);
+    });
+  });
+
+  group('create analytics', () {
+    late Directory parent;
+
+    setUp(() {
+      parent = Directory.systemTemp.createTempSync('appstudio_creator_test');
+    });
+
+    tearDown(() {
+      if (parent.existsSync()) parent.deleteSync(recursive: true);
+    });
+
+    test('a rejected name reports a validation failure', () async {
+      final transport = installRecordingAnalytics(addTearDown: addTearDown);
+      final creator = ProjectCreator(
+        toolchains: await emptyToolchainController(),
+      );
+      await expectLater(
+        creator.create(name: 'Bad Name', parentDirectory: parent.path),
+        throwsA(isA<ProjectCreationException>()),
+      );
+      await appAnalytics.flush();
+
+      expect(transport.events, ['app_studio.project_created']);
+      final props = transport.propertiesOf(0);
+      expect(props['success'], isFalse);
+      expect(props['failure_stage'], 'validation');
+      expect(props['ides'], isEmpty);
+      expect(props['duration_ms'], isA<int>());
+    });
+
+    test(
+      'a CLI that cannot run reports the cli stage with the picks',
+      () async {
+        final transport = installRecordingAnalytics(addTearDown: addTearDown);
+        // The empty toolchain has no Serverpod CLI, so the run fails before a
+        // process is spawned — same stage as a non-zero exit.
+        final creator = ProjectCreator(
+          toolchains: await emptyToolchainController(),
+        );
+        await expectLater(
+          creator.create(
+            name: 'fine',
+            parentDirectory: parent.path,
+            ides: {IdeIntegration.vscode, IdeIntegration.cursor},
+          ),
+          throwsA(isA<ProjectCreationException>()),
+        );
+        await appAnalytics.flush();
+
+        final props = transport.propertiesOf(0);
+        expect(props['failure_stage'], 'cli');
+        expect(props['ides'], ['cursor', 'vscode']);
+      },
+    );
+
+    test('nothing is sent while no sink is installed', () async {
+      final creator = ProjectCreator(
+        toolchains: await emptyToolchainController(),
+      );
+      await expectLater(
+        creator.create(name: 'fine', parentDirectory: parent.path),
+        throwsA(isA<ProjectCreationException>()),
+      );
+      // No throw and no recording: the default sink is the disabled one.
+      expect(appAnalytics.enabled, isFalse);
     });
   });
 

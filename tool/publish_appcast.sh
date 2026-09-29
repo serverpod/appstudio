@@ -64,9 +64,9 @@ gcloud_storage() {
 # ---------------------------------------------------------------------------
 #
 # Scoped to where a human would actually drop one: the repo root, tool/ and
-# macos/. Scanning everything matches vendored third-party trees — the Flutter
-# SDK under toolchain/ ships dummy TLS certs in its own test fixtures — and a
-# tripwire that cries wolf on every run is one that gets disabled.
+# macos/. Scanning everything matches vendored third-party trees — a Flutter
+# SDK ships dummy TLS certs in its own test fixtures — and a tripwire that
+# cries wolf on every run is one that gets disabled.
 LEAKED="$(
   {
     find "$ROOT_DIR" -maxdepth 1 -type f \

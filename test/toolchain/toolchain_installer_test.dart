@@ -1,373 +1,297 @@
-import 'dart:convert';
 import 'dart:io';
 
-import 'package:appstudio/toolchain/install_progress.dart';
+import 'package:appstudio/toolchain/install_plan.dart';
+import 'package:appstudio/toolchain/install_record.dart';
+import 'package:appstudio/toolchain/shell_profile.dart';
 import 'package:appstudio/toolchain/tool_status.dart';
+import 'package:appstudio/toolchain/tool_version.dart';
 import 'package:appstudio/toolchain/toolchain_installer.dart';
-import 'package:appstudio/toolchain/platform_key.dart';
-import 'package:appstudio/toolchain/toolchain_manifest.dart';
 import 'package:appstudio/toolchain/toolchain_paths.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:path/path.dart' as p;
 
-/// Serves one tarball on loopback, with switches for the failure modes that
-/// matter: a server that ignores Range, and one that corrupts the body.
-class _ArtifactServer {
-  _ArtifactServer(this._bytes);
-
-  final List<int> _bytes;
-  late HttpServer _server;
-
-  bool honourRange = true;
-  bool corrupt = false;
-
-  /// Requests seen, for asserting a resume actually resumed.
-  final List<String?> rangeHeaders = [];
-
-  Uri get url => Uri.parse('http://127.0.0.1:${_server.port}/tool.tar.gz');
-
-  Future<void> start() async {
-    _server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    _server.listen((request) async {
-      final range = request.headers.value(HttpHeaders.rangeHeader);
-      rangeHeaders.add(range);
-
-      var body = corrupt ? _corrupted() : _bytes;
-      var status = HttpStatus.ok;
-
-      if (range != null && honourRange) {
-        final start = int.parse(RegExp(r'bytes=(\d+)-').firstMatch(range)!.group(1)!);
-        if (start >= body.length) {
-          request.response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
-          await request.response.close();
-          return;
-        }
-        body = body.sublist(start);
-        status = HttpStatus.partialContent;
-      }
-
-      request.response.statusCode = status;
-      request.response.headers.contentType =
-          ContentType('application', 'gzip');
-      request.response.add(body);
-      await request.response.close();
-    });
-  }
-
-  List<int> _corrupted() {
-    final copy = [..._bytes];
-    copy[copy.length ~/ 2] ^= 0xFF;
-    return copy;
-  }
-
-  Future<void> stop() => _server.close(force: true);
-}
-
+/// Everything here runs against a scratch home: the installer writes to
+/// `~/develop`, `~/.zprofile` and `~/Library`, and a test that reached the
+/// real ones would edit the machine running it.
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
-
-  late Directory temp;
+  late Directory tmp;
   late ToolchainPaths paths;
-  late List<int> archiveBytes;
-  late String archiveSha;
-  late _ArtifactServer server;
+  late String zprofile;
 
   setUp(() async {
-    // The Flutter test binding installs an HttpOverrides that fails every
-    // request, to stop tests hitting the network. This test serves its own
-    // artifact on loopback, so restore the real client.
-    HttpOverrides.global = null;
-
-    temp = await Directory.systemTemp.createTemp('appstudio_installer');
-    paths = ToolchainPaths(temp.path);
-
-    // Build a real tarball with one top-level dir, exactly like publish does.
-    final source = Directory('${temp.path}/src/opencode-1.18.4');
-    await Directory('${source.path}/nested').create(recursive: true);
-    await File('${source.path}/opencode').writeAsString('#!/bin/sh\necho hi\n');
-    await File('${source.path}/nested/data.txt').writeAsString('payload');
-
-    final tarPath = '${temp.path}/artifact.tar.gz';
-    final result = await Process.run('/usr/bin/tar', [
-      '--no-mac-metadata',
-      '-czf',
-      tarPath,
-      '-C',
-      '${temp.path}/src',
-      'opencode-1.18.4',
-    ]);
-    expect(result.exitCode, 0, reason: '${result.stderr}');
-
-    archiveBytes = await File(tarPath).readAsBytes();
-    archiveSha = sha256.convert(archiveBytes).toString();
-
-    server = _ArtifactServer(archiveBytes);
-    await server.start();
+    tmp = await Directory.systemTemp.createTemp('installer');
+    paths = ToolchainPaths.forHome(tmp.path);
+    zprofile = p.join(tmp.path, '.zprofile');
   });
 
   tearDown(() async {
-    await server.stop();
-    // uninstall/uninstallAll rename first and delete in the background on
-    // purpose, so the UI is correct immediately. That can still be in flight
-    // here — a vanished temp dir is expected, not a failure.
-    try {
-      if (await temp.exists()) await temp.delete(recursive: true);
-    } on FileSystemException {
-      // Concurrent background cleanup got there first.
-    }
+    if (await tmp.exists()) await tmp.delete(recursive: true);
   });
 
-  /// A manifest whose single tool points at the loopback server.
-  ToolManifest manifestFor({String? sha, int? downloadBytes}) {
-    return ToolManifest.tryParse(jsonEncode({
-      'schemaVersion': 1,
-      'manifestId': 'test',
-      'baseUrl': '${server.url.origin}/',
-      'tools': [
-        {
-          'id': 'opencode',
-          'displayName': 'OpenCode',
-          'version': '1.18.4',
-          'build': 1,
-          'hostAccepts': '>=1.0.0',
-          'required': true,
-          'installDir': 'opencode/1.18.4',
-          'platforms': {
-            currentPlatformKey(): {
-              'path': 'tool.tar.gz',
-              'sha256': sha ?? archiveSha,
-              'downloadBytes': downloadBytes ?? archiveBytes.length,
-              'installedBytes': 1024,
-              'format': 'tar.gz',
-              'stripComponents': 1,
-            },
-          },
-          'entrypoints': {'opencode': 'opencode'},
-          'metadata': const <String, dynamic>{},
-        },
-      ],
-    }))!;
-  }
+  ToolchainInstaller installer({
+    http.Client? client,
+    String? loginPath,
+    bool supportedShell = true,
+  }) =>
+      ToolchainInstaller(
+        paths: paths,
+        httpClient: client ?? MockClient((_) async => http.Response('', 404)),
+        loginShellPath: () async => loginPath,
+        profile: ShellProfile(
+          shell: supportedShell ? 'zsh' : 'fish',
+          path: supportedShell ? zprofile : null,
+        ),
+      );
 
-  ToolchainInstaller installerFor(ToolManifest manifest) {
-    final installer = ToolchainInstaller(paths: paths, manifest: manifest);
-    addTearDown(installer.close);
-    return installer;
-  }
-
-  Future<List<ToolProgress>> runInstall(
-    ToolchainInstaller installer,
-    ToolSpec spec, {
-    CancelToken? cancel,
-  }) async {
-    final seen = <ToolProgress>[];
-    await installer.install(
-      spec,
-      cancel: cancel,
-      onProgress: seen.add,
+  /// A zip laid out like the official archive: one top-level `flutter/`.
+  Future<List<int>> flutterZip() async {
+    final src = Directory(p.join(tmp.path, 'zipsrc'));
+    final bin = File(p.join(src.path, 'flutter', 'bin', 'flutter'));
+    await bin.parent.create(recursive: true);
+    await bin.writeAsString('#!/bin/sh\necho flutter\n');
+    await Process.run('/bin/chmod', ['755', bin.path]);
+    final zip = p.join(tmp.path, 'flutter.zip');
+    final result = await Process.run(
+      '/usr/bin/zip',
+      ['-qry', zip, 'flutter'],
+      workingDirectory: src.path,
     );
-    return seen;
+    expect(result.exitCode, 0, reason: '${result.stderr}');
+    await src.delete(recursive: true);
+    final bytes = await File(zip).readAsBytes();
+    await File(zip).delete();
+    return bytes;
   }
 
-  String installedDir() => '${paths.toolchainRoot}/opencode/1.18.4';
+  FlutterRelease releaseFor(List<int> bytes, {String? sha}) => FlutterRelease(
+        version: ToolVersion.tryParse('3.47.5')!,
+        archiveUrl: Uri.parse('https://example.invalid/flutter.zip'),
+        sha256: sha ?? sha256.convert(bytes).toString(),
+        downloadBytes: bytes.length,
+      );
 
-  test('installs, stripping the top-level directory', () async {
-    final manifest = manifestFor();
-    await runInstall(installerFor(manifest), manifest[ToolId.opencode]!);
+  http.Client serving(List<int> bytes) =>
+      MockClient((_) async => http.Response.bytes(bytes, 200));
 
-    expect(File('${installedDir()}/opencode').existsSync(), isTrue);
-    expect(File('${installedDir()}/nested/data.txt').readAsStringSync(), 'payload');
-    // The archive's own top-level directory must not survive.
-    expect(Directory('${installedDir()}/opencode-1.18.4').existsSync(), isFalse);
-  });
+  group('installFlutter', () {
+    test('unpacks the official archive into ~/develop/flutter', () async {
+      final bytes = await flutterZip();
 
-  test('records what it installed', () async {
-    final manifest = manifestFor();
-    await runInstall(installerFor(manifest), manifest[ToolId.opencode]!);
-
-    final installed = jsonDecode(
-      File(paths.installedFile).readAsStringSync(),
-    ) as Map<String, dynamic>;
-    expect(installed['opencode']['version'], '1.18.4');
-    expect(installed['opencode']['sha256'], archiveSha);
-  });
-
-  test('reports progress through to done', () async {
-    final manifest = manifestFor();
-    final seen = await runInstall(installerFor(manifest), manifest[ToolId.opencode]!);
-
-    final phases = seen.map((p) => p.phase).toSet();
-    expect(phases, contains(ToolPhase.downloading));
-    expect(phases, contains(ToolPhase.verifying));
-    expect(phases, contains(ToolPhase.extracting));
-    expect(seen.last.phase, ToolPhase.done);
-  });
-
-  test('a hash mismatch installs nothing', () async {
-    final manifest = manifestFor(sha: 'a' * 64);
-    final installer = installerFor(manifest);
-
-    await expectLater(
-      installer.install(
-        manifest[ToolId.opencode]!,
+      final entry = await installer(client: serving(bytes)).installFlutter(
+        releaseFor(bytes),
         onProgress: (_) {},
-      ),
-      throwsA(isA<ToolInstallException>()),
-    );
+        cancel: CancelToken(),
+      );
 
-    // Nothing installed, and the bad archive is gone rather than retried.
-    expect(Directory(installedDir()).existsSync(), isFalse);
-    expect(
-      Directory(paths.downloadsDir).listSync().where(
-            (e) => e.path.endsWith('.tar.gz'),
-          ),
-      isEmpty,
-    );
-  });
+      expect(entry.path, p.join(tmp.path, 'develop', 'flutter'));
+      expect(entry.version, '3.47.5');
+      final flutter = File(p.join(entry.path!, 'bin', 'flutter'));
+      expect(await flutter.exists(), isTrue);
+      // unzip keeps the exec bit the SDK's scripts need.
+      expect((await flutter.stat()).mode & 0x49, isNonZero);
+      // Neither the archive nor the staging directory is left behind.
+      expect(await Directory(paths.downloadsDir).list().isEmpty, isTrue);
+      expect(
+        await Directory(p.join(tmp.path, 'develop')).list().map((e) => p.basename(e.path)).toList(),
+        ['flutter'],
+      );
+    });
 
-  test('a corrupted body is caught by verification, not extracted', () async {
-    server.corrupt = true;
-    final manifest = manifestFor();
-    final installer = installerFor(manifest);
+    test('refuses a download whose checksum does not match', () async {
+      final bytes = await flutterZip();
 
-    await expectLater(
-      installer.install(manifest[ToolId.opencode]!, onProgress: (_) {}),
-      throwsA(
-        isA<ToolInstallException>().having(
+      await expectLater(
+        installer(client: serving(bytes)).installFlutter(
+          releaseFor(bytes, sha: 'f' * 64),
+          onProgress: (_) {},
+          cancel: CancelToken(),
+        ),
+        throwsA(isA<ToolInstallException>()),
+      );
+      expect(await Directory(paths.flutterInstallDir).exists(), isFalse);
+    });
+
+    test('never overwrites a folder the user put there', () async {
+      final theirs = File(p.join(paths.flutterInstallDir, 'notes.txt'));
+      await theirs.parent.create(recursive: true);
+      await theirs.writeAsString('mine');
+      final bytes = await flutterZip();
+
+      await expectLater(
+        installer(client: serving(bytes)).installFlutter(
+          releaseFor(bytes),
+          onProgress: (_) {},
+          cancel: CancelToken(),
+        ),
+        throwsA(isA<ToolInstallException>().having(
           (e) => e.message,
           'message',
-          contains('corrupted'),
-        ),
-      ),
-    );
-    expect(Directory(installedDir()).existsSync(), isFalse);
-  });
+          contains('~/develop/flutter already exists'),
+        )),
+      );
+      expect(await theirs.readAsString(), 'mine');
+    });
 
-  test('resumes from a partial download', () async {
-    // Leave a half-written .part behind, as a killed app would.
-    await Directory(paths.downloadsDir).create(recursive: true);
-    final part = File('${paths.downloadsDir}/opencode-1.18.4.tar.gz.part');
-    await part.writeAsBytes(archiveBytes.sublist(0, archiveBytes.length ~/ 2));
+    test('replaces a copy App Studio installed there itself', () async {
+      final old = File(p.join(paths.flutterInstallDir, 'old-marker'));
+      await old.parent.create(recursive: true);
+      await old.writeAsString('old');
+      final bytes = await flutterZip();
 
-    final manifest = manifestFor();
-    await runInstall(installerFor(manifest), manifest[ToolId.opencode]!);
-
-    expect(server.rangeHeaders.single, isNotNull,
-        reason: 'should have sent a Range header');
-    expect(File('${installedDir()}/opencode').existsSync(), isTrue);
-  });
-
-  test('restarts cleanly when the server ignores Range', () async {
-    server.honourRange = false;
-    await Directory(paths.downloadsDir).create(recursive: true);
-    final part = File('${paths.downloadsDir}/opencode-1.18.4.tar.gz.part');
-    await part.writeAsBytes(archiveBytes.sublist(0, archiveBytes.length ~/ 2));
-
-    final manifest = manifestFor();
-    await runInstall(installerFor(manifest), manifest[ToolId.opencode]!);
-
-    // A 200 must truncate, not append — otherwise the hash would fail.
-    expect(File('${installedDir()}/opencode').existsSync(), isTrue);
-  });
-
-  test('an upgrade replaces the tree without leaving the old one', () async {
-    final manifest = manifestFor();
-    final spec = manifest[ToolId.opencode]!;
-    await runInstall(installerFor(manifest), spec);
-
-    await File('${installedDir()}/stale.txt').writeAsString('old');
-    await runInstall(installerFor(manifest), spec);
-
-    expect(File('${installedDir()}/opencode').existsSync(), isTrue);
-    expect(File('${installedDir()}/stale.txt').existsSync(), isFalse,
-        reason: 'the swap must replace, not merge');
-  });
-
-  test('cancelling leaves nothing installed', () async {
-    final manifest = manifestFor();
-    final installer = installerFor(manifest);
-    final cancel = CancelToken()..cancel();
-
-    await expectLater(
-      installer.install(
-        manifest[ToolId.opencode]!,
-        cancel: cancel,
+      await installer(client: serving(bytes)).installFlutter(
+        releaseFor(bytes),
         onProgress: (_) {},
-      ),
-      throwsA(anything),
-    );
-    expect(Directory(installedDir()).existsSync(), isFalse);
-  });
-
-  test('uninstall removes the managed tree', () async {
-    final manifest = manifestFor();
-    final spec = manifest[ToolId.opencode]!;
-    final installer = installerFor(manifest);
-    await runInstall(installer, spec);
-    expect(Directory(installedDir()).existsSync(), isTrue);
-
-    await installer.uninstall(spec);
-    expect(Directory(installedDir()).existsSync(), isFalse);
-
-    final installed = jsonDecode(
-      File(paths.installedFile).readAsStringSync(),
-    ) as Map<String, dynamic>;
-    expect(installed.containsKey('opencode'), isFalse);
-  });
-
-  test('uninstallAll clears the toolchain root only', () async {
-    final manifest = manifestFor();
-    await runInstall(installerFor(manifest), manifest[ToolId.opencode]!);
-
-    // Something outside toolchain/ that must survive.
-    final keep = File('${paths.appSupportRoot}/keep-me.txt');
-    await keep.writeAsString('mine');
-
-    await installerFor(manifest).uninstallAll();
-
-    expect(Directory(paths.toolchainRoot).existsSync(), isFalse);
-    expect(keep.existsSync(), isTrue);
-  });
-
-  test('garbage collection clears staging and trash', () async {
-    await Directory('${paths.stagingDir}/leftover').create(recursive: true);
-    await Directory('${paths.trashDir}/leftover').create(recursive: true);
-
-    await installerFor(manifestFor()).collectGarbage();
-
-    expect(Directory(paths.stagingDir).existsSync(), isFalse);
-    expect(Directory(paths.trashDir).existsSync(), isFalse);
-  });
-
-  test('refuses a tool with no artifact for this platform', () async {
-    final manifest = ToolManifest.tryParse(jsonEncode({
-      'schemaVersion': 1,
-      'manifestId': 'test',
-      'baseUrl': '${server.url.origin}/',
-      'tools': [
-        {
-          'id': 'opencode',
-          'version': '1.18.4',
-          'hostAccepts': '*',
-          'installDir': 'opencode/1.18.4',
-          'platforms': const <String, dynamic>{},
-          'entrypoints': {'opencode': 'opencode'},
-        },
-      ],
-    }))!;
-
-    await expectLater(
-      installerFor(manifest).install(
-        manifest[ToolId.opencode]!,
-        onProgress: (_) {},
-      ),
-      throwsA(
-        isA<ToolInstallException>().having(
-          (e) => e.message,
-          'message',
-          contains('not available'),
+        cancel: CancelToken(),
+        owned: RecordedInstall(
+          id: ToolId.flutter,
+          path: paths.flutterInstallDir,
+          installedAt: DateTime.utc(2026),
         ),
-      ),
-    );
+      );
+
+      expect(await old.exists(), isFalse);
+      expect(
+        await File(p.join(paths.flutterInstallDir, 'bin', 'flutter')).exists(),
+        isTrue,
+      );
+    });
+
+    test('a cancelled download installs nothing', () async {
+      final bytes = await flutterZip();
+      final cancel = CancelToken()..cancel();
+
+      await expectLater(
+        installer(client: serving(bytes)).installFlutter(
+          releaseFor(bytes),
+          onProgress: (_) {},
+          cancel: cancel,
+        ),
+        throwsA(isA<InstallCancelled>()),
+      );
+      expect(await Directory(paths.flutterInstallDir).exists(), isFalse);
+    });
+  });
+
+  group('addToShellPath', () {
+    const dir = '/Users/alex/develop/flutter/bin';
+    const line = r'export PATH="$HOME/develop/flutter/bin:$PATH"';
+
+    test('writes the line and returns it for the record', () async {
+      final written = await installer().addToShellPath(dir, line);
+
+      expect(written, RecordedPathLine(file: zprofile, line: line));
+      expect(await File(zprofile).readAsString(), '$line\n');
+    });
+
+    test('writes nothing when the shell already has the directory', () async {
+      // Someone already set this up; a second line would be clutter, and
+      // recording it would have uninstall remove a line that is not ours.
+      final written = await installer(loginPath: '/usr/bin:$dir')
+          .addToShellPath(dir, line);
+
+      expect(written, isNull);
+      expect(await File(zprofile).exists(), isFalse);
+    });
+
+    test('writes nothing for a shell it cannot edit', () async {
+      expect(
+        await installer(supportedShell: false).addToShellPath(dir, line),
+        isNull,
+      );
+    });
+  });
+
+  group('uninstall', () {
+    test('Flutter goes with exactly its own line', () async {
+      final root = Directory(paths.flutterInstallDir);
+      await root.create(recursive: true);
+      const line = r'export PATH="$HOME/develop/flutter/bin:$PATH"';
+      await File(zprofile).writeAsString('# mine\n$line\nexport FOO=1\n');
+
+      await installer().uninstallFlutter(RecordedInstall(
+        id: ToolId.flutter,
+        path: root.path,
+        installedAt: DateTime.utc(2026),
+        pathLines: [RecordedPathLine(file: zprofile, line: line)],
+      ));
+
+      expect(await root.exists(), isFalse);
+      expect(await File(zprofile).readAsString(), '# mine\nexport FOO=1\n');
+    });
+
+    test('the dart install PATH line stays while other tools use it', () async {
+      final bin = Directory(paths.dartInstallBinDir);
+      await bin.create(recursive: true);
+      final serverpod = File(p.join(bin.path, 'serverpod'));
+      await serverpod.writeAsString('');
+      await File(p.join(bin.path, 'other_tool')).writeAsString('');
+      final line = dartInstallPathLine(bin.path, home: tmp.path);
+      await File(zprofile).writeAsString('$line\n');
+
+      await installer().uninstallServerpod(RecordedInstall(
+        id: ToolId.serverpodCli,
+        path: serverpod.path,
+        installedAt: DateTime.utc(2026),
+        pathLines: [RecordedPathLine(file: zprofile, line: line)],
+      ));
+
+      expect(await serverpod.exists(), isFalse);
+      expect(await File(zprofile).readAsString(), '$line\n');
+    });
+
+    test('and goes once nothing does', () async {
+      final bin = Directory(paths.dartInstallBinDir);
+      await bin.create(recursive: true);
+      final serverpod = File(p.join(bin.path, 'serverpod'));
+      await serverpod.writeAsString('');
+      final line = dartInstallPathLine(bin.path, home: tmp.path);
+      await File(zprofile).writeAsString('# mine\n$line\n');
+
+      await installer().uninstallServerpod(RecordedInstall(
+        id: ToolId.serverpodCli,
+        path: serverpod.path,
+        installedAt: DateTime.utc(2026),
+        pathLines: [RecordedPathLine(file: zprofile, line: line)],
+      ));
+
+      expect(await File(zprofile).readAsString(), '# mine\n');
+    });
+  });
+
+  group('removeLegacyInstall', () {
+    test('removes the private toolchain, its shims and the PATH block, and '
+        'nothing else', () async {
+      for (final dir in paths.legacyPaths) {
+        await Directory(p.join(dir, 'x')).create(recursive: true);
+      }
+      final scratch = Directory(p.join(paths.appSupportRoot, 'agent-scratch'));
+      await scratch.create(recursive: true);
+      final zshrc = File(p.join(tmp.path, '.zshrc'));
+      await zshrc.writeAsString(
+        '# mine\n\n$kLegacyShellBlockStart\n# checksum: x\n'
+        'export PATH="${paths.legacyShimDir}:\$PATH"\n$kLegacyShellBlockEnd\n',
+      );
+
+      await installer().removeLegacyInstall();
+
+      for (final dir in paths.legacyPaths) {
+        expect(await Directory(dir).exists(), isFalse, reason: dir);
+      }
+      expect(await scratch.exists(), isTrue);
+      expect(await zshrc.readAsString(), '# mine\n');
+    });
+  });
+
+  test('collectGarbage clears a crashed unpack', () async {
+    final staging =
+        Directory(p.join(tmp.path, 'develop', '.flutter-install-123'));
+    await staging.create(recursive: true);
+
+    await installer().collectGarbage();
+
+    expect(await staging.exists(), isFalse);
   });
 }

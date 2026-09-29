@@ -6,59 +6,47 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../agent/agent_controller.dart';
 import '../mcp/mcp_controller.dart';
 import '../process/serverpod_process.dart';
-import '../toolchain/shim_writer.dart';
+import '../toolchain/tool_status.dart';
 import '../toolchain/toolchain_controller.dart';
 import '../update/session_teardown.dart';
-import '../util/home_dir.dart';
 import 'uninstall_result.dart';
 
 export 'uninstall_result.dart';
 
-/// Removes everything App Studio put on this Mac, apart from the app bundle.
+/// Removes what App Studio put on this Mac, apart from the app bundle.
 ///
-/// Four stores, only one of which is the Application Support directory:
+/// Always:
 ///
-///  * `~/Library/Application Support/App Studio` — the toolchain, shims,
-///    manifests and install state.
-///  * The `PATH` block in the user's shell rc file, which lives in the home
-///    directory. Leaving it behind would point their shell at a directory that
-///    no longer exists, in every new terminal, forever.
-///  * `~/.serverpod` — the Serverpod CLI's own state: per-version template
-///    caches, the analytics id and run counter, the latest-version check and
-///    the cloud CLI's login. The CLI we ran wrote it, and a fresh install
-///    would otherwise inherit it.
-///  * Preferences (NSUserDefaults) — recents, theme, the toolchain-setup
-///    dismissal. Without clearing these a reinstall would not behave like a
-///    fresh one, which is the whole point.
+///  * `~/Library/Application Support/App Studio` — App Studio's own data.
+///  * Whatever an earlier build left for tools: its private toolchain and the
+///    fenced `PATH` block in the user's shell config.
+///  * Preferences (NSUserDefaults) — recents, theme, notice dismissals.
+///    Without clearing these a reinstall would not behave like a fresh one.
 ///
-/// Deliberately NOT removed, because they are shared with things that are not
-/// App Studio: `~/.pub-cache` (offered separately, off by default) and
-/// `~/.local/share/opencode/auth.json`, which holds API keys the OpenCode CLI
-/// uses independently.
+/// And each tool App Studio installed that the user ticked. Those are real
+/// installs now, in the places their own instructions put them, so other
+/// things may use them — which is why they are a choice and not implied:
+///
+///  * the Serverpod CLI (`dart uninstall`), and with it `~/.serverpod` — the
+///    CLI's own state, including the Serverpod Cloud login;
+///  * the Flutter SDK, and the `PATH` line App Studio added for it;
+///  * the Command Line Tools, behind an administrator prompt.
+///
+/// Deliberately never removed: anything App Studio did not install,
+/// `~/.pub-cache` unless asked (shared with every Dart project), and
+/// `~/.local/share/opencode/auth.json` (keys the OpenCode CLI uses on its own).
 class Uninstaller {
   const Uninstaller({
     required this.toolchains,
     required this.process,
     required this.agent,
     required this.mcp,
-    this.homeOverride,
   });
 
   final ToolchainController toolchains;
   final ServerpodProcessController process;
   final AgentController agent;
   final McpController mcp;
-
-  /// Where `~/.serverpod` is looked for; `$HOME` when null. Tests point it at
-  /// a scratch directory so they never touch the real one.
-  final String? homeOverride;
-
-  /// The Serverpod CLI's state directory, or null when there is no home.
-  String? get serverpodStateDir {
-    final home = homeOverride ?? homeDirectory();
-    if (home == null || home.isEmpty) return null;
-    return '$home/.serverpod';
-  }
 
   /// Total size of the Application Support directory, or null if it cannot be
   /// measured. Used by the confirmation dialog, which takes it as a callback so
@@ -79,7 +67,7 @@ class Uninstaller {
     }
   }
 
-  Future<UninstallResult> run({bool clearPubCache = false}) async {
+  Future<UninstallResult> run(UninstallChoice choice) async {
     final failures = <String>[];
 
     Future<void> step(String what, Future<void> Function() action) async {
@@ -91,30 +79,39 @@ class Uninstaller {
       }
     }
 
-    // Stop the world first. Deleting the toolchain out from under a running
-    // serverpod or opencode would leave processes pointing at missing binaries.
+    // Stop the world first. Deleting a tool out from under a running server
+    // would leave processes pointing at missing binaries.
     await step('shutting down the session', () async {
       await teardownSession(process: process, agent: agent, mcp: mcp);
     });
 
-    // Before deleting the directory: this edits the shell rc file, and the
-    // removal path reads the shim directory to know what it wrote.
-    await step('removing the shell PATH entry', () async {
-      // Returns its error rather than throwing, so it has to be checked — an
-      // unchecked call here would report a clean uninstall while leaving a
-      // dead PATH entry in the user's shell.
-      final error = await toolchains.setShellPathEnabled(false, force: true);
-      // Shims are removed by the call above, but only if it got that far.
-      await ShimWriter(binDir: toolchains.paths.shimBinDir).removeAll();
-      if (error != null) throw StateError(error);
-    });
-
-    if (clearPubCache) {
+    // Both need Dart, so both run before Flutter can go.
+    if (choice.tools.contains(ToolId.serverpodCli)) {
+      await step('uninstalling the Serverpod CLI', () async {
+        await toolchains.uninstallTool(ToolId.serverpodCli);
+      });
+    }
+    if (choice.clearPubCache) {
       await step('clearing the Dart package cache', () async {
         final error = await toolchains.clearPubCache();
         if (error != null) throw StateError(error);
       });
     }
+    if (choice.tools.contains(ToolId.flutter)) {
+      await step('uninstalling the Flutter SDK', () async {
+        await toolchains.uninstallTool(ToolId.flutter);
+      });
+    }
+    if (choice.tools.contains(ToolId.commandLineTools)) {
+      await step('uninstalling the Command Line Tools', () async {
+        await toolchains.uninstallTool(ToolId.commandLineTools);
+      });
+    }
+
+    await step('removing tools from earlier versions', () async {
+      final error = await toolchains.removeLegacyInstall();
+      if (error != null) throw StateError(error);
+    });
 
     await step('deleting the App Studio support folder', () async {
       final dir = Directory(toolchains.paths.appSupportRoot);
@@ -123,17 +120,19 @@ class Uninstaller {
       }
     });
 
-    // After the session is down: the CLI writes here on every run, and the
-    // cloud CLI holds its login here, so this is only safe once nothing of
-    // ours can start either.
-    await step('deleting the Serverpod CLI settings folder', () async {
-      final path = serverpodStateDir;
-      if (path == null) return;
-      final dir = Directory(path);
-      if (await dir.exists()) {
-        await dir.delete(recursive: true);
-      }
-    });
+    // The CLI's own state goes with the CLI. After the session is down: the
+    // CLI writes here on every run, and the cloud CLI holds its login here.
+    if (choice.tools.contains(ToolId.serverpodCli)) {
+      await step('deleting the Serverpod CLI settings folder', () async {
+        final dir = Directory(toolchains.paths.serverpodStateDir);
+        if (await dir.exists()) {
+          await dir.delete(recursive: true);
+        }
+        // The install record lived in there. Whatever App Studio installed and
+        // the user chose to keep is still its to offer next time.
+        await toolchains.persistRecord();
+      });
+    }
 
     // Last, so a crash earlier still leaves the app able to explain itself.
     await step('clearing preferences', () async {

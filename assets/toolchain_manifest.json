@@ -1,139 +1,22 @@
 {
-  "schemaVersion": 1,
-  "manifestId": "2026.09.15.1225",
-  "baseUrl": "https://asdl.serverpod.dev/",
+  "schemaVersion": 2,
   "tools": [
+    {
+      "id": "command_line_tools",
+      "displayName": "Command Line Tools",
+      "description": "Apple's git, compilers and linkers. Flutter and Serverpod run on them."
+    },
     {
       "id": "flutter",
       "displayName": "Flutter SDK",
       "description": "Builds and serves the Flutter web app shown in the preview pane.",
-      "version": "3.47.0",
-      "build": 1,
-      "hostAccepts": ">=3.47.0 <3.48.0",
-      "required": true,
-      "installDir": "flutter/3.47.0",
-      "platforms": {
-        "macos-arm64": {
-          "path": "tools/flutter/3.47.0/b1/flutter-macos-arm64.tar.gz",
-          "sha256": "5c24ae92313c5509890fc10ed5b667133444c7b6e95922de10b1bd5275ab0e9a",
-          "downloadBytes": 2030399555,
-          "installedBytes": 4177879040,
-          "format": "tar.gz",
-          "stripComponents": 1
-        }
-      },
-      "entrypoints": {
-        "flutter": "bin/flutter",
-        "dart": "bin/cache/dart-sdk/bin/dart"
-      },
-      "metadata": {
-        "channel": "stable",
-        "frameworkRevision": "c9a6c484230f8b5e408ec57be1ef71dee1e77020",
-        "dartSdkVersion": "3.12.2"
-      }
+      "accepts": ">=3.47.0"
     },
     {
       "id": "serverpod_cli",
       "displayName": "Serverpod CLI",
       "description": "Creates projects, generates code and runs the server.",
-      "version": "4.0.0",
-      "build": 1,
-      "hostAccepts": ">=4.0.0 <4.1.0",
-      "required": true,
-      "installDir": "serverpod_cli/4.0.0",
-      "platforms": {
-        "macos-arm64": {
-          "path": "tools/serverpod_cli/4.0.0/b1/serverpod_cli-macos-arm64.tar.gz",
-          "sha256": "c6397cf6fe85368bb8cfccd982f979bf4535e1ed9e8ac4b7de0ac2dc4d573f81",
-          "downloadBytes": 11442027,
-          "installedBytes": 30695424,
-          "format": "tar.gz",
-          "stripComponents": 1
-        }
-      },
-      "entrypoints": {
-        "serverpod": "bin/serverpod"
-      },
-      "metadata": {
-        "nativeAssetsDir": "lib"
-      }
-    },
-    {
-      "id": "opencode",
-      "displayName": "OpenCode",
-      "description": "Backs the Agent tab.",
-      "version": "1.18.4",
-      "build": 2,
-      "hostAccepts": ">=1.18.0",
-      "required": true,
-      "installDir": "opencode/1.18.4",
-      "platforms": {
-        "macos-arm64": {
-          "path": "tools/opencode/1.18.4/b2/opencode-macos-arm64.tar.gz",
-          "sha256": "b3b2b05a5191e25cefd38788276125943e4fbf016b655da33e65aa178b445221",
-          "downloadBytes": 44850482,
-          "installedBytes": 138297344,
-          "format": "tar.gz",
-          "stripComponents": 1
-        }
-      },
-      "entrypoints": {
-        "opencode": "opencode"
-      },
-      "metadata": {}
-    },
-    {
-      "id": "git",
-      "displayName": "Git",
-      "description": "Flutter needs a real git. macOS ships a stub that prompts to install Xcode.",
-      "version": "2.53.0-3",
-      "build": 2,
-      "hostAccepts": ">=2.20.0",
-      "required": true,
-      "installDir": "git/2.53.0-3",
-      "platforms": {
-        "macos-arm64": {
-          "path": "tools/git/2.53.0-3/b2/git-macos-arm64.tar.gz",
-          "sha256": "3dfba5aab35da823b00fb7943374051a2bbeb53593c297678009d87e07cce7c3",
-          "downloadBytes": 60229489,
-          "installedBytes": 148090880,
-          "format": "tar.gz",
-          "stripComponents": 1
-        }
-      },
-      "entrypoints": {
-        "git": "bin/git"
-      },
-      "metadata": {
-        "execPath": "libexec/git-core"
-      }
-    },
-    {
-      "id": "llvm-tools",
-      "displayName": "Developer tools",
-      "description": "otool and install_name_tool, used by Serverpod to relocate native libraries. macOS ships stubs that prompt to install Xcode.",
-      "version": "23.1.1",
-      "build": 1,
-      "hostAccepts": "*",
-      "required": true,
-      "installDir": "llvm-tools/23.1.1",
-      "platforms": {
-        "macos-arm64": {
-          "path": "tools/llvm-tools/23.1.1/b1/llvm-tools-macos-arm64.tar.gz",
-          "sha256": "03231c455ae4c9066af5c4c5b9a294f398ceac214f624981b6e05441b053d8ff",
-          "downloadBytes": 8619813,
-          "installedBytes": 40345600,
-          "format": "tar.gz",
-          "stripComponents": 1
-        }
-      },
-      "entrypoints": {
-        "otool": "bin/otool",
-        "install_name_tool": "bin/install_name_tool"
-      },
-      "metadata": {
-        "upstream": "otool is llvm-objdump from an official LLVM release, installed under the Apple name; install_name_tool is built from Apple's cctools sources (cctools-port), because llvm-objcopy rejects the LC_NOTE load command every dart-compiled executable carries"
-      }
+      "accepts": ">=4.0.0 <4.1.0"
     }
   ]
 }

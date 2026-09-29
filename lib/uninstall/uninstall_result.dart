@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import '../toolchain/tool_status.dart';
+
 /// What a full uninstall removed, for the confirmation screen.
 ///
 /// Kept apart from [Uninstaller] so the screen that renders it does not import
@@ -16,4 +18,17 @@ class UninstallResult {
   final List<String> failures;
 
   bool get isClean => failures.isEmpty;
+}
+
+/// What the user agreed to remove.
+class UninstallChoice {
+  const UninstallChoice({required this.tools, required this.clearPubCache});
+
+  /// Tools App Studio installed that go too. App Studio's own data always
+  /// goes; these are opt-out, because other things on the Mac may use them.
+  final Set<ToolId> tools;
+
+  /// Also run `dart pub cache clean`, which affects every Dart project on the
+  /// machine — never implied by anything else.
+  final bool clearPubCache;
 }

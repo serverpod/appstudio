@@ -5,7 +5,6 @@ import 'package:appstudio/toolchain/toolchain.dart';
 import 'package:appstudio/toolchain/toolchain_controller.dart';
 import 'package:appstudio/toolchain/toolchain_manifest.dart';
 import 'package:appstudio/toolchain/toolchain_paths.dart';
-import 'package:appstudio/toolchain/toolchain_requirements.dart';
 
 Future<String> loadTestManifestSource() =>
     File('assets/toolchain_manifest.json').readAsString();
@@ -15,15 +14,19 @@ Future<ToolManifest> loadTestManifest() async =>
 
 /// A controller with nothing resolved. Instant, and correct for tests that only
 /// need a controller to exist — they never spawn a tool.
-Future<ToolchainController> emptyToolchainController() async {
+///
+/// [paths] defaults to the real home: nothing here writes to it unless a test
+/// installs or uninstalls, and those pass a scratch one.
+Future<ToolchainController> emptyToolchainController({
+  ToolchainPaths? paths,
+}) async {
   final manifest = await loadTestManifest();
   return ToolchainController(
     initial: Toolchain(
       ToolchainInventory(manifest: manifest, tools: const {}),
     ),
     manifest: manifest,
-    paths: ToolchainPaths.resolve(),
-    requirements: ToolchainRequirements.empty,
+    paths: paths ?? ToolchainPaths.resolve(),
   );
 }
 
@@ -33,13 +36,8 @@ Future<ToolchainController> probedToolchainController() async {
   final manifest = await loadTestManifest();
   final paths = ToolchainPaths.resolve();
   return ToolchainController(
-    initial: await Toolchain.resolve(
-      manifest: manifest,
-      requirements: ToolchainRequirements.empty,
-      paths: paths,
-    ),
+    initial: await Toolchain.resolve(manifest: manifest, paths: paths),
     manifest: manifest,
     paths: paths,
-    requirements: ToolchainRequirements.empty,
   );
 }

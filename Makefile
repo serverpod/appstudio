@@ -1,13 +1,13 @@
-# App Studio — every command for running the app, releasing it, and publishing
-# the bundled tools. The Makefile is the whole interface: no release step
-# should require running a tool/ script by hand.
+# App Studio — every command for running the app and releasing it. The
+# Makefile is the whole interface: no release step should require running a
+# tool/ script by hand.
 #
 # Run locally:
 #   make start             Run the app (flutter run -d macos)
 #   make deps              flutter pub get + CEF/pods
 #   make previews          Browser previews of the first-run dialogs
 #   make clean             Drop build output and dist artifacts
-#   make clean_all         Also drop CEF, Pods and the dev toolchain
+#   make clean_all         Also drop CEF and Pods
 #
 # Release the app (two steps, so a build can be tested before it goes live):
 #   make release V=1.2.3   Set the version, build, notarize, upload — the build
@@ -21,13 +21,6 @@
 #   make publish           Upload the built zip + refresh downloads/macos.json
 #   make build_debug       Unsigned zip, local only
 #
-# Publish the bundled tools:
-#   make update_flutter    Download the full Flutter/Dart SDK; V=… sets the pin
-#   make update_serverpod  Copy the Serverpod CLI from this Mac's dart install
-#   make update_llvm_tools Rebuild otool + install_name_tool; V=… sets the pin
-#   make dev_toolchain     Build every toolchain/ tree
-#   make publish_toolchain Upload the tools to GCS and refresh the manifest
-#
 .DEFAULT_GOAL := help
 
 # Recipes use [[ ]] and read -p.
@@ -37,17 +30,15 @@ ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 CEF_STAMP := $(ROOT)/packages/webview_cef/macos/third/cef/version.txt
 
 .PHONY: help start deps ensure_deps previews clean clean_all \
-        set_version release build build_debug publish promote \
-        update_flutter update_serverpod update_llvm_tools dev_toolchain \
-        publish_toolchain
+        set_version release build build_debug publish promote
 
 help:
 	@echo "Run locally:"
 	@echo "  make start             Run the app (flutter run -d macos)"
 	@echo "  make deps              flutter pub get + CEF/pods"
 	@echo "  make previews          Browser previews of the first-run dialogs"
-	@echo "  make clean             Remove build/ and dist/ (keeps CEF + toolchain)"
-	@echo "  make clean_all         Also remove CEF, Pods and <repo>/toolchain"
+	@echo "  make clean             Remove build/ and dist/ (keeps CEF)"
+	@echo "  make clean_all         Also remove CEF and Pods"
 	@echo ""
 	@echo "Release the app:"
 	@echo "  make release V=1.2.3   Set the version (or V=patch|minor|major|build),"
@@ -61,16 +52,8 @@ help:
 	@echo "  make publish           Upload the built zip + refresh the download links"
 	@echo "  make build_debug       Unsigned zip, local only"
 	@echo ""
-	@echo "Publish the bundled tools:"
-	@echo "  make update_flutter [V=3.44.2]     Download the SDK and set the pin"
-	@echo "  make update_serverpod [V=4.0.0]    Copy the CLI from the dart install"
-	@echo "  make update_llvm_tools [V=23.1.1]  Rebuild otool + install_name_tool"
-	@echo "  make dev_toolchain                 Build every <repo>/toolchain tree"
-	@echo "  make publish_toolchain             Dry-run, confirm, then upload"
-	@echo ""
-	@echo "The app downloads its own tools on first run, so no toolchain is"
-	@echo "needed to build or ship it. The toolchain targets are for publishing"
-	@echo "new tool versions to the bucket."
+	@echo "The app installs Flutter and the Serverpod CLI from their official"
+	@echo "sources on first run, so no toolchain is needed to build or ship it."
 
 # ---------------------------------------------------------------------------
 # Run locally
@@ -113,20 +96,17 @@ clean:
 	@echo "Kept (expensive to re-fetch, use clean_all to drop them too):"
 	@echo "  packages/webview_cef/macos/third/cef   CEF binaries"
 	@echo "  macos/Pods                             CocoaPods"
-	@echo "  toolchain/                             local dev toolchain"
 	@echo ""
 	@echo "flutter clean also removed .dart_tool, so dart analyze will report"
 	@echo "thousands of unresolved imports until you run: flutter pub get"
 
-# Back to a fresh checkout. Re-fetches CEF (~380 MB) on the next build, and
-# dev_toolchain would re-download Flutter and LLVM.
+# Back to a fresh checkout. Re-fetches CEF (~380 MB) on the next build. Also
+# drops toolchain/, what the retired tool-publishing pipeline left behind.
 clean_all: clean
-	@echo "==> removing CEF, Pods and the dev toolchain"
+	@echo "==> removing CEF, Pods and any old toolchain/ build trees"
 	rm -rf "$(ROOT)/packages/webview_cef/macos/third/cef"
 	rm -rf "$(ROOT)/macos/Pods"
-	rm -rf "$(ROOT)/toolchain/flutter" "$(ROOT)/toolchain/git" \
-	       "$(ROOT)/toolchain/opencode" "$(ROOT)/toolchain/llvm-tools"
-	@echo "    kept toolchain/{active.json,pins,bin,serverpod_cli} — tracked in git"
+	rm -rf "$(ROOT)/toolchain"
 
 # ---------------------------------------------------------------------------
 # Release the app
@@ -180,62 +160,3 @@ promote:
 	@read -r -p "Make this build the live auto-update for every install? [y/N] " a; \
 		[[ $$a == [yY]* ]] || { echo "aborted"; exit 1; }
 	cd "$(ROOT)" && ./tool/publish_appcast.sh
-
-# ---------------------------------------------------------------------------
-# Publish the bundled tools
-# ---------------------------------------------------------------------------
-
-# Builds the <repo>/toolchain trees that publish_toolchain uploads.
-#
-# The app itself never reads this tree — it resolves each tool as managed (its
-# own Application Support directory) then host, and nothing else — so this is a
-# packaging step for a release, not a way to run App Studio against local tools.
-dev_toolchain:
-	cd "$(ROOT)" && ./tool/bundle_toolchain.sh
-
-# Update one tool in the tree, then publish. Both take an optional V=, which
-# becomes the new pin in toolchain/active.json; without one they rebuild the
-# version that file already pins. Tools not named keep their pins too, so a
-# partial run cannot quietly move a pin for a tree it never rebuilt.
-#
-# Flutter carries the Dart SDK (bin/cache/dart-sdk), so this is how Dart moves
-# too — there is no separate dart tool in the toolchain.
-update_flutter:
-	cd "$(ROOT)" && ./tool/bundle_toolchain.sh --only=flutter --force \
-		$(if $(V),--flutter=$(V))
-	@echo ""
-	@echo "Flutter updated. Publish it with: make publish_toolchain"
-
-# `dart install serverpod_cli <version>` first — pub publishes no macOS archive,
-# so the tree is copied from the bundle that command unpacks.
-update_serverpod:
-	cd "$(ROOT)" && ./tool/bundle_toolchain.sh --only=serverpod_cli --force \
-		$(if $(V),--serverpod=$(V))
-	@echo ""
-	@echo "Serverpod CLI updated. Raise hostAccepts in"
-	@echo "assets/toolchain_manifest.json if this is a new minimum, then:"
-	@echo "  make publish_toolchain"
-
-# otool from the LLVM release V= names, plus install_name_tool built from the
-# cctools sources the script pins by commit. Needs Xcode or the CLT on this
-# Mac for the build; the product is static and needs neither. V= is the LLVM
-# version and becomes the pin — and it is the version installed copies compare
-# against (`otool --version`), so a new cctools reaches them only alongside an
-# LLVM bump. The run refuses to stage a tree whose install_name_tool cannot
-# edit a dart-compiled executable, which is the failure that made this a
-# separate build in the first place.
-update_llvm_tools:
-	cd "$(ROOT)" && ./tool/bundle_toolchain.sh --only=llvm-tools --force \
-		$(if $(V),--llvm=$(V))
-	@echo ""
-	@echo "Developer tools updated. Publish them with: make publish_toolchain"
-
-# Dry-run first, then confirm before uploading for real. Uploads are immutable
-# and cannot be undone with the publisher role, which is why the dry run is
-# not optional.
-publish_toolchain:
-	cd "$(ROOT)" && ./tool/publish_toolchain.sh --dry-run
-	@echo ""
-	@read -r -p "Dry run above. Publish for real? [y/N] " a; \
-		[[ $$a == [yY]* ]] || { echo "aborted"; exit 1; }
-	cd "$(ROOT)" && ./tool/publish_toolchain.sh

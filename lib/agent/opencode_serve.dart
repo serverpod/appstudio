@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../process/dev_session_cleanup.dart';
-import '../toolchain/tool_status.dart';
+import '../toolchain/tool_probe.dart';
 import '../toolchain/toolchain_controller.dart';
 
 enum OpenCodeServeState { stopped, starting, running, stopping }
@@ -52,10 +52,14 @@ class OpenCodeServe {
     _stdout.clear();
 
     final toolchain = toolchains.current;
-    final opencode = toolchain.opencodeExecutable;
+    // App Studio no longer installs OpenCode, so the agent runs whichever copy
+    // the user has on their PATH.
+    final opencode =
+        await whichOnPath('opencode', Platform.environment['PATH']);
     if (opencode == null) {
       _state = OpenCodeServeState.stopped;
-      _error = toolchain.unavailableReason(ToolId.opencode);
+      _error = 'OpenCode is not installed. Install it and make sure '
+          '`opencode` is on your PATH.';
       throw StateError(_error!);
     }
 

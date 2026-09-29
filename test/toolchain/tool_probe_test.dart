@@ -1,15 +1,19 @@
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:appstudio/toolchain/install_record.dart';
+import 'package:appstudio/toolchain/shell_profile.dart';
 import 'package:appstudio/toolchain/tool_probe.dart';
 import 'package:appstudio/toolchain/tool_status.dart';
 import 'package:appstudio/toolchain/tool_version.dart';
 import 'package:appstudio/toolchain/toolchain_manifest.dart';
-import 'package:appstudio/toolchain/toolchain_requirements.dart';
+import 'package:appstudio/toolchain/toolchain_paths.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
+import '../support/toolchain_support.dart';
+
 late ToolManifest manifest;
-const requirements = ToolchainRequirements.empty;
 
 ToolVersion v(String s) => ToolVersion.tryParse(s)!;
 
@@ -17,65 +21,30 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUpAll(() async {
-    manifest = ToolManifest.tryParse(
-      await File('assets/toolchain_manifest.json').readAsString(),
-    )!;
+    manifest = await loadTestManifest();
   });
 
   group('version parsers', () {
-    test('git', () {
-      expect(parseGitVersion('git version 2.53.0').toString(), '2.53.0');
-      // Apple's git appends its own build tag.
-      expect(
-        parseGitVersion('git version 2.39.5 (Apple Git-154)').toString(),
-        '2.39.5',
-      );
-      expect(parseGitVersion(''), isNull);
-      expect(parseGitVersion('command not found'), isNull);
-    });
-
     test('serverpod', () {
       expect(
         parseServerpodVersion('Serverpod version: 4.0.0-beta.1').toString(),
         '4.0.0-beta.1',
       );
-      // What is installed on this machine today.
-      expect(
-        parseServerpodVersion('Serverpod version: 3.5.0-beta.7').toString(),
-        '3.5.0-beta.7',
-      );
       expect(parseServerpodVersion('dart: command not found'), isNull);
-    });
-
-    test('opencode', () {
-      expect(parseOpencodeVersion('1.18.4').toString(), '1.18.4');
-      expect(parseOpencodeVersion('opencode 1.18.4\n').toString(), '1.18.4');
-    });
-
-    test('otool', () {
-      expect(
-        parseOtoolVersion('Apple LLVM version 17.0.0').toString(),
-        '17.0.0',
-      );
-      expect(
-        parseOtoolVersion('llvm-otool\nLLVM version 20.1.0\n').toString(),
-        '20.1.0',
-      );
     });
 
     test('flutter.version.json', () {
       final info = FlutterInfo.parse('''
 {
-  "frameworkVersion": "3.44.2",
+  "frameworkVersion": "3.47.5",
   "channel": "stable",
-  "dartSdkVersion": "3.12.2",
-  "frameworkRevision": "c9a6c484230f8b5e408ec57be1ef71dee1e77020"
+  "dartSdkVersion": "3.13.4",
+  "frameworkRevision": "6a19cca56475dbfba1478ee68d7bd0c2ef891da1"
 }
 ''')!;
-      expect(info.frameworkVersion.toString(), '3.44.2');
+      expect(info.frameworkVersion.toString(), '3.47.5');
       expect(info.channel, 'stable');
-      expect(info.dartSdkVersion, '3.12.2');
-      expect(info.frameworkRevision, startsWith('c9a6c48'));
+      expect(info.dartSdkVersion, '3.13.4');
     });
 
     test('flutter.version.json survives garbage', () {
@@ -85,185 +54,292 @@ void main() {
   });
 
   group('qualifyFlutter', () {
-    // In-range means whatever the live manifest pins, so a Flutter bump does
-    // not silently turn every fixture here into a wrongVersion.
-    String pinned() => manifest[ToolId.flutter]!.version.toString();
     FlutterObservation good({String channel = 'stable', String? version}) =>
         FlutterObservation(
           hasFlutterExecutable: true,
           hasDartExecutable: true,
-          hasWebSdk: true,
           info: FlutterInfo(
-            frameworkVersion: v(version ?? pinned()),
+            frameworkVersion: v(version ?? '3.47.5'),
             channel: channel,
           ),
         );
 
-    ({ToolFitness fitness, String? reason}) run(
-      FlutterObservation observation, {
-      bool isHost = true,
-    }) =>
-        qualifyFlutter(
-          observation: observation,
-          spec: manifest[ToolId.flutter]!,
-          requirements: requirements,
-          isHost: isHost,
-        );
+    ({ToolFitness fitness, String? reason}) run(FlutterObservation o) =>
+        qualifyFlutter(observation: o, spec: manifest[ToolId.flutter]!);
 
-    test('accepts a stable, precached, in-range SDK', () {
+    test('accepts a stable, in-range SDK', () {
       expect(run(good()).fitness, ToolFitness.satisfied);
     });
 
-    test('rejects a host SDK on a non-stable channel', () {
-      final verdict = run(good(channel: 'master'));
+    test('accepts a newer stable than any App Studio was built against', () {
+      // Fresh installs take the latest stable, and so does `flutter upgrade`.
+      expect(run(good(version: '3.52.0')).fitness, ToolFitness.satisfied);
+    });
+
+    test('rejects a non-stable channel', () {
+      final verdict = run(good(channel: 'beta'));
       expect(verdict.fitness, ToolFitness.wrongVersion);
-      expect(verdict.reason, contains('master'));
+      expect(verdict.reason, contains('beta'));
     });
 
-    test('allows a non-stable channel for an SDK we manage', () {
-      // Our own tree is whatever we published; the channel check exists to
-      // protect against a developer's master checkout.
-      expect(run(good(channel: 'master'), isHost: false).fitness,
-          ToolFitness.satisfied);
-    });
-
-    test('rejects a version outside the range with a readable reason', () {
-      final verdict = run(good(version: '3.38.1'));
+    test('rejects an old SDK with a readable reason', () {
+      final verdict = run(good(version: '3.41.2'));
       expect(verdict.fitness, ToolFitness.wrongVersion);
-      expect(
-        verdict.reason,
-        '3.38.1 (needs ${manifest[ToolId.flutter]!.hostAccepts})',
-      );
+      expect(verdict.reason, contains('3.41.2'));
+      expect(verdict.reason, contains('>=3.47.0'));
     });
 
-    test('rejects an SDK that never precached the web artifacts', () {
-      final verdict = run(
-        FlutterObservation(
-          hasFlutterExecutable: true,
-          hasDartExecutable: true,
-          hasWebSdk: false,
-          info: FlutterInfo(frameworkVersion: v(pinned()), channel: 'stable'),
-        ),
-      );
-      expect(verdict.fitness, ToolFitness.incomplete);
-      expect(verdict.reason, contains('precache --web'));
+    test('does not need the web artifacts precached', () {
+      // Flutter fetches them on the first web build. Rejecting an SDK for not
+      // having them yet would send every fresh `flutter` checkout to setup.
+      expect(run(good()).fitness, ToolFitness.satisfied);
     });
 
-    test('reports a missing Dart SDK as incomplete, not missing', () {
-      final verdict = run(
-        const FlutterObservation(
-          hasFlutterExecutable: true,
-          hasDartExecutable: false,
-          hasWebSdk: true,
-        ),
-      );
+    test('a missing Dart SDK is incomplete, not missing', () {
+      final verdict = run(const FlutterObservation(
+        hasFlutterExecutable: true,
+        hasDartExecutable: false,
+      ));
       expect(verdict.fitness, ToolFitness.incomplete);
     });
 
     test('absent means notFound', () {
-      final verdict = run(
-        const FlutterObservation(
+      expect(
+        run(const FlutterObservation(
           hasFlutterExecutable: false,
           hasDartExecutable: false,
-          hasWebSdk: false,
-        ),
+        )).fitness,
+        ToolFitness.notFound,
       );
-      expect(verdict.fitness, ToolFitness.notFound);
-    });
-
-    test('unreadable version is unusable, not silently accepted', () {
-      final verdict = run(
-        const FlutterObservation(
-          hasFlutterExecutable: true,
-          hasDartExecutable: true,
-          hasWebSdk: true,
-        ),
-      );
-      expect(verdict.fitness, ToolFitness.unusable);
     });
   });
 
   group('qualifyVersioned', () {
-    ({ToolFitness fitness, String? reason}) run({
-      bool exists = true,
-      bool isStub = false,
-      String? detected,
-      String? incompleteReason,
-      ToolId id = ToolId.serverpodCli,
-    }) =>
+    ({ToolFitness fitness, String? reason}) run(String? version) =>
         qualifyVersioned(
-          exists: exists,
-          isStub: isStub,
-          detected: detected == null ? null : v(detected),
-          spec: manifest[id]!,
-          requirements: requirements,
-          incompleteReason: incompleteReason,
+          exists: true,
+          detected: version == null ? null : v(version),
+          spec: manifest[ToolId.serverpodCli]!,
         );
 
-    test('accepts the pinned Serverpod', () {
-      expect(run(detected: '4.0.0-beta.2').fitness, ToolFitness.satisfied);
+    test('accepts a Serverpod CLI inside the range', () {
+      expect(run('4.0.3').fitness, ToolFitness.satisfied);
     });
 
-    test('rejects the host Serverpod that is actually installed here', () {
-      final verdict = run(detected: '3.5.0-beta.7');
-      expect(verdict.fitness, ToolFitness.wrongVersion);
-      expect(verdict.reason, '3.5.0-beta.7 (needs >=4.0.0-beta.2 <4.1.0)');
-    });
-
-    test('a CLT shim is flagged, never run', () {
-      final verdict = run(isStub: true, id: ToolId.git);
-      expect(verdict.fitness, ToolFitness.stub);
-      expect(verdict.reason, 'Xcode Command Line Tools stub');
-    });
-
-    test('missing native libraries read as incomplete', () {
-      final verdict = run(
-        detected: '4.0.0-beta.2',
-        incompleteReason: 'native libraries (lib/) are missing',
-      );
-      expect(verdict.fitness, ToolFitness.incomplete);
-      expect(verdict.reason, contains('lib/'));
+    test('rejects one outside it', () {
+      expect(run('3.4.1').fitness, ToolFitness.wrongVersion);
+      expect(run('4.1.0').fitness, ToolFitness.wrongVersion);
     });
 
     test('unparseable version output is unusable', () {
-      expect(run(detected: null).fitness, ToolFitness.unusable);
-    });
-
-    test('absent is notFound', () {
-      expect(run(exists: false).fitness, ToolFitness.notFound);
-    });
-
-    test('git accepts anything modern, including a dugite revision', () {
-      expect(run(detected: '2.53.0', id: ToolId.git).fitness,
-          ToolFitness.satisfied);
-      expect(run(detected: '2.53.0-3', id: ToolId.git).fitness,
-          ToolFitness.satisfied);
-      expect(run(detected: '2.10.0', id: ToolId.git).fitness,
-          ToolFitness.wrongVersion);
+      expect(run(null).fitness, ToolFitness.unusable);
     });
   });
 
-  group('isMachO', () {
-    test('accepts a real binary', () async {
-      // codesign is a genuine base-system Mach-O on every Mac.
-      expect(await isMachO('/usr/bin/codesign'), isTrue);
+  group('flutterAction', () {
+    const ours = '/Users/alex/develop/flutter';
+    final record = InstallRecord.empty.withTool(RecordedInstall(
+      id: ToolId.flutter,
+      path: ours,
+      installedAt: DateTime.utc(2026),
+    ));
+
+    ToolCandidate candidate(String root, ToolFitness fitness) => ToolCandidate(
+          id: ToolId.flutter,
+          source: ToolSource.host,
+          fitness: fitness,
+          root: root,
+        );
+
+    test('nothing to do when a copy qualifies', () {
+      expect(
+        flutterAction(
+          [candidate('/old', ToolFitness.wrongVersion),
+            candidate('/new', ToolFitness.satisfied)],
+          InstallRecord.empty,
+        ),
+        ToolAction.none,
+      );
     });
 
-    test('rejects a text file', () async {
-      final dir = await Directory.systemTemp.createTemp('appstudio_macho');
-      addTearDown(() => dir.delete(recursive: true));
-      final script = File('${dir.path}/fake');
-      await script.writeAsString('#!/bin/sh\necho hi\n');
-      expect(await isMachO(script.path), isFalse);
+    test('installs when there is none', () {
+      expect(flutterAction(const [], InstallRecord.empty), ToolAction.install);
     });
 
-    test('rejects a missing or empty file', () async {
-      final dir = await Directory.systemTemp.createTemp('appstudio_macho');
-      addTearDown(() => dir.delete(recursive: true));
-      final empty = File('${dir.path}/empty');
-      await empty.writeAsBytes(const []);
-      expect(await isMachO(empty.path), isFalse);
-      expect(await isMachO('${dir.path}/nope'), isFalse);
+    test('updates an old copy App Studio installed', () {
+      expect(
+        flutterAction([candidate(ours, ToolFitness.wrongVersion)], record),
+        ToolAction.update,
+      );
+    });
+
+    test('replaces a broken copy App Studio installed', () {
+      expect(
+        flutterAction([candidate(ours, ToolFitness.incomplete)], record),
+        ToolAction.install,
+      );
+    });
+
+    test('asks the user to update a copy they installed', () {
+      // Installing a second SDK beside it would leave the old one first on
+      // their PATH.
+      expect(
+        flutterAction(
+          [candidate('/Users/alex/flutter', ToolFitness.wrongVersion)],
+          record,
+        ),
+        ToolAction.manual,
+      );
+    });
+  });
+
+  group('serverpodAction', () {
+    test('reinstalls an old copy whoever installed it', () {
+      expect(
+        serverpodAction(const [
+          ToolCandidate(
+            id: ToolId.serverpodCli,
+            source: ToolSource.host,
+            fitness: ToolFitness.wrongVersion,
+          ),
+        ]),
+        ToolAction.update,
+      );
+      expect(serverpodAction(const []), ToolAction.install);
+    });
+  });
+
+  group('ToolProbe.inventory', () {
+    late Directory tmp;
+    late ToolchainPaths paths;
+    late String developerDir;
+
+    setUp(() async {
+      tmp = await Directory.systemTemp.createTemp('tool_probe');
+      paths = ToolchainPaths.forHome(tmp.path);
+      developerDir = p.join(tmp.path, 'CommandLineTools');
+    });
+
+    tearDown(() async {
+      if (await tmp.exists()) await tmp.delete(recursive: true);
+    });
+
+    Future<void> touch(String path, [String contents = '']) async {
+      final file = File(path);
+      await file.parent.create(recursive: true);
+      await file.writeAsString(contents);
+    }
+
+    Future<void> fakeFlutter(String root, String version) async {
+      await touch(p.join(root, 'bin', 'flutter'));
+      await touch(p.join(root, 'bin', 'cache', 'dart-sdk', 'bin', 'dart'));
+      await touch(
+        p.join(root, 'bin', 'cache', 'flutter.version.json'),
+        jsonEncode({'frameworkVersion': version, 'channel': 'stable'}),
+      );
+    }
+
+    ToolProbe probe({
+      InstallRecord record = InstallRecord.empty,
+      bool clt = true,
+      String serverpodVersion = '4.0.3',
+    }) =>
+        ToolProbe(
+          paths: paths,
+          manifest: manifest,
+          record: record,
+          environment: {'PATH': '/nonexistent'},
+          loginShellPath: () async => null,
+          runner: (executable, args, {environment}) async {
+            if (executable == '/usr/bin/xcode-select') {
+              return ProcessResult(0, clt ? 0 : 2, clt ? '$developerDir\n' : '',
+                  '');
+            }
+            if (p.basename(executable) == 'serverpod') {
+              return ProcessResult(
+                  0, 0, 'Serverpod version: $serverpodVersion', '');
+            }
+            throw StateError('unexpected $executable');
+          },
+        );
+
+    test('a clean Mac needs everything installed', () async {
+      final inventory = await probe(clt: false).inventory();
+
+      expect(
+        {for (final t in inventory.tools.values) t.id: t.action},
+        {
+          ToolId.commandLineTools: ToolAction.install,
+          ToolId.flutter: ToolAction.install,
+          ToolId.serverpodCli: ToolAction.install,
+        },
+      );
+      expect(inventory.legacyInstallFound, isFalse);
+    });
+
+    test('finds what App Studio installed and says so', () async {
+      await touch(p.join(developerDir, 'usr', 'bin', 'git'));
+      await fakeFlutter(paths.flutterInstallDir, '3.47.5');
+      final serverpod = p.join(paths.dartInstallBinDir, 'serverpod');
+      await touch(serverpod);
+      final record = InstallRecord.empty
+          .withTool(RecordedInstall(
+            id: ToolId.flutter,
+            path: paths.flutterInstallDir,
+            installedAt: DateTime.utc(2026),
+          ))
+          .withTool(RecordedInstall(
+            id: ToolId.serverpodCli,
+            path: serverpod,
+            installedAt: DateTime.utc(2026),
+          ));
+
+      final inventory = await probe(record: record).inventory();
+
+      expect(inventory.needsSetup, isFalse);
+      expect(inventory[ToolId.flutter]!.resolved!.source, ToolSource.appStudio);
+      expect(
+        inventory[ToolId.serverpodCli]!.resolved!.source,
+        ToolSource.appStudio,
+      );
+      expect(
+        inventory[ToolId.commandLineTools]!.resolved!.source,
+        ToolSource.host,
+      );
+    });
+
+    test('a Flutter in a conventional place that App Studio did not install '
+        'is the user\'s', () async {
+      await touch(p.join(developerDir, 'usr', 'bin', 'git'));
+      await fakeFlutter(p.join(tmp.path, 'development', 'flutter'), '3.41.2');
+
+      final inventory = await probe().inventory();
+
+      final flutter = inventory[ToolId.flutter]!;
+      expect(flutter.action, ToolAction.manual);
+      expect(flutter.bestRejected!.detectedVersion.toString(), '3.41.2');
+      expect(inventory.needsManualUpdate, hasLength(1));
+    });
+
+    test('an old Serverpod CLI is reinstalled', () async {
+      await touch(p.join(paths.dartInstallBinDir, 'serverpod'));
+
+      final inventory = await probe(serverpodVersion: '3.4.1').inventory();
+
+      expect(inventory[ToolId.serverpodCli]!.action, ToolAction.update);
+    });
+
+    test('an earlier build\'s private toolchain is found', () async {
+      await touch(p.join(paths.legacyToolchainRoot, 'flutter', 'marker'));
+      expect((await probe().inventory()).legacyInstallFound, isTrue);
+    });
+
+    test('so is only its PATH block', () async {
+      await touch(
+        p.join(tmp.path, '.zshrc'),
+        '# mine\n\n$kLegacyShellBlockStart\n# x\n$kLegacyShellBlockEnd\n',
+      );
+      expect((await probe().inventory()).legacyInstallFound, isTrue);
     });
   });
 
@@ -278,18 +354,7 @@ void main() {
       return dir;
     }
 
-    test('finds an executable on the path', () async {
-      final dir = await dirContaining('serverpod');
-      expect(
-        await whichOnPath('serverpod', dir.path),
-        p.join(dir.path, 'serverpod'),
-      );
-    });
-
     test('takes the first match, so PATH order decides', () async {
-      // This is the whole bug: a stale ~/.pub-cache/bin/serverpod was the only
-      // candidate the probe ever saw, while the `dart install` copy earlier on
-      // PATH — the one the user's shell runs — was invisible.
       final first = await dirContaining('serverpod');
       final second = await dirContaining('serverpod');
       expect(
@@ -303,33 +368,16 @@ void main() {
       expect(await whichOnPath('serverpod', dir.path), isNull);
     });
 
-    test('skips directories that do not have it, and empty entries', () async {
-      final dir = await dirContaining('serverpod');
-      expect(
-        await whichOnPath('serverpod', '/nonexistent::${dir.path}'),
-        p.join(dir.path, 'serverpod'),
-      );
-    });
-
     test('returns null with no path to search', () async {
-      // The old implementation shelled out to `which`, which the probe ran with
-      // no environment at all — so this was the answer for *every* lookup.
       expect(await whichOnPath('serverpod', null), isNull);
       expect(await whichOnPath('serverpod', ''), isNull);
     });
+  });
 
-    test('resolves a symlink into bin, which is how dart install ships',
-        () async {
-      final target = await dirContaining('serverpod-real');
-      final linkDir = await Directory.systemTemp.createTemp('appstudio_link');
-      addTearDown(() => linkDir.delete(recursive: true));
-      await Link(p.join(linkDir.path, 'serverpod'))
-          .create(p.join(target.path, 'serverpod-real'));
-
-      expect(
-        await whichOnPath('serverpod', linkDir.path),
-        p.join(linkDir.path, 'serverpod'),
-      );
-    });
+  test('pathContainsDir matches whole entries only', () {
+    const path = '/usr/bin:/Users/a/develop/flutter/bin/:/bin';
+    expect(pathContainsDir(path, '/Users/a/develop/flutter/bin'), isTrue);
+    expect(pathContainsDir(path, '/Users/a/develop/flutter'), isFalse);
+    expect(pathContainsDir(null, '/bin'), isFalse);
   });
 }

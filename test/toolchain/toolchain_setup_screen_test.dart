@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:appstudio/previews/preview_data.dart';
 import 'package:appstudio/theme/app_theme.dart';
+import 'package:appstudio/toolchain/tool_status.dart';
+import 'package:appstudio/ui/toolchain/toolchain_notices.dart';
 import 'package:appstudio/ui/toolchain/toolchain_setup_dialog.dart';
 import 'package:appstudio/ui/toolchain/toolchain_setup_screen.dart';
 import 'package:flutter/material.dart';
@@ -90,10 +92,10 @@ void main() {
     await settleDialog(tester);
 
     expect(find.byType(ToolchainSetupDialog), findsOneWidget);
-    expect(find.text('Set up toolchain'), findsOneWidget);
+    expect(find.text('Set up your tools'), findsOneWidget);
     // The plan is fully populated the moment it appears.
     expect(find.text('Flutter SDK'), findsOneWidget);
-    expect(find.text('Download'), findsOneWidget);
+    expect(find.text('Install'), findsOneWidget);
   });
 
   testWidgets('a failed preflight explains itself and retries on demand',
@@ -143,9 +145,10 @@ void main() {
 
   testWidgets('no plan is raised when the preflight leaves nothing to install',
       (tester) async {
-    // A newer published manifest can pin versions the host already satisfies.
-    // The plan dialog only closes itself once an install has run, so an empty
-    // one would sit there forever over the shell main.dart has switched to.
+    // The user can install a tool in a terminal while the plan is being looked
+    // up. The plan dialog only closes itself once an install has run, so an
+    // empty one would sit there forever over the shell main.dart has switched
+    // to.
     final tools = _ScriptedTools(inventory: emptyInventory);
     await pumpScreen(tester, tools);
 
@@ -165,5 +168,66 @@ void main() {
 
     expect(tools.preflights, 0);
     expect(find.byType(ToolchainSetupDialog), findsNothing);
+  });
+
+  testWidgets('an earlier build\'s tools are explained, then removed, before '
+      'anything is planned', (tester) async {
+    final tools = _ScriptedTools(inventory: legacyInventory);
+    await pumpScreen(tester, tools);
+    await settleDialog(tester);
+
+    expect(find.byType(LegacyInstallNotice), findsOneWidget);
+    expect(tools.legacyRemovals, 0);
+    expect(tools.preflights, 0);
+
+    await tester.tap(find.text('Continue'));
+    await settleDialog(tester);
+    // A second pump for the route's exit transition.
+    await settleDialog(tester);
+
+    expect(tools.legacyRemovals, 1);
+    expect(find.byType(LegacyInstallNotice), findsNothing);
+    // With the old copies gone, setup carries on to the new install.
+    expect(tools.preflights, 1);
+  });
+
+  testWidgets('a Flutter the user must update blocks until they have',
+      (tester) async {
+    final tools = _ScriptedTools(inventory: manualUpdateInventory);
+    await pumpScreen(tester, tools);
+    await settleDialog(tester);
+
+    expect(find.byType(ManualUpdateDialog), findsOneWidget);
+    expect(find.text('/Users/preview/flutter/bin/flutter upgrade'),
+        findsOneWidget);
+    expect(tools.preflights, 0);
+
+    // Still old: the dialog stays, and says so.
+    await tester.tap(find.text('Check again'));
+    await settleDialog(tester);
+    expect(find.byType(ManualUpdateDialog), findsOneWidget);
+    expect(find.textContaining('Still out of date'), findsOneWidget);
+
+    tools.inventory = completeInventory;
+    await tester.tap(find.text('Check again'));
+    await settleDialog(tester);
+    await settleDialog(tester);
+
+    expect(find.byType(ManualUpdateDialog), findsNothing);
+  });
+
+  test('the update command switches channel only when it has to', () {
+    const candidate = ToolCandidate(
+      id: ToolId.flutter,
+      source: ToolSource.host,
+      fitness: ToolFitness.wrongVersion,
+      root: '/opt/flutter',
+      facts: {'channel': 'beta'},
+    );
+    expect(
+      manualUpdateCommand(candidate),
+      '/opt/flutter/bin/flutter channel stable\n'
+      '/opt/flutter/bin/flutter upgrade',
+    );
   });
 }

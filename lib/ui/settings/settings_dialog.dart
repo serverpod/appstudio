@@ -130,11 +130,15 @@ class _SettingsDialogState extends State<SettingsDialog> {
     final toolchains = widget.toolchains;
     final installable = toolchains.inventory.installable;
     if (installable.isEmpty || toolchains.isInstalling) return null;
+    final bytes = toolchains.plan.covers([for (final t in installable) t.id])
+        ? toolchains.plan.downloadBytes
+        : 0;
     return ShadButton(
+      enabled: !toolchains.isBusy,
       onPressed: toolchains.isBusy ? null : toolchains.installMissing,
       child: Text(
-        'Install ${installable.length == 1 ? '1 tool' : '${installable.length} tools'} '
-        '(${formatBytes(toolchains.inventory.downloadBytes)})',
+        'Install ${installable.length == 1 ? '1 tool' : '${installable.length} tools'}'
+        '${bytes > 0 ? ' (${formatBytes(bytes)})' : ''}',
       ),
     );
   }

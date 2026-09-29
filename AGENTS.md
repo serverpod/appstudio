@@ -15,14 +15,13 @@ lib/
   session/               # ProjectSession (open project, recents)
   terminal/              # xterm wrapper
   theme/                 # Shad themes, layout constants, ThemeController
-  toolchain/             # Bundled vs host flutter/dart/serverpod/opencode
+  toolchain/             # Probe + install CLT, Flutter, Serverpod CLI (official sources)
   widgets/               # Shared UI (IconSegmentedControl, MenuItemTile)
 packages/
   mac_menu_bar/            # Local fork — SF Symbol icons, separators, reset()
   webview_cef/             # Local fork — CEF resize + skip Helper (Alerts)
 tool/
-  bundle_toolchain.sh, distribute_macos.sh
-toolchain/               # Release bundle (see README)
+  distribute_macos.sh, publish_*.sh, set_version.sh   # releasing the app
 ```
 
 UI reference for design patterns: `../cloudui/cloudui_flutter/`.
@@ -34,16 +33,13 @@ in this section is dormant behind it.** The code is all still here; the flag is
 the whole switch, and flipping it to `true` brings the feature back intact. Read
 the rest of this section as what happens when it is on.
 
-Off, four things step back, and each reads the flag directly:
+**OpenCode is no longer a tool App Studio installs**, whatever the flag says —
+it is not in the manifest, not probed and has no Settings → Tools row. With the
+flag on, `OpenCodeServe` runs whichever `opencode` is on the user's `PATH`, and
+reports it missing otherwise.
 
-- **`ToolProbe.inventory()` does not probe `opencode`.** It is left out of the
-  inventory rather than probed and filtered — an id that is absent cannot be
-  reported missing, cannot be downloaded and gets no Settings → Tools row, so
-  one condition covers the first-run setup screen, the Tools tab and
-  `missingRequired` together. The manifest entry is untouched, so nothing has to
-  be republished to bring it back. `ShimWriter` stops writing an `opencode`
-  shim, and *deletes* one a previous build left — it would otherwise point the
-  user at a Settings → Tools row that no longer exists.
+Off, three things step back, and each reads the flag directly:
+
 - **`IdeIntegration.opencode.builtIn` becomes `false`**, so `serverpod create`
   is no longer told to configure it on every new project. See the New projects
   section: `_neverInferred` in `project_settings.dart` had to stop keying off
@@ -61,11 +57,10 @@ Off, four things step back, and each reads the flag directly:
 Tests that cover the switched-on behaviour are skipped, not deleted —
 `test/support/agent_flag.dart` carries `skipWhenAgentOff` / `skipWhenAgentOn`.
 
-- Agent tab hosts a Cursor-style chat driven by bundled `opencode serve` (HTTP + SSE).
+- Agent tab hosts a Cursor-style chat driven by `opencode serve` (HTTP + SSE).
 - Scoped to the open project directory; restart serve on project switch.
 - **`opencode serve` starts as soon as a project opens — it does *not* wait for `previewReady`.** It only needs the project directory, and the Serverpod build it used to wait for takes minutes on a cold project, which left Settings unable to say which providers held a key. Starting early does not make the agent usable early: `canSend` still requires `previewReady` and `AgentPane` still shows its "Serverpod is starting" gate, so the main interface is unchanged. The trade is that the agent now outlives a server stop, which also makes a restart cheaper.
 - API keys via Settings → Providers tab → OpenCode `auth.json` / `PUT /auth/{id}`.
-- Bundle: `toolchain/opencode/<ver>/` (darwin-arm64 only); pin in `active.json`.
 - **Permissions:** `permission.asked` → reply with `POST /permission/{id}/reply`
   `{"reply": "once"|"always"|"reject"}`. Any other value is a 400 and the agent
   stays blocked forever, so never swallow the error — keep the card up.
@@ -389,7 +384,6 @@ notifying on every poll tick.
 ### Prerequisites (dev machine)
 
 - **Flutter 3.44+** / **Dart 3.12+** (host SDK for building App Studio itself)
-- **Serverpod CLI 4.0.0-beta.2** — `dart install serverpod_cli 4.0.0-beta.2` (used when no bundled toolchain)
 - **CEF / webview_cef:** `brew install cmake ninja`; then `cd macos && pod install`  
   (CEF binaries download into `packages/webview_cef/macos/third/cef/` — gitignored)
 
@@ -398,96 +392,134 @@ notifying on every poll tick.
 ```bash
 make deps              # pub get + CEF/pods (once, or when CEF is missing)
 make start             # flutter run -d macos
-make clean             # drop build/ + dist/ (keeps CEF, Pods, toolchain/)
-make clean_all         # also drop CEF, Pods and the dev toolchain
+make clean             # drop build/ + dist/ (keeps CEF, Pods)
+make clean_all         # also drop CEF, Pods and any old toolchain/ trees
 make build_debug       # unsigned zip
 make build             # Developer ID + notarized zip
 ```
 
-`start` / `build` / `build_debug` only need CEF; the app downloads its own tools.
+`start` / `build` / `build_debug` only need CEF; the app installs its own tools.
 
 **Stale-embed trap:** Xcode never deletes unknown files under `Contents/Resources`, so a build tree from before the toolchain moved out keeps a ~1.8 GB embed alive — it gets re-signed on every release and shipped in the archive (2.1 GB app instead of 350 MB). `distribute_macos.sh` deletes it defensively; `make clean` is the honest fix.
+
+### How tools get onto the Mac
+
+App Studio installs nothing privately. Each tool is installed **the way its own
+instructions say, into the place they name**, so the user's terminal, their
+editor and any AI agent see exactly the tools App Studio runs:
+
+| Tool | Installed with | Lands in | `PATH` line |
+|---|---|---|---|
+| Command Line Tools | `xcode-select --install` (Apple's own dialog) | `/Library/Developer/CommandLineTools` | — |
+| Flutter SDK | official archive from `releases_macos.json`, `unzip` | `~/develop/flutter` | `export PATH="$HOME/develop/flutter/bin:$PATH"` |
+| Serverpod CLI | `dart install serverpod_cli@<version>` | `~/Library/Application Support/Dart/install/bin` | `export PATH="$PATH":"$HOME/Library/Application Support/Dart/install/bin"` |
+
+- **The order is load-bearing.** Flutter runs on the CLT's `git`, and `dart
+  install` runs `install_name_tool` through the `/usr/bin` shims, which the
+  CLT make real. The Serverpod CLI is installed with the just-resolved
+  Flutter's `dart`. `ToolchainInventory.installable` is always in `ToolId`
+  order, and the controller refreshes between steps so each step sees the one
+  before it. The first failure ends the run — nothing after it could work.
+- **Versions come from `assets/toolchain_manifest.json` (schema 2) — ranges,
+  nothing else.** A fresh install takes the newest release inside the range:
+  the newest *stable* Flutter for this arch in Flutter's own feed, and the newest
+  non-retracted Serverpod CLI on pub.dev, preferring stable (pub's own rule).
+  Flutter's range deliberately has **no upper bound**: installs take the latest
+  stable and `flutter upgrade` goes to the latest stable, so a ceiling would put
+  the two at odds the day a new minor ships. There is no published manifest and
+  no user-raised minimum any more.
+- **`ToolsView.preflight()` looks the versions up** (`install_plan.dart`) — the
+  plan dialog shows them, and a HEAD on the Flutter archive gives its size. It
+  is the only network step before an install, and its failure is what the setup
+  error dialog reports.
+- **The Flutter archive is verified against the feed's sha256**, unzipped into
+  `~/develop/.flutter-install-<stamp>` and renamed into place, so a crash leaves
+  a staging directory (`collectGarbage` clears it) rather than half an SDK.
+  `unzip` is real in `/usr/bin` — not one of the CLT shims — and is what
+  Flutter's own instructions use.
+- **`~/develop/flutter` is never overwritten unless App Studio put it there.**
+  An empty directory is removed; anything else stops the install and says
+  where. `flutter precache --web` runs after, best effort — Flutter fetches the
+  same components on the first web build.
+- **Apple's installer reports nothing, so it is polled.** `xcode-select
+  --install` returns at once; the installer polls `xcode-select -p` for a real
+  `git` every 3 s. It also watches for the `Install Command Line Developer
+  Tools` process, so a window closed early reads as a failure after 15 s
+  instead of an endless wait. Cancel stops the wait, not Apple's installer.
+- **A copy App Studio did not install is never changed**, with one exception.
+  - An old **Flutter** of the user's gets `ToolAction.manual`: setup blocks on
+    `ManualUpdateDialog`, which gives the exact command (the SDK's full path,
+    plus `channel stable` when it is on another channel) and a **Check again**
+    button that re-probes without a restart. Installing a second SDK beside it
+    would leave the old one first on their `PATH`.
+  - An old copy **App Studio installed** is `ToolAction.update` — it runs
+    `flutter upgrade` itself. A *broken* one of ours is replaced.
+  - The **Serverpod CLI** is the exception: `dart install` replaces it in
+    place and is cheap, so an old one is reinstalled whoever put it there. A
+    copy the user had put in the `dart install` directory stays theirs in the
+    record, so uninstall never offers to remove it.
+
+### The install record — `~/.serverpod/app_studio_installs.json`
+
+`InstallRecord` (`install_record.dart`) lists every tool App Studio installed,
+with its path, version and **every `PATH` line it wrote, as `{file, line}`**.
+
+- **It is what makes a tool App Studio's.** `ToolSource.appStudio` vs
+  `ToolSource.host` (the Tools tab's "App Studio" / "Native" badges), whether an
+  old Flutter is `update` or `manual`, and what uninstall prefills all read it.
+- **A `PATH` line is recorded only if App Studio wrote it.** `addToShellPath`
+  writes nothing when the directory is already on the user's login-shell `PATH`
+  or the exact line is already in the file — a line that was already there is
+  not ours to remove later.
+- **The profile is `~/.zprofile` for zsh** (what Flutter's macOS instructions
+  say) and `~/.bash_profile` for bash. Any other shell gets the lines shown in
+  Settings → Tools to add by hand (`manualPathLines`). Both the Flutter line
+  and Dart's go in the same file so they are found together.
+- **Edits resolve symlinks first** and write through a temp file and a rename.
+  Dotfile managers link these files; renaming over the link would detach the
+  user's config from their repo.
+- **Flutter is recorded before its first run**, so an install interrupted during
+  `flutter precache` is still one App Studio knows it owns and can replace.
+- A missing or corrupt record reads as "nothing installed by App Studio" —
+  it only costs the uninstall prefill and the auto-update of an old Flutter.
+
+### Upgrading from a build that shipped its own tools
+
+Earlier builds kept every tool under
+`~/Library/Application Support/App Studio/toolchain`, wrapper scripts in
+`…/App Studio/bin`, and a fenced `# >>> App Studio >>>` block in `.zshrc` /
+`.bash_profile` / `.profile` pointing at the wrappers.
+
+- **`ToolchainInventory.legacyInstallFound` is part of `needsSetup`**, so a
+  legacy user always lands on the setup screen — even when every tool is
+  already on the Mac — and step one there is `LegacyInstallNotice`, which says
+  what changed. Continue runs `removeLegacyInstall()`: the three legacy
+  directories (`ToolchainPaths.legacyPaths`, including the pre-rename
+  `AppStudio` directory) and the fenced block in every rc file it could be in.
+  Then setup carries on as a first run.
+- **The old managed tree is never read.** The probe does not look there, so an
+  un-migrated install simply reads as missing tools — there is no state in
+  which the app runs on the old copies.
+- Uninstall runs the same cleanup, so a legacy block cannot survive it either.
 
 ### Tool resolution (in the app)
 
 - `ToolchainController` (`lib/toolchain/toolchain_controller.dart`) owns the resolved `Toolchain`. **Consumers read `toolchains.current` at call time — never capture it**, or they strand on a snapshot taken before the user installed anything.
-- Resolution is **per tool** across exactly two sources, in precedence order: managed (`~/Library/Application Support/App Studio/toolchain`) → host (already on this Mac). A missing OpenCode no longer invalidates Flutter.
-- **There is deliberately no dev-repo or bundled source.** `<repo>/toolchain` and `Contents/Resources/toolchain` used to sit in front of both and are gone: the release embeds no toolchain, and a repo tree silently overriding what the user installed made "which binary am I actually running?" unanswerable. `ToolSource` has two values and they are what the Tools tab badges say.
+- Every candidate is an ordinary install somewhere on the Mac; the record decides whether it is App Studio's. Flutter roots, in order: `FLUTTER_ROOT`, `flutter` on `PATH`, the recorded path, `~/develop/flutter`, `~/development/flutter`, `~/flutter`, `~/fvm/default`.
 - Executable getters are **nullable**. Spawn sites check `toolchain.unavailableReason(id)` first; a bare command name would only defer the failure to `Process.start`.
-- `Toolchain.resolve()` short-circuits at the first satisfied candidate (~350 ms). `deep: true` enumerates every candidate (~900 ms) and is only for the Tools Manager — the full sweep is too slow to run before `runApp`.
-- **Never probe `/usr/bin/{git,otool,install_name_tool,clang,ar,ld}`** — all confirmed CLT shims (identical 118,928-byte stub) that pop a modal installer. `codesign` at /usr/bin *is* real. Candidates come from Homebrew, `/Library/Developer/CommandLineTools`, and `$(xcode-select -p)`.
-- Flutter is version-detected from `bin/cache/flutter.version.json`, never by running `flutter --version` — that can trigger a precache download on a cold SDK.
-- **`PATH` is searched by `whichOnPath`, in Dart — never by shelling out to `/usr/bin/which`.** Every probe subprocess runs with `includeParentEnvironment: false` so a user's environment cannot sway version output, and `which` inherited that empty environment, so it had no `PATH` and returned null for *everything*. Tools were then only ever found at the hardcoded candidate paths, which silently missed a `dart install`ed Serverpod CLI (`~/Library/Application Support/Dart/install/bin`, **not** `~/.pub-cache/bin` — the stale copy there was the only one the probe saw) and any Flutter SDK outside `~/development`.
-- **A GUI launch only inherits launchd's `PATH`, so the probe falls back to the user's login shell** (`login_shell_path.dart`). Opened from Finder, `PATH` is `/usr/bin:/bin:/usr/sbin:/sbin` and nothing else, so a host Flutter outside the hardcoded roots and a `dart install`ed Serverpod CLI both resolved to nothing — and the app offered to download 662 MB of tools the Mac already had. The *same build* started with `make start` found them, which was the entire difference.
-  - The shell runs `-l -i -c`, and **the `-i` is the load-bearing flag**: `.zshrc` is the *interactive* rc and is where both users and installers put their `PATH` lines, while a login-only shell reads `.zprofile` and misses them. Terminal.app is login+interactive, so this reproduces what the user sees when they type `flutter` themselves.
-  - **It is a fallback, not a replacement.** `_which` tries the inherited `PATH` first and only then spawns a shell (~80 ms), so a terminal launch and a fully-managed install never pay for it at all. The result — including a failure — is memoised per `ToolProbe`.
-  - **Discovery only.** Candidates found this way are still executed by absolute path under the probe's own controlled environment, so `includeParentEnvironment: false` still holds and the user's shell cannot sway what a tool reports about itself.
-  - **Do not wait for the shell's stdout to reach EOF.** The shell's children inherit that pipe, so an rc that backgrounds anything — or a shell we had to kill, whose `sleep` outlived it — holds it open long after the answer is written. The reader completes on the closing marker instead, which is also what makes the timeout fire. `${PATH}` is braced for the same class of reason: unbraced, the trailing marker is read as part of the variable *name* and the answer comes back silently empty.
-- **Serverpod's host candidates check `~/Library/Application Support/Dart/install/bin` first**, ahead of `~/.pub-cache/bin`. That is where `dart install serverpod_cli` puts it; the pub-cache copy is the one that goes stale, and it used to be the only location the probe knew, so an up-to-date CLI installed the documented way was invisible unless it also happened to sit on `PATH`.
+- `Toolchain.resolve()` short-circuits at the first satisfied candidate (~350 ms). `deep: true` enumerates every candidate and is only for the Tools tab — the full sweep is too slow to run before `runApp`.
+- **The Command Line Tools are satisfied by `xcode-select -p` pointing at a directory with a real `usr/bin/git`** — the standalone tools or a full Xcode. Never execute `/usr/bin/{git,otool,install_name_tool,clang,ar,ld}` to find out: they are the CLT shims and pop a modal installer. Only App Studio's own install step opens that installer, on purpose.
+- Flutter is version-detected from `bin/cache/flutter.version.json`, never by running `flutter --version` — that can trigger a precache download on a cold SDK. The web-artifacts check is gone: it existed for the precached SDK App Studio used to ship.
+- `ToolProbe` takes an injectable `environment` for `PATH`, `FLUTTER_ROOT` and `PUB_CACHE`; tests that probe would otherwise find the Flutter on the machine running them.
+- **`PATH` is searched by `whichOnPath`, in Dart — never by shelling out to `/usr/bin/which`.** Every probe subprocess runs with `includeParentEnvironment: false` so a user's environment cannot sway version output, and `which` inherited that empty environment, so it had no `PATH` and returned null for *everything*.
+- **A GUI launch only inherits launchd's `PATH`, so the probe falls back to the user's login shell** (`login_shell_path.dart`). Opened from Finder, `PATH` is `/usr/bin:/bin:/usr/sbin:/sbin` and nothing else, so a Flutter outside the conventional roots and a `dart install`ed Serverpod CLI both resolved to nothing — and the app offered to install tools the Mac already had. The installer uses the same capture to decide whether a `PATH` line is needed.
+  - The shell runs `-l -i -c`, and **the `-i` is the load-bearing flag**: `.zshrc` is the *interactive* rc and is where many users and installers put their `PATH` lines, while a login-only shell reads `.zprofile` and misses them. Terminal.app is login+interactive, so this reproduces what the user sees when they type `flutter` themselves.
+  - **It is a fallback, not a replacement.** `_which` tries the inherited `PATH` first and only then spawns a shell (~80 ms). The result — including a failure — is memoised per `ToolProbe`.
+  - **Discovery only.** Candidates found this way are still executed by absolute path under the probe's own controlled environment.
+  - **Do not wait for the shell's stdout to reach EOF.** The shell's children inherit that pipe, so an rc that backgrounds anything holds it open long after the answer is written. The reader completes on the closing marker instead, which is also what makes the timeout fire. `${PATH}` is braced for the same class of reason: unbraced, the trailing marker is read as part of the variable *name* and the answer comes back silently empty.
+- **Serverpod's candidates check `~/Library/Application Support/Dart/install/bin` first**, ahead of `~/.pub-cache/bin`. That is where `dart install serverpod_cli` puts it; the pub-cache copy is the one that goes stale.
 - `PUB_CACHE` is deliberately **not** set: `package_config.json` stores absolute paths, so a private cache would make every switch to an external editor re-resolve the project.
-- Version rules live in `tool_version.dart`. A numeric-only suffix is a *packaging revision*, not a prerelease — dugite's `2.53.0-3` is newer than `2.53.0`, while `4.0.0-beta.1` is older than `4.0.0`.
-
-### Publishing tools (release engineer)
-
-```bash
-make update_serverpod V=4.0.0-beta.2          # copy from the local dart install
-make update_flutter   V=3.44.2                # download full SDK + set pin; carries Dart
-make update_llvm_tools V=23.1.1               # otool from that LLVM + cctools install_name_tool
-make dev_toolchain                            # or: build every tree at once
-make publish_toolchain                        # dry-run, confirm, then publish
-./tool/publish_toolchain.sh --only=git        # publish a subset (script directly)
-```
-
-- **There is no download for the Serverpod CLI** — pub publishes no macOS
-  archive — so `make update_serverpod` copies the bundle `dart install
-  serverpod_cli <version>` unpacked into
-  `~/Library/Application Support/Dart/install/app-bundles/`. Install it first.
-  The copy is `ditto`, to carry the signature and exec bits, and the staged
-  binary is then asked its own `--version`: the install path claims a version,
-  but only the binary knows one, and a mismatch would publish an archive whose
-  name, pin and manifest entry all disagree with its contents.
-- **`--only=` leaves the other pins alone.** A partial run reads the untouched
-  versions back out of `active.json` rather than falling back to the script's
-  own defaults, which would otherwise reset a pin to whatever the file was last
-  written with — and point the "already present?" checks at a tree that was
-  never built.
-- Bucket `gs://serverpod-appstudio-toolchain`, public read, reachable two ways —
-  see **One bucket, two URLs** below. Immutability is enforced by **`--if-generation-match=0` in the publish
-  scripts**, not by IAM — the release account holds `roles/owner` and *can*
-  overwrite or delete an object. **A mistaken publish cannot be undone by the
-  account that made it: always `--dry-run` first.**
-- Object names embed the build counter as a path segment
-  (`tools/<id>/<version>/b<build>/<id>-macos-arm64.tar.gz`), so repacking the same upstream
-  version is a new URL. There is no mutable `latest.json`.
-- **The build number is chosen per tool, not passed in.** The script walks
-  `b1`, `b2`, … and takes the first path that is either free or already holds
-  these exact bytes. `--build=N` sets where that walk starts, not where it ends.
-  That is what makes a full `./tool/publish_toolchain.sh` safe to run when only
-  one tool moved: the other four resolve to what is already published instead of
-  colliding with it and failing the run.
-- **Identity is proved by a `.sha256` sidecar published next to each archive**,
-  written after the archive so it can never advertise bytes that failed to
-  upload. Both probes are plain HTTPS, not `gcloud`, so `--dry-run` reports the
-  same decision a real run would take without needing credentials.
-- **Archives are packed with `gzip -n`, not tar's `-z`.** gzip stamps the
-  current time into its header otherwise, so two packs of one untouched tree
-  differ and the reuse check above can never recognise its own work.
-  `ensure_flutter_tools_cache.sh` is conditional for the same reason — an
-  unconditional `touch` there re-published the whole 673 MB SDK every run.
-- The script hashes the **exact bytes uploaded**, re-downloads to re-verify —
-  reused objects included, since the sidecar is only a claim about the bytes —
-  then rewrites `assets/toolchain_manifest.json`. Commit that file with the
-  release.
-- **It writes `version`, `build`, `installDir` and the platform entry; it never
-  writes `hostAccepts`.** The first four are packaging facts derived from
-  `active.json`, exactly like the object path, and leaving them to be hand-edited
-  is how a manifest ends up naming one version and downloading another. The
-  floor is policy and stays manual — but publishing a version the floor does not
-  mention prints a warning, because that failure is otherwise silent: the app
-  goes on accepting the older CLI it was supposed to stop accepting.
-- Do **not** put a service-account key in a `.env`. Write access here is effectively
-  code-signing authority over every install. Use `--impersonate-service-account` (no key
-  exists) or Workload Identity Federation in CI.
+- Version rules live in `tool_version.dart`. A numeric-only suffix is a *packaging revision*, not a prerelease — `2.53.0-3` is newer than `2.53.0`, while `4.0.0-beta.1` is older than `4.0.0`.
 
 ### One bucket, two URLs — and which one a caller may use
 
@@ -501,23 +533,27 @@ owns the distinction; nothing derives one URL from the other.
   read-back, and `published_max_build`'s feed read are all asking what is *in
   the bucket*, and a cached answer is not an answer to that question.
 - **Public** — `https://asdl.serverpod.dev/` — is the same bucket behind the
-  CDN, and every URL handed to a **user** uses it: the manifest's `baseUrl`, the
-  appcast enclosures, and `SPARKLE_FEED_URL`.
+  CDN, and every URL handed to a **user** uses it: the appcast enclosures, the
+  `downloads/macos.json` links, and `SPARKLE_FEED_URL`.
 - **The build-number gate is the one that cannot be allowed to read stale.** A
   low answer from `published_max_build` approves a build number already
   published, which blinds every installed copy to updates forever and cannot be
   undone. `set_version.sh` and `publish_dist.sh` both read the origin feed, and
   `fetch_uncached` cachebusts on top of that.
 - **The origin URL must keep working forever.** Every copy of App Studio built
-  before the CDN existed has it compiled in — as its Sparkle feed *and* as the
-  `baseUrl` of its baked manifest. The CDN is a second route to one bucket, not
-  a move; retiring the old URL strands those installs permanently.
+  before the CDN existed has it compiled in as its Sparkle feed. The CDN is a
+  second route to one bucket, not a move; retiring the old URL strands those
+  installs permanently.
+- **The `tools/` objects and `manifest.json` stay in the bucket.** Nothing
+  publishes them any more — App Studio installs its tools from their official
+  sources now — but builds from before that change still download from them on
+  first run, and they have to keep working until those builds update.
 - **`--bucket=NAME` falls back to the origin for the public URL too**
   (`public_base_url`). The CDN fronts exactly one bucket, so stamping its host
-  into a manifest built from a different one yields downloads that 404 — or,
+  into a feed built from a different one yields downloads that 404 — or,
   worse, silently resolve to the production object sharing that path.
-- **Only the three mutable objects are invalidated** — `appcast.xml` and
-  `manifest.json` (`max-age=300`) and `downloads/macos.json` (`max-age=60`).
+- **Only the mutable objects are invalidated** — `appcast.xml`
+  (`max-age=300`) and `downloads/macos.json` (`max-age=60`).
   `invalidate_cdn_path` is best-effort and returns 0: the object is already in
   the bucket, the TTL it waits out is minutes, and everything that must not be
   stale reads the origin anyway — so failing a release that already succeeded
@@ -531,60 +567,6 @@ owns the distinction; nothing derives one URL from the other.
   (`serverpod-appstudio`): backend bucket `asdl-backend`, url map `asdl-url-map`,
   Google-managed cert `asdl-cert`. Those names are in `bucket_urls.sh` because
   the invalidation needs them.
-
-### Native tools: what we can and cannot ship
-
-Serverpod's per-start native-assets step runs exactly three commands on prebuilt dylibs:
-`otool -D`, `install_name_tool -id/-change`, then `codesign --force --sign -`.
-
-- `/usr/bin/{otool,install_name_tool,clang,ar,ld,lipo,strip}` are **all the same 118,928-byte
-  Xcode CLT shim** and pop a modal installer on a clean Mac. Never execute them.
-- `/usr/bin/codesign` (459,824 bytes) **is** a real base-system binary — nothing to ship.
-- We ship LLVM's `llvm-objdump` under the name `otool` (it dispatches on `argv[0]`; `otool -D`
-  output is byte-identical to Apple's) and an `install_name_tool` **built from Apple's cctools
-  sources** via cctools-port, statically linked, pinned by commit in `bundle_toolchain.sh`.
-- **`install_name_tool` must not be `llvm-objcopy`, and it was.** Every `dart compile exe`
-  output carries an `LC_NOTE` load command (data owner `__dart_app_snap`, the embedded
-  snapshot), `dart install` runs `install_name_tool -add_rpath` on that executable, and
-  `llvm-objcopy` refuses to lay out a Mach-O with a load command it does not know:
-  `unsupported load command (cmd=0x31)`. That took out `dart install` and `serverpod cloud`
-  (which self-installs the cloud CLI through it) on every Mac without the CLT — exactly the
-  Macs the managed toolchain exists for. LLVM `main` still has the same allowlist, so a newer
-  release does not fix it; cctools handles the command, and is what Apple ships.
-  `bundle_toolchain.sh`'s `verify_llvm_tools` compiles a Dart program and adds an rpath to
-  it, and refuses to stage the tree otherwise.
-- Neither tool re-signs after editing a Mach-O (cctools-port writes a placeholder signature
-  and says so on stderr) — which is fine, because Serverpod and `dart install` both run
-  `codesign` on the very next line.
-- **The `llvm_tools` pin is the LLVM version, and a cctools change only reaches installed
-  copies with an LLVM bump.** `ToolchainInventory.updatable` compares what `otool --version`
-  reports against the manifest pin; nothing reads the build number. `make update_llvm_tools
-  V=<llvm>` rebuilds both halves; bumping `CCTOOLS_PORT_COMMIT` alone republishes a tree no
-  installed copy will ever pick up.
-- **Compiling** native code from source is different: `native_toolchain_c` needs `clang`, `ar`
-  and `xcrun --show-sdk-path`, and **the macOS SDK cannot be redistributed**. That path
-  requires Xcode CLT; detect it and offer `xcode-select --install`.
-
-### Building the toolchain trees (release engineer)
-
-`./tool/bundle_toolchain.sh` builds the trees that `publish_toolchain.sh` uploads. **The app no longer reads `<repo>/toolchain`** — see the resolution note above — so this is a packaging step, not a way to run against local tools. `make dev_toolchain` still builds the tree for that purpose.
-
-```
-toolchain/
-  active.json                          # pins versions (flutter, serverpod_cli, opencode, git)
-  flutter/<version>/                   # full SDK, precached for web
-  serverpod_cli/<version>/{bin,lib}/   # full CLI bundle — lib/ has sqlite dylibs (required)
-  opencode/<version>/opencode          # darwin-arm64 CLI binary
-  git/<version>/{bin,libexec}/         # portable Git (dugite-native) — avoids Xcode CLT stub
-  llvm-tools/<version>/bin/            # otool (LLVM) + install_name_tool (cctools), no CLT stubs
-  bin/{flutter,dart,serverpod,opencode,git}
-```
-
-- **`./tool/bundle_toolchain.sh`** — downloads the full Flutter SDK (not stripped) and runs `flutter precache --web`; downloads OpenCode + portable Git; downloads an official LLVM release and installs `llvm-objdump` as `otool`, and builds `install_name_tool` from the pinned cctools-port commit (needs Xcode or the CLT on the release Mac). Does **not** download Serverpod; copy the full CLI bundle into `toolchain/serverpod_cli/<version>/` first. A version flag both selects what to fetch and becomes the new pin in `active.json`; a tool run without its flag rebuilds whatever `active.json` already pins. Flags: `--force`, `--flutter=VERSION`, `--serverpod=VERSION`, `--opencode=VERSION`, `--git=VERSION`.
-- `Toolchain.resolve()` prepends portable `git` + `cctools` to `PATH` and sets `FLUTTER_PREBUILT_ENGINE_VERSION` so target Macs don't need Xcode / CLT for web preview.
-- Nothing is embedded in the `.app` at build time — `tool/embed_toolchain.sh` is dead and referenced by neither the Makefile nor the Xcode project. `distribute_macos.sh` still asserts no `Contents/Resources/toolchain` survives, which now catches a stale build tree rather than a live feature.
-
-Opened Serverpod projects must launch Flutter in **`web-server`** mode on port **9998** (Serverpod `flutter_apps` config).
 
 ### Release / distribute
 
@@ -871,10 +853,8 @@ install. Sparkle would also catch it, but later and less clearly.
 - **Prefer a shad component over a hand-built one.** Panels drawn as a `DecoratedBox` with tinted `scheme.muted`/`scheme.border` are the pattern to replace: `ShadCard` already carries the right fill, hairline border, radius and padding. Likewise `ShadSeparator` over a `Divider`, and `ShadRow`/`ShadColumn`/`ShadGap` — whose `spacing` is in 4px theme steps, not pixels — over `SizedBox` spacers. Both Settings panes are converted; there is no tinted `DecoratedBox` left in the dialog. The install banner is a `ShadCard` on `scheme.muted`.
 - **One table, `widgets/settings_table.dart`, for the setup dialog, Settings → Tools and Settings → Providers.** They ask the same question of different subjects — what is this, and where does it stand — and drawing it three times is what let the setup dialog offer a plain download where the Tools tab said "Update needed". `versionBadge` lives beside it so the `1.15.13 → 1.18.4` form is written once. `SettingsTable` renders nothing when handed no rows — `ShadTable.list` asserts on an empty child list, and an empty inventory is reachable, since `ToolchainController.create` falls back to one when the probe throws rather than refusing to launch.
 - The Tools tab deliberately has no per-row buttons, install path or version-range line. Those were answering questions nobody asked; installing is the dialog footer's job, and removing everything is the App Studio menu's.
-- **`llvm-tools` is displayed as "Developer tools", not "Native tools"** — it ships `otool` and `install_name_tool`, which is what Apple calls the command line developer tools, and the old name collided with the `Native` source badge to produce a row reading "Native tools … Native". The name comes from the manifest (`assets/toolchain_manifest.json`), with `ToolId`'s as the fallback; `publish_toolchain.sh` rewrites only hashes, sizes and ids, so an edit there survives a publish.
-- **Installing globally is no longer a choice, and there is no checkbox for it.** Putting the tools on the user's own `PATH` is what lets an external editor or AI agent find the toolchain, and with `kOpenCodeAgentEnabled` off that is the *only* way it is reached from outside — so the question had one useful answer. The setup dialog writes the block unconditionally after the download; `ManageToolsPane`'s `_ShellPathSection` writes it on open when it finds it `absent`, which is also what un-sticks a user who ticked the old checkbox off and would otherwise have no way back.
-  - **It still writes nothing when `inventory.requiredToolsAreNative`** — every required tool is already on this Mac, so our block would add nothing, and editing someone's shell config to no effect is worse than leaving it alone. OpenCode is excluded from that check: it *is* the agent, so an external one has no reason to look for it.
-  - **`edited` and `unsupported` are the two it cannot fix, and they are all the section ever draws.** A block the user wrote inside is left alone and reported, with **Replace (backs up first)** as the only action — there is no opting back out, so the old "Remove it" went with the checkbox. A shell we cannot edit gets the export line to add by hand. In every other state the section renders nothing.
+- **Putting the tools on the user's `PATH` is not a choice, and there is no checkbox for it.** It is what lets an external editor or AI agent find the toolchain, so it is part of installing: the installer writes the official line for each tool it installs, unless the user's login shell already has that directory. The Tools tab says nothing about it in the ordinary case; for a shell App Studio cannot edit (fish, nu) it shows the lines to add by hand in a `CommandBlock`.
+- **The Tools tab has no Update All.** A copy App Studio installed that falls out of range becomes `ToolAction.update` and appears in the footer's Install button like anything else missing; a copy the user installed gets a banner with the command to run.
 - **Settings → Providers lists only providers that hold a key**, each with a green Connected badge and a trash button, and an Add Provider button that opens `add_provider_dialog.dart` (provider dropdown, key field, Connect/Cancel, no close X, narrower than Settings). It used to render a card with a key field for all seventeen curated providers, which buried the two that were actually configured. The dropdown filters out anything already connected: the fix for a bad key is remove-then-add, not a second add.
 - **The Add Provider dialog does the save itself** and stays open on failure with the key still in the field, because losing a pasted key to a dialog that closed is the worst possible response to an error. Be careful what it claims: `saveApiKey` writes to the auth store and treats that as the source of truth — it swallows a failed `PUT /auth/{id}` and restarts serve — so **a wrong-but-well-formed key does not fail here**. What the pane's `_connect` can report is an exception from the write, and the provider not appearing in `connectedProviders` afterwards, which is "that did not take effect" rather than "your key is wrong". Do not word it as validation.
 - Its width comes from `ShadDialog.constraints`, not a fixed-width child: the dialog sizes itself to its widest content, so a narrower child just leaves the inputs floating short of the edge.
@@ -1066,6 +1046,47 @@ button — now an expand icon — is the way back.
   including the two subtle ones: compact → desktop restores the window but
   stays minimized, and desktop-minimized → phone re-enters compact.
 
+## Analytics (PostHog)
+
+`lib/analytics/` sends `app_studio.*` events to the **same PostHog project the
+Serverpod CLIs report to** — one key (`kPostHogProjectApiKey`, the `phc_…` the
+`serverpod_cli` and `serverpod_cloud_cli` binaries carry), the EU host, and
+the same body `cli_tools`' `PostHogAnalytics` posts. It is a ~40-line client
+on the app's existing `http` dependency rather than a dependency on
+`cli_tools`, which would pull in `args`, `config` and `pub_api_client` for one
+class.
+
+- **Three events, one method each on `AppAnalytics`**, so a property set is
+  written once: `app_opened` (from `main()`, with `tool_sources` and whether
+  setup is required), `project_created` (from `ProjectCreator.create`, success
+  or not, with the `failure_stage` — `validation`, `cli` or
+  `configure_preview`) and `project_opened` (from `_onSessionChanged`, so the
+  picker, Open Recent and a fresh creation all count).
+- **Every event carries the launch context**: `$lib: app_studio`,
+  `$lib_version`/`app_version`/`app_build` (from `UpdateState`, which already
+  reads `Info.plist` — no `package_info_plus`), `platform` spelled `MacOS`
+  exactly as `cli_tools` spells it so one PostHog filter covers the CLIs and
+  the app, `os_version`, `dart_version` and `is_debug`.
+- **The distinct id is `~/.serverpod/uuid`, shared with the CLIs.** Read if
+  present, created in the same v4 format if not, so one person is one user
+  across all three tools. The uninstaller removes `~/.serverpod`, so a fresh
+  install gets a fresh id — which is also what the CLIs do. Unwritable →
+  `'unknown'`, never "no event".
+- **Debug and profile builds send nothing**, so `make start` runs do not
+  pollute the project — the CLI gates on `productionMode` for the same reason.
+  `APPSTUDIO_ANALYTICS=1` in the environment overrides that; it is how a
+  change here is verified end to end.
+- **Fire-and-forget, never awaited on a user path.** `capture` returns at
+  once, sends are swallowed on failure and time out at 2 s, and nothing flushes
+  on quit — a quit must not wait on the network. `flush()` exists for tests.
+- **Call sites use the `appAnalytics` global, which is a no-op until `main()`
+  installs one** — the same shape as the CLI's `cliAnalytics`. That keeps
+  `ProjectCreator` free of an analytics parameter and means a test that
+  constructs one sends nothing. `test/support/recording_analytics.dart`
+  installs a recording sink for one test and puts the disabled one back.
+- No opt-out UI yet. The CLI has `--no-analytics`; a Settings toggle is the
+  obvious next step if one is wanted.
+
 ## Settings & uninstall
 
 - **One dialog, two tabs** (`ui/settings/settings_dialog.dart`): Providers and
@@ -1091,24 +1112,41 @@ button — now an expand icon — is the way back.
   listening to the controller dirty mid-build. Harmless while it was a
   standalone dialog; a crash the moment the Settings dialog wrapped it.
 - **Uninstall lives in the App Studio menu**, not the Tools tab — it is not a
-  tool operation. `uninstall/uninstaller.dart` clears three separate stores:
-  the Application Support directory, the shell `PATH` block in the user's rc
-  file (in `$HOME`, so deleting the directory alone would leave a dead entry in
-  every new terminal), and preferences (NSUserDefaults), which is what makes a
-  relaunch behave like a fresh install — the recents list and the startup-notice
-  dismissal live there, not on disk.
+  tool operation. App Studio's own data always goes: the Application Support
+  directory, whatever an earlier build left for tools (its private toolchain
+  and fenced `PATH` block), and preferences (NSUserDefaults), which is what
+  makes a relaunch behave like a fresh install.
+- **The tools App Studio installed are checkboxes, ticked, each with what
+  removing it would break written under it** (`uninstallConsequence`). They are
+  real installs now, and other projects, Homebrew or the user's own terminal
+  may rely on them, so they are a choice rather than implied. Only tools in the
+  install record that are still on disk are offered (`removableTools`); a tool
+  the user installed themselves is never listed.
+- **Removing Flutter forces the Serverpod CLI** (`kUninstallRequires`): the CLI
+  runs on Flutter's Dart. The CLI's box is ticked and disabled while Flutter's
+  is, and says why. The Command Line Tools are not forced either way — removing
+  them leaves Flutter without `git`, which its consequence text says.
+- **Order matters, and it is Serverpod → pub cache → Flutter → CLT.** `dart
+  uninstall` and `dart pub cache clean` both need Flutter's Dart. The CLT go
+  through `osascript … with administrator privileges` running Apple's
+  documented `rm -rf /Library/Developer/CommandLineTools`; a full Xcode is
+  never touched, and cancelling the password prompt is reported as a failure.
+- **Each `PATH` line goes exactly as recorded.** `withoutLine` removes lines
+  equal to the recorded one and touches nothing else. Dart's line stays while
+  anything else is still installed with `dart install` — that directory is
+  shared.
 - It never aborts on a failed step: stopping halfway leaves neither a working
   install nor a clean machine. Failures are collected and named on the final
   screen, which never claims a clean uninstall that did not happen.
-- **`~/.serverpod` is removed too.** The Serverpod CLI keeps its own state
-  there — per-version template caches, the analytics id and run counter, the
-  latest-version check, and the cloud CLI's login — and a fresh install would
-  otherwise inherit it. It is shared with a standalone `serverpod` the user
-  may have, which is why the confirm dialog names it; the cloud login is the
-  one thing in there that is not re-derived on the next run.
-- Deliberately **not** removed: `~/.pub-cache` (opt-in checkbox — shared with
-  every Dart project) and `~/.local/share/opencode/auth.json` (API keys the
-  OpenCode CLI uses independently of App Studio).
+- **`~/.serverpod` goes with the Serverpod CLI, and only then.** The CLI keeps
+  its own state there — template caches, the analytics id, the cloud CLI's
+  login — and so does the install record. When the CLI goes, the directory
+  goes, and `persistRecord()` writes back whatever App Studio installed that
+  the user chose to keep, so it can still be offered next time.
+- Deliberately **not** removed: anything App Studio did not install,
+  `~/.pub-cache` (opt-in checkbox — shared with every Dart project) and
+  `~/.local/share/opencode/auth.json` (API keys the OpenCode CLI uses
+  independently of App Studio).
 - **Both uninstall screens ride on `LandingScaffold`**, like the start page and
   first-run setup: with no project, no toolchain and no session left, the
   branded gradient is the one surface here that does not depend on something
@@ -1128,10 +1166,11 @@ make previews    # browser previews of the toolchain install, hot-reloading
 ```
 
 - **The previews cover the first-run toolchain install and nothing else** — the
-  plan, the two install states, both failure paths and the setup screen, each
-  emitted light and dark. That is the flow that is genuinely hard to look at:
-  it needs a machine with no toolchain, a 662 MB download to reach the middle,
-  and a dead network for the failures. Everything else in the app can be
+  legacy notice, the "update your Flutter" prompt, the plan, the install
+  states, the failure paths and the setup screen, each emitted light and dark.
+  That is the flow that is genuinely hard to look at: it needs a machine with
+  no tools, Apple's installer and a 2 GB download to reach the middle, and a
+  dead network for the failures. Everything else in the app can be
   reached by hand in a running copy, so it does not earn a preview.
 - **`dialog_previews.dart` warms the theme from `BrightnessPreview.transform`,
   and every preview fails without it.** Building a `ShadThemeData` reads
@@ -1158,14 +1197,13 @@ make previews    # browser previews of the toolchain install, hot-reloading
   `dart:io`, which is non-negotiable: **the widget preview scaffold only
   supports the web device**, so anything reaching `Platform` or `File` cannot
   be previewed at all.
-- Keep those interfaces narrow. The panes used to reach through the controller
-  for `manifest`, `paths`, `requirements` and `shellPath` purely to build
-  strings; those are now `upgradeCommand`, `requirementLabel`,
-  `toolchainRootLabel` and the `shell*` getters, so command construction and
-  path prettifying stay out of the widget layer.
+- Keep those interfaces narrow. Path prettifying stays out of the widget layer
+  (`flutterInstallLabel`, `shellProfileLabel`, `manualPathLines`), and so does
+  anything that reads the filesystem.
 - `dart:io` is kept out of shared value types by conditional imports:
-  `platform_key.dart` and `util/home_dir.dart`. `ShellPathState` and
-  `UninstallResult` live in their own files for the same reason. Before adding
+  `platform_key.dart` and `util/home_dir.dart`. `install_plan.dart`,
+  `toolchain_manifest.dart` and `UninstallResult` / `UninstallChoice` are
+  `dart:io`-free for the same reason. Before adding
   an import to a widget file, check it does not drag `dart:io` in — the whole
   preview surface is one careless import away from breaking.
 - `lib/previews/preview_data.dart` holds the fakes and fixtures for the
@@ -1189,18 +1227,16 @@ previewed even if the set were widened again.
 
 ## First run
 
-`main.dart` picks the whole screen from `toolchains.inventory.installable`:
-non-empty means `ToolchainSetupScreen`, empty means `StudioShell`. **The start
+`main.dart` picks the whole screen from `toolchains.inventory.needsSetup`:
+true means `ToolchainSetupScreen`, false means `StudioShell`. **The start
 page and the setup flow are two screens, never stacked.** The dialog used to
 float over the start page, which offered New Project and Open Project buttons
 that could not work — there is no Flutter SDK to build with yet.
 
-- The gate is `installable` (missing **and** we have an artifact), not
-  `isComplete`. A required tool we cannot supply is unfixable by this screen, so
-  blocking on it would be a dead end; those surface as the toolbar's destructive
-  badge instead. It is `ToolchainInventory.needsSetup`, named rather than
-  written out, because three things have to agree on it and would otherwise
-  drift: the screen `main.dart` picks, `MacAppMenu.canOpenProjects` — ⌘O, Open
+- The gate is `ToolchainInventory.needsSetup`: something App Studio can
+  install or update, a Flutter the user has to update themselves, or an earlier
+  build's toolchain still to remove. It is named rather than written out,
+  because three things have to agree on it and would otherwise drift: the screen `main.dart` picks, `MacAppMenu.canOpenProjects` — ⌘O, Open
   Recent and Settings would walk straight past the gate — and
   `StudioShell._showSettings`.
 - **Settings is disabled *and* inert while setup is up, which is two mechanisms
@@ -1209,9 +1245,7 @@ that could not work — there is no Flutter SDK to build with yet.
   belt to the first's braces — but every route into the dialog goes through that
   one function (the menu item via `AgentController`'s handler, and the toolbar's
   warning badge), and the only pane Settings could show then is a Tools tab
-  duplicating the setup screen already on top of it. The badge is never the
-  casualty: the shell is built exactly when nothing is installable, so a badge
-  that is visible is always about a tool `needsSetup` ignores.
+  duplicating the setup screen already on top of it.
 - **`MacMenuBar.setSettingsEnabled` is pushed before the menus are installed,
   not after.** The plugin installs its Settings override from a block queued at
   registration — which force-enables the item — and its own flag defaults to
@@ -1279,41 +1313,41 @@ that could not work — there is no Flutter SDK to build with yet.
   image in both themes and the spinner sits over its saturated middle, where the
   default (`primary`, brand blue) all but disappears — the same reason the banner
   hardcodes black.
-- **The screen is a spinner and nothing else until the plan is ready.** Every
-  number in the dialog — versions, download sizes — comes from the bucket, so
-  `ToolsView.preflight()` is awaited before the dialog is raised. Raising it
-  first and filling the table in afterwards is what made a slow network read as
-  a stuck dialog.
-- **A failed published-manifest fetch is not a preflight failure.**
-  `manifest.json` is an optional upgrade over the pin baked into the app — the
-  app is fully functional on the baked pin alone — so treating its absence as
-  fatal would mean a bucket hiccup could stop any first run from getting past
-  this screen. (It *is* published: `publish_toolchain.sh` uploads it at the end
-  of every run. An older note here said it 404s, which stopped being true.) What `preflight` reports is an
-  unreachable **artifact** — `ToolManifest.probeArtifacts` HEADs each one, and a
-  miss means that download is about to fail. It probes only the tools actually
-  about to be fetched (`only:`), so a host copy of Flutter cannot be blocked by
-  an artifact nobody would download.
+- **Setup is a sequence of dialogs over a spinner** (`_drive()` in
+  `toolchain_setup_screen.dart`), each blocking on the user so the loop cannot
+  spin: the legacy notice and cleanup first, then the "update your Flutter"
+  prompt, then the plan. The Flutter prompt comes before the plan because the
+  Serverpod CLI is installed with that Flutter's `dart`.
+- **The plan is not raised until `ToolsView.preflight()` has answered.** Every
+  version in it comes from Flutter's release feed and pub.dev; raising the
+  dialog first and filling the table in afterwards is what made a slow network
+  read as a stuck dialog.
+- **The plan says where everything goes.** It edits the user's machine outside
+  the app, so the description names `~/develop/flutter`, `dart install`,
+  Apple's installer and the shell profile, and each row says how its tool
+  arrives (a size, "From Apple", "dart install", "flutter upgrade").
 - Failure raises `ToolchainSetupErrorDialog` — the message plus **Try again**,
-  which loops back to the preflight, and **Quit**. There is no third option:
-  the app cannot build a Serverpod project without these tools and cannot fetch
-  them without a network.
+  which loops back, and **Quit**. There is no third option: the app cannot
+  build a Serverpod project without these tools.
 - Both dialogs are `canPop: false`. The plan dialog closes *itself* when the
   inventory comes back complete, which is why that uses `Navigator.pop` and not
   `maybePop` — `maybePop` honours the same `PopScope` that refuses the user.
-- `_drive()` re-checks `installable` after the preflight. A newer manifest can
-  pin versions the host already satisfies, and the plan dialog only self-closes
-  once an install has run, so an empty one would strand a modal over the shell.
+- `_drive()` re-checks `installable` after the preflight. The user can install
+  a tool in a terminal meanwhile, and the plan dialog only self-closes once an
+  install has run, so an empty one would strand a modal over the shell.
 - **An install runs to the end without ever going back to the plan.** There is
-  real work after the last byte lands — a deep re-probe, then the shell `PATH`
-  write — and showing the download plan again through it read as the install
-  having been thrown away, right before the dialog closed. Two flags keep the
-  progress view up, because the tail spans two owners:
-  `ToolchainController._finalizing` folds into `isInstalling` and covers the
-  re-probe, and the dialog's own `_running` covers `setShellPathEnabled`, which
-  runs after `installMissing()` has already returned. `_closeIfComplete` defers
-  to `_running`, so the self-close fires once — after the last step, from
-  `_download`'s `finally`.
+  real work after the last step — a deep re-probe — and showing the plan again
+  through it read as the install having been thrown away, right before the
+  dialog closed. `ToolchainController._finalizing` folds into `isInstalling`
+  and covers it; the dialog's own `_running` covers the rest of
+  `installMissing()`. `_closeIfComplete` defers to `_running`, so the
+  self-close fires once, from `_install`'s `finally`.
+- **Progress is per step, not one bar.** Only the Flutter download can measure
+  itself; Apple's installer, `flutter upgrade` and `dart install` report
+  nothing. So the bar is determinate while downloading and indeterminate
+  otherwise, and the caption says "Step 2 of 3" plus either the byte count or
+  what the step is doing (`ToolPhase.hint`) — for Apple's installer, that the
+  user has to click through its window.
 - **The dialog is closed from outside, and its self-close checks for that.**
   Because it now outlives the moment `installable` goes empty, `main.dart`'s
   post-frame `_clearPushedRoutes()` is what actually takes it off on a first
@@ -1322,15 +1356,14 @@ that could not work — there is no Flutter SDK to build with yet.
   as it goes, which is precisely the failure the comment in
   `_onToolchainsChanged` has always warned about. `_closeIfComplete` therefore
   pops only while its own route `isCurrent`. The window is one frame wide (the
-  route is out of the history, the `State` is not yet unmounted) and the shell
-  PATH write lands right in it; `test/toolchain/toolchain_setup_dialog_test.dart`
+  route is out of the history, the `State` is not yet unmounted) and the end of
+  the install can land right in it; `test/toolchain/toolchain_setup_dialog_test.dart`
   reproduces it with `removeRoute` and fails without the check.
-- Past the last download there is nothing left to cancel, so **Cancel dims
-  rather than disappearing** — in the setup dialog and in the Tools tab's
-  banner. The line over the bar comes from `InstallProgress.statusLabel`, which
-  names the first tool still working and calls the tail "Finishing up…";
-  without it the label fell back to "Installed Developer tools…", which claims
-  the run is over while the dialog is visibly still busy.
+- Past the last step there is nothing left to cancel, so **Cancel dims rather
+  than disappearing** — in the setup dialog and in the Tools tab's banner.
+  Cancel stops between steps; it cannot stop Apple's installer, which is its
+  own app. The line over the bar comes from `InstallProgress.statusLabel`,
+  which names the step in progress and calls the tail "Finishing up…".
 
 ## New projects
 

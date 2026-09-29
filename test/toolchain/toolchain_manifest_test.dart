@@ -1,299 +1,83 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:appstudio/toolchain/tool_status.dart';
 import 'package:appstudio/toolchain/tool_version.dart';
-import 'package:appstudio/toolchain/platform_key.dart';
 import 'package:appstudio/toolchain/toolchain_manifest.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 
-/// A manifest with one fully-published tool, matching what
-/// tool/publish_toolchain.sh emits.
-String published({
-  String schemaVersion = '1',
-  String platformKey = 'macos-arm64',
-  String manifestId = '2026.08.0',
-}) =>
-    '''
-{
-  "schemaVersion": $schemaVersion,
-  "manifestId": "$manifestId",
-  "baseUrl": "https://storage.googleapis.com/serverpod-appstudio-toolchain/",
-  "tools": [
-    {
-      "id": "flutter",
-      "displayName": "Flutter SDK",
-      "version": "3.44.2",
-      "build": 1,
-      "hostAccepts": ">=3.44.0 <3.45.0",
-      "required": true,
-      "installDir": "flutter/3.44.2",
-      "platforms": {
-        "$platformKey": {
-          "path": "tools/flutter/3.44.2+1/flutter-web-macos-arm64-3.44.2+1.tar.gz",
-          "sha256": "9F8C0000000000000000000000000000000000000000000000000000000000AB",
-          "downloadBytes": 812345678,
-          "installedBytes": 1610612736,
-          "format": "tar.gz",
-          "stripComponents": 1
-        }
-      },
-      "entrypoints": {"flutter": "bin/flutter"},
-      "metadata": {"channel": "stable"}
-    }
-  ]
-}
-''';
+import '../support/toolchain_support.dart';
 
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
+  Map<String, dynamic> valid() => {
+        'schemaVersion': kManifestSchemaVersion,
+        'tools': [
+          {'id': 'command_line_tools'},
+          {'id': 'flutter', 'accepts': '>=3.47.0'},
+          {'id': 'serverpod_cli', 'accepts': '>=4.0.0 <4.1.0'},
+        ],
+      };
 
-  group('published manifest', () {
-    test('isNewerThan compares manifestId timestamps', () {
-      final older = ToolManifest.tryParse(published(manifestId: '2026.08.01.1200'))!;
-      final newer = ToolManifest.tryParse(published(manifestId: '2026.08.02.0900'))!;
-      expect(newer.isNewerThan(older), isTrue);
-      expect(older.isNewerThan(newer), isFalse);
-    });
+  test('parses the ranges', () {
+    final manifest = ToolManifest.tryParse(jsonEncode(valid()))!;
 
-    test('fetchPublished returns null on HTTP errors', () async {
-      final client = MockClient((_) async => http.Response('', 404));
-      final manifest = await ToolManifest.fetchPublished(
-        Uri.parse('https://example.invalid/'),
-        client: client,
-      );
-      expect(manifest, isNull);
-    });
-
-    test('fetchPublished parses a live manifest and caches it', () async {
-      final body = published(manifestId: '2026.09.01.1000');
-      final client = MockClient((_) async => http.Response(body, 200));
-      final dir = await Directory.systemTemp.createTemp('manifest-cache-');
-      addTearDown(() => dir.delete(recursive: true));
-      final cacheFile = '${dir.path}/manifest.json';
-
-      final manifest = await ToolManifest.fetchPublished(
-        Uri.parse('https://example.invalid/'),
-        client: client,
-        cacheFile: cacheFile,
-      );
-
-      expect(manifest?.manifestId, '2026.09.01.1000');
-      expect(await File(cacheFile).readAsString(), body);
-      expect(
-        (await ToolManifest.loadCached(cacheFile))?.manifestId,
-        '2026.09.01.1000',
-      );
-    });
-
-    test('withLiveDownloadBytes reads Content-Length from HEAD', () async {
-      final manifest = ToolManifest.tryParse(published())!;
-      final artifact = manifest[ToolId.flutter]!.artifactForCurrentPlatform!;
-      final url = manifest.urlFor(artifact);
-
-      final client = MockClient((request) async {
-        expect(request.method, 'HEAD');
-        expect(request.url, url);
-        return http.Response('', 200, headers: {'content-length': '999'});
-      });
-
-      final enriched = await manifest.withLiveDownloadBytes(client: client);
-      expect(
-        enriched[ToolId.flutter]!.artifactForCurrentPlatform!.downloadBytes,
-        999,
-      );
-    });
-
-    test('withLiveDownloadBytes keeps the manifest when HEAD fails', () async {
-      final manifest = ToolManifest.tryParse(published())!;
-      final client = MockClient((_) async => http.Response('', 404));
-      final enriched = await manifest.withLiveDownloadBytes(client: client);
-      expect(identical(enriched, manifest), isTrue);
-    });
-
-    test('probeArtifacts names the tools whose artifact is not there', () async {
-      final manifest = ToolManifest.tryParse(published())!;
-      final client = MockClient((_) async => http.Response('', 404));
-
-      final probe = await manifest.probeArtifacts(client: client);
-
-      // A 404 on the artifact means the download would fail, so it has to be
-      // reported rather than silently kept at the manifest's size.
-      expect(probe.unreachable, [ToolId.flutter]);
-    });
-
-    test('probeArtifacts reports nothing when every artifact answers', () async {
-      final manifest = ToolManifest.tryParse(published())!;
-      final client = MockClient(
-        (_) async => http.Response('', 200, headers: {'content-length': '999'}),
-      );
-
-      final probe = await manifest.probeArtifacts(client: client);
-
-      expect(probe.unreachable, isEmpty);
-      expect(
-        probe.manifest[ToolId.flutter]!.artifactForCurrentPlatform!.downloadBytes,
-        999,
-      );
-    });
-
-    test('probeArtifacts skips tools outside `only`', () async {
-      // A tool already satisfied on this Mac is never downloaded, so an
-      // unreachable artifact for it must not block anything.
-      final manifest = ToolManifest.tryParse(published())!;
-      var requests = 0;
-      final client = MockClient((_) async {
-        requests++;
-        return http.Response('', 404);
-      });
-
-      final probe = await manifest.probeArtifacts(
-        client: client,
-        only: const [ToolId.git],
-      );
-
-      expect(requests, 0);
-      expect(probe.unreachable, isEmpty);
-    });
+    expect(
+      manifest[ToolId.serverpodCli]!.accepts.allows(ToolVersion.tryParse('4.0.3')),
+      isTrue,
+    );
+    expect(
+      manifest[ToolId.serverpodCli]!.accepts.allows(ToolVersion.tryParse('4.1.0')),
+      isFalse,
+    );
+    // No range means any version will do.
+    expect(
+      manifest[ToolId.commandLineTools]!.accepts.allows(ToolVersion.tryParse('1.0.0')),
+      isTrue,
+    );
   });
 
-  group('parse', () {
-    test('reads a published tool', () {
-      final manifest = ToolManifest.tryParse(published())!;
-      expect(manifest.manifestId, '2026.08.0');
-
-      final flutter = manifest[ToolId.flutter]!;
-      expect(flutter.version.toString(), '3.44.2');
-      expect(flutter.required, isTrue);
-      expect(flutter.hostAccepts.allows(ToolVersion.tryParse('3.44.2')), isTrue);
-      expect(flutter.hostAccepts.allows(ToolVersion.tryParse('3.38.0')), isFalse);
-      expect(flutter.entrypoints['flutter'], 'bin/flutter');
-      expect(flutter.metadata['channel'], 'stable');
-    });
-
-    test('lowercases the hash so comparison is case-insensitive', () {
-      final artifact =
-          ToolManifest.tryParse(published())![ToolId.flutter]!.platforms.values.first;
-      expect(artifact.sha256, startsWith('9f8c'));
-      expect(artifact.downloadBytes, 812345678);
-      expect(artifact.installedBytes, 1610612736);
-      expect(artifact.stripComponents, 1);
-    });
-
-    test('resolves an artifact URL against the base', () {
-      final manifest = ToolManifest.tryParse(published())!;
-      final artifact = manifest[ToolId.flutter]!.platforms.values.first;
-      expect(
-        manifest.urlFor(artifact).toString(),
-        'https://storage.googleapis.com/serverpod-appstudio-toolchain/'
-        'tools/flutter/3.44.2+1/flutter-web-macos-arm64-3.44.2+1.tar.gz',
-      );
-    });
-
-    test('rejects a newer schema instead of half-reading it', () {
-      expect(ToolManifest.tryParse(published(schemaVersion: '2')), isNull);
-    });
-
-    test('rejects malformed input rather than throwing', () {
-      for (final bad in ['', 'not json', '{}', '[]', '{"schemaVersion": 1}']) {
-        expect(ToolManifest.tryParse(bad), isNull, reason: 'input: $bad');
-      }
-    });
-
-    test('ignores unknown tool ids so a newer manifest still loads', () {
-      final json = jsonDecode(published()) as Map<String, dynamic>;
-      (json['tools'] as List).add({
-        'id': 'some-future-tool',
-        'version': '1.0.0',
-        'hostAccepts': '*',
-      });
-      final manifest = ToolManifest.tryParse(jsonEncode(json))!;
-      expect(manifest.tools.keys, [ToolId.flutter]);
-    });
-
-    test('drops a tool whose version range is a typo', () {
-      // A permissive fallback would silently accept every host version.
-      final json = jsonDecode(published()) as Map<String, dynamic>;
-      (json['tools'] as List)[0]['hostAccepts'] = '>=not.a.version';
-      expect(ToolManifest.tryParse(jsonEncode(json)), isNull);
-    });
+  test('falls back to the built-in display name', () {
+    final manifest = ToolManifest.tryParse(jsonEncode(valid()))!;
+    expect(manifest[ToolId.flutter]!.displayName, 'Flutter SDK');
   });
 
-  group('platform selection', () {
-    test('reports no artifact when this platform was not published', () {
-      final manifest =
-          ToolManifest.tryParse(published(platformKey: 'linux-x64'))!;
-      expect(manifest[ToolId.flutter]!.artifactForCurrentPlatform, isNull);
-    });
-
-    test('current key is a macOS arch', () {
-      expect(currentPlatformKey(), anyOf('macos-arm64', 'macos-x64'));
-    });
+  test('refuses another schema rather than half-reading it', () {
+    // Schema 1 was the artifact manifest of builds that shipped their own
+    // tools; its shape means something else entirely.
+    final json = valid()..['schemaVersion'] = 1;
+    expect(ToolManifest.tryParse(jsonEncode(json)), isNull);
   });
 
-  group('baked asset', () {
-    test('assets/toolchain_manifest.json parses and covers every tool', () async {
-      // Read from disk rather than rootBundle so a broken asset declaration
-      // cannot make this pass by accident.
-      final source =
-          await File('assets/toolchain_manifest.json').readAsString();
-      final manifest = ToolManifest.tryParse(source);
-      expect(manifest, isNotNull, reason: 'baked manifest must be valid');
-      expect(manifest!.tools.keys.toSet(), ToolId.values.toSet());
-    });
+  test('refuses a manifest missing a tool', () {
+    final json = valid();
+    (json['tools'] as List).removeLast();
+    expect(ToolManifest.tryParse(jsonEncode(json)), isNull);
+  });
 
-    test('baseUrl is the CDN host, not the bucket', () async {
-      // publish_toolchain.sh rewrites baseUrl on every run, from the bucket it
-      // was told to publish to. If that ever resolves back to the bucket's own
-      // storage.googleapis.com URL, every install silently stops going through
-      // the CDN — which works, so nothing else would notice.
-      final source =
-          await File('assets/toolchain_manifest.json').readAsString();
-      final manifest = ToolManifest.tryParse(source)!;
-      expect(manifest.baseUrl.toString(), 'https://asdl.serverpod.dev/');
-    });
+  test('refuses a malformed range instead of accepting everything', () {
+    final json = valid();
+    (json['tools'] as List)[1] = {'id': 'flutter', 'accepts': '>=three'};
+    expect(ToolManifest.tryParse(jsonEncode(json)), isNull);
+  });
 
-    test('pins match toolchain/active.json', () async {
-      final source =
-          await File('assets/toolchain_manifest.json').readAsString();
-      final manifest = ToolManifest.tryParse(source)!;
-      final active = jsonDecode(
-        await File('toolchain/active.json').readAsString(),
-      ) as Map<String, dynamic>;
+  test('ignores an id this build does not know', () {
+    final json = valid();
+    (json['tools'] as List).add({'id': 'opencode', 'accepts': '>=1.0.0'});
+    expect(ToolManifest.tryParse(jsonEncode(json)), isNotNull);
+  });
 
-      expect(manifest[ToolId.flutter]!.version.toString(), active['flutter']);
-      expect(
-        manifest[ToolId.serverpodCli]!.version.toString(),
-        active['serverpod_cli'],
-      );
-      expect(manifest[ToolId.opencode]!.version.toString(), active['opencode']);
-      expect(manifest[ToolId.git]!.version.toString(), active['git']);
-    });
+  test('the bundled manifest parses and covers every tool', () async {
+    final manifest = await loadTestManifest();
+    expect(manifest.tools.keys, containsAll(ToolId.values));
+  });
 
-    test('every published artifact has a real hash and size', () async {
-      // Guards against shipping a placeholder hash the installer would then
-      // verify against, or a zero size that would break the preflight total.
-      final source =
-          await File('assets/toolchain_manifest.json').readAsString();
-      final manifest = ToolManifest.tryParse(source)!;
-
-      for (final spec in manifest.tools.values) {
-        for (final entry in spec.platforms.entries) {
-          final artifact = entry.value;
-          final where = '${spec.id.manifestId}/${entry.key}';
-          expect(artifact.sha256, hasLength(64), reason: '$where sha256');
-          expect(
-            RegExp(r'^[0-9a-f]{64}$').hasMatch(artifact.sha256),
-            isTrue,
-            reason: '$where sha256 must be hex',
-          );
-          expect(artifact.downloadBytes, greaterThan(0), reason: '$where size');
-          expect(artifact.installedBytes, greaterThan(0), reason: '$where size');
-          expect(artifact.path, isNotEmpty, reason: '$where path');
-        }
-      }
-    });
+  test('the bundled Flutter range has no upper bound', () async {
+    // Fresh installs take the latest stable and an old SDK is fixed with
+    // `flutter upgrade`, which also goes to the latest stable. A ceiling would
+    // put the two at odds the day a new minor ships.
+    final manifest = await loadTestManifest();
+    expect(
+      manifest[ToolId.flutter]!.accepts.allows(ToolVersion.tryParse('99.0.0')),
+      isTrue,
+    );
   });
 }

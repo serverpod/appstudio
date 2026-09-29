@@ -13,16 +13,17 @@
 #     taken, and published objects are immutable so that cannot be undone.
 #
 #   PUBLIC — https://asdl.serverpod.dev/ — the same bucket behind Cloud CDN.
-#     Every URL handed to a USER goes here: the manifest's baseUrl, the appcast
-#     enclosures, and SPARKLE_FEED_URL in Sparkle.xcconfig.
+#     Every URL handed to a USER goes here: the appcast enclosures, the
+#     download links, and SPARKLE_FEED_URL in Sparkle.xcconfig.
 #
 # The origin URL keeps working forever and must: every copy of App Studio
-# published before the CDN existed has it compiled in, both as its Sparkle feed
-# and as the baseUrl of its baked manifest.
+# published before the CDN existed has it compiled in as its Sparkle feed (and
+# builds from before the toolchain moved to official sources also fetch their
+# tools from it).
 
 # The bucket the CDN is bolted to. --bucket=NAME is for a test publish, and
 # public_base_url below is what keeps that from writing production URLs into a
-# manifest describing objects that are somewhere else entirely.
+# feed describing objects that are somewhere else entirely.
 PRODUCTION_BUCKET="serverpod-appstudio-toolchain"
 CDN_BASE_URL="${CDN_BASE_URL:-https://asdl.serverpod.dev/}"
 
@@ -38,9 +39,9 @@ origin_base_url() {
 # anything else.
 #
 # Falling back is not a nicety. The CDN serves ONE bucket, so stamping its host
-# into a manifest built from a different one yields a manifest whose every
-# download either 404s or, far worse, silently resolves to the production object
-# that happens to share the path.
+# into a feed built from a different one yields a feed whose every download
+# either 404s or, far worse, silently resolves to the production object that
+# happens to share the path.
 public_base_url() {
   if [[ "$1" == "$PRODUCTION_BUCKET" ]]; then
     printf '%s\n' "$CDN_BASE_URL"
@@ -51,9 +52,9 @@ public_base_url() {
 
 # invalidate_cdn_path <bucket> <path> [extra gcloud args...]
 #
-# Drops one path from the CDN edge caches. Only the three MUTABLE objects need
-# this — appcast.xml and manifest.json (max-age=300) and downloads/macos.json
-# (max-age=60) — and only they may have it: invalidating an immutable object is
+# Drops one path from the CDN edge caches. Only the MUTABLE objects need this —
+# appcast.xml (max-age=300) and downloads/macos.json (max-age=60) — and only
+# they may have it: invalidating an immutable object is
 # meaningless, and the quota is per-project and small.
 #
 # Best-effort by design. The object is already in the bucket by the time this

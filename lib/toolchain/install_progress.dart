@@ -2,11 +2,22 @@ import 'tool_status.dart';
 
 enum ToolPhase {
   queued,
-  preflight,
+
+  /// Apple's Command Line Tools installer is up; it reports nothing back, so
+  /// all we can do is wait for the tools to appear.
+  waitingForApple,
   downloading,
   verifying,
   extracting,
-  finalizing,
+
+  /// `flutter precache --web` and the `PATH` line.
+  configuring,
+
+  /// `flutter upgrade` on a copy App Studio installed.
+  upgrading,
+
+  /// `dart install serverpod_cli`.
+  installing,
   done,
   failed,
   cancelled;
@@ -15,25 +26,32 @@ enum ToolPhase {
       this == done || this == failed || this == cancelled;
 
   String get label => switch (this) {
-        queued => 'Waiting',
-        preflight => 'Checking disk space',
+        queued => 'Waiting for',
+        waitingForApple => 'Installing',
         downloading => 'Downloading',
         verifying => 'Verifying',
-        extracting => 'Extracting',
-        finalizing => 'Finishing up',
+        extracting => 'Unpacking',
+        configuring => 'Setting up',
+        upgrading => 'Updating',
+        installing => 'Installing',
         done => 'Installed',
         failed => 'Failed',
         cancelled => 'Cancelled',
       };
-}
 
-/// Rough share of wall-clock each phase takes, so the overall bar does not
-/// stall at 100 % through a minute of extraction.
-const _phaseWeights = <ToolPhase, double>{
-  ToolPhase.downloading: 0.85,
-  ToolPhase.verifying: 0.05,
-  ToolPhase.extracting: 0.10,
-};
+  /// What is actually happening, for the line under the bar. Null for the
+  /// download, which shows its byte count instead.
+  String? get hint => switch (this) {
+        waitingForApple =>
+          'Follow the steps in the window Apple opened. This can take several '
+              'minutes.',
+        verifying || extracting => 'This takes a minute.',
+        configuring => 'Fetching the web components with flutter precache.',
+        upgrading => 'Running flutter upgrade.',
+        installing => 'Running dart install serverpod_cli.',
+        _ => null,
+      };
+}
 
 class ToolProgress {
   const ToolProgress({
@@ -41,6 +59,7 @@ class ToolProgress {
     required this.phase,
     this.receivedBytes = 0,
     this.totalBytes = 0,
+    this.phaseStartedAt,
     this.error,
   });
 
@@ -48,36 +67,24 @@ class ToolProgress {
   final ToolPhase phase;
   final int receivedBytes;
   final int totalBytes;
+
+  /// When [phase] began — the download's ETA is measured from it.
+  final DateTime? phaseStartedAt;
   final String? error;
 
-  /// 0..1 of this tool's whole install, or null when indeterminate.
+  /// 0..1 through the current phase, or null when there is nothing to measure
+  /// — every step but the download.
   double? get fraction {
-    switch (phase) {
-      case ToolPhase.done:
-        return 1;
-      case ToolPhase.queued:
-      case ToolPhase.preflight:
-        return 0;
-      case ToolPhase.failed:
-      case ToolPhase.cancelled:
-        return null;
-      case ToolPhase.downloading:
-        if (totalBytes <= 0) return null;
-        final ratio = (receivedBytes / totalBytes).clamp(0.0, 1.0);
-        return ratio * _phaseWeights[ToolPhase.downloading]!;
-      case ToolPhase.verifying:
-        return _phaseWeights[ToolPhase.downloading]!;
-      case ToolPhase.extracting:
-      case ToolPhase.finalizing:
-        return _phaseWeights[ToolPhase.downloading]! +
-            _phaseWeights[ToolPhase.verifying]!;
-    }
+    if (phase == ToolPhase.done) return 1;
+    if (phase != ToolPhase.downloading || totalBytes <= 0) return null;
+    return (receivedBytes / totalBytes).clamp(0.0, 1.0);
   }
 
   ToolProgress copyWith({
     ToolPhase? phase,
     int? receivedBytes,
     int? totalBytes,
+    DateTime? phaseStartedAt,
     String? error,
   }) {
     return ToolProgress(
@@ -85,11 +92,17 @@ class ToolProgress {
       phase: phase ?? this.phase,
       receivedBytes: receivedBytes ?? this.receivedBytes,
       totalBytes: totalBytes ?? this.totalBytes,
+      phaseStartedAt: phaseStartedAt ?? this.phaseStartedAt,
       error: error ?? this.error,
     );
   }
 }
 
+/// A run over several tools, one after the other.
+///
+/// Reported per step rather than as one bar over the whole run: only the
+/// Flutter download can measure itself, and a single bar weighted across Apple's
+/// installer, a 2 GB download and a `dart install` would sit still or leap.
 class InstallProgress {
   InstallProgress({required this.tools, required this.startedAt, this.now});
 
@@ -102,48 +115,55 @@ class InstallProgress {
   bool get isDone => tools.every((t) => t.phase.isTerminal);
   bool get hasFailure => tools.any((t) => t.phase == ToolPhase.failed);
 
+  /// The step in progress, or null once every step has finished.
+  ToolProgress? get current {
+    for (final tool in tools) {
+      if (!tool.phase.isTerminal) return tool;
+    }
+    return null;
+  }
+
+  /// "Step 2 of 3" — null for a run of one.
+  String? get stepLabel {
+    if (tools.length < 2) return null;
+    final at = current;
+    if (at == null) return null;
+    return 'Step ${tools.indexOf(at) + 1} of ${tools.length}';
+  }
+
   /// The line above the bar: what is happening to which tool.
   ///
-  /// Once every tool is terminal there is still work in flight — the re-probe,
-  /// and the shell PATH write the setup dialog adds — so this keeps naming a
-  /// step rather than falling back to `Installed <the last tool>`, which read
-  /// as finished while the dialog was visibly still busy.
+  /// Once every step is terminal there is still work in flight — the re-probe
+  /// — so this keeps naming a step rather than falling back to "Installed" and
+  /// the last tool, which read as finished while the dialog was visibly still
+  /// busy.
   String get statusLabel {
-    for (final tool in tools) {
-      if (!tool.phase.isTerminal) {
-        return '${tool.phase.label} ${tool.id.displayName}…';
-      }
-    }
-    return 'Finishing up…';
+    final at = current;
+    if (at == null) return 'Finishing up…';
+    return '${at.phase.label} ${at.id.displayName}…';
   }
 
-  int get bytesReceived =>
-      tools.fold(0, (sum, t) => sum + t.receivedBytes);
+  /// Explanation for the current step, when it is not a download.
+  String? get hint => current?.phase.hint;
 
-  int get bytesTotal => tools.fold(0, (sum, t) => sum + t.totalBytes);
+  bool get isDownloading => current?.phase == ToolPhase.downloading;
 
-  /// Weighted by each tool's download size, so a 673 MB Flutter does not
-  /// advance the bar at the same rate as an 11 MB CLI.
-  double get fraction {
-    if (tools.isEmpty) return 0;
-    var weight = 0.0;
-    var progress = 0.0;
-    for (final tool in tools) {
-      final toolWeight = tool.totalBytes > 0 ? tool.totalBytes.toDouble() : 1.0;
-      weight += toolWeight;
-      progress += toolWeight * (tool.fraction ?? 0);
-    }
-    return weight == 0 ? 0 : (progress / weight).clamp(0.0, 1.0);
-  }
+  /// The bar: the current step's own progress, or null (indeterminate).
+  double? get fraction => isDone ? 1 : current?.fraction;
 
-  /// Null until there is enough signal to be worth showing.
+  int get bytesReceived => isDownloading ? current!.receivedBytes : 0;
+  int get bytesTotal => isDownloading ? current!.totalBytes : 0;
+
+  /// For the download only. Null until there is enough signal to be worth
+  /// showing.
   Duration? get eta {
-    final elapsed = (now ?? DateTime.now()).difference(startedAt);
-    if (elapsed.inSeconds < 3) return null;
-    final done = fraction;
-    if (done <= 0.01 || done >= 1) return null;
-    final total = elapsed.inMilliseconds / done;
-    final remaining = total - elapsed.inMilliseconds;
+    final at = current;
+    final started = at?.phaseStartedAt;
+    final done = at?.fraction;
+    if (at == null || started == null || done == null) return null;
+    final elapsed = (now ?? DateTime.now()).difference(started);
+    if (elapsed.inSeconds < 3 || done <= 0.01 || done >= 1) return null;
+    final remaining = elapsed.inMilliseconds / done - elapsed.inMilliseconds;
     if (remaining <= 0) return null;
     return Duration(milliseconds: remaining.round());
   }

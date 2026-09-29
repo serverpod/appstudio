@@ -5,8 +5,11 @@ Self-contained macOS IDE for **Serverpod 4** projects. Open a project, run
 Chromium (CEF) at `http://localhost:9998`, and work with an OpenCode-backed
 agent in the sidebar.
 
-App Studio downloads its own Flutter, Dart, Serverpod CLI, OpenCode and Git on
-first run, so a user needs nothing preinstalled — not even Xcode.
+On first run App Studio installs what it needs the standard way — Apple's
+Command Line Tools, Flutter from its official archive into `~/develop/flutter`,
+and the Serverpod CLI with `dart install` — and puts them on the user's `PATH`,
+so a user needs nothing preinstalled. Tools already on the Mac are used as
+they are.
 
 ## Getting started
 
@@ -82,50 +85,16 @@ Never hand-edit `version:` in `pubspec.yaml`. The `+N` counter is what Sparkle
 compares, and a repeat or a rollback makes every installed copy stop seeing
 updates for good — use `make set_version` (which `make release` runs for you).
 
-### The Serverpod CLI
+### Tool versions
 
-```bash
-dart install serverpod_cli 4.0.0-beta.3     # pub publishes no macOS archive
-make update_serverpod V=4.0.0-beta.3
-# raise "hostAccepts" in assets/toolchain_manifest.json if this is a new minimum
-make publish_toolchain
-git add -A && git commit
-```
-
-### Dart / Flutter
-
-Dart ships inside the Flutter SDK, so pick the Flutter release carrying the Dart
-version you want. The full SDK is bundled — nothing is stripped — precached for
-web, so expect a multi-GB download and upload.
-
-```bash
-make update_flutter V=3.45.0
-# raise "hostAccepts" — a minor bump falls outside the pinned range
-make publish_toolchain
-git add -A && git commit                    # includes assets/toolchain_manifest.json
-```
-
-`V=` becomes the new pin in `toolchain/active.json`; without it, the currently
-pinned version is re-downloaded and re-bundled. The publish rewrites
-`assets/toolchain_manifest.json`, which ships in the app — commit it with the
-release.
-
-### The toolchain publish always dry-runs first
-
-`make publish_toolchain` dry-runs, shows what would upload, and asks before
-publishing for real. Published objects are immutable and the account that
-uploads them cannot undo a mistake, which is why the dry run is not optional.
-Tools whose trees are unchanged resolve to what is already published and are
-skipped, so a full run after updating one tool only uploads that tool; to force
-a subset explicitly, `./tool/publish_toolchain.sh --only=<id>` still works.
-
-`hostAccepts` is the one manifest field the script never writes — it is the
-minimum version App Studio will accept, which is a decision rather than a
-packaging fact. Every publish prints each tool's version and floor side by side
-at the end.
+There is nothing to publish for the tools. `assets/toolchain_manifest.json`
+holds the version range each one must fall in; a fresh install takes the newest
+release inside it (Flutter's stable feed, pub.dev for the Serverpod CLI), and a
+copy outside it is updated. Change a range there and ship it with the app.
 
 ## More
 
-`AGENTS.md` is the reference: architecture, the toolchain and bucket layout,
+`AGENTS.md` is the reference: architecture, how tools are installed, the bucket
+layout,
 signing and key backup, Sparkle, CEF, and the reasoning behind the decisions
 that look surprising.

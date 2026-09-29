@@ -1,12 +1,13 @@
 import 'toolchain_manifest.dart';
 import 'tool_version.dart';
 
+/// The tools App Studio needs, in install order: the Command Line Tools
+/// supply the `git` Flutter runs on, and the Serverpod CLI is installed with
+/// Flutter's own `dart`.
 enum ToolId {
+  commandLineTools('command_line_tools', 'Command Line Tools'),
   flutter('flutter', 'Flutter SDK'),
-  serverpodCli('serverpod_cli', 'Serverpod CLI'),
-  opencode('opencode', 'OpenCode'),
-  git('git', 'Git'),
-  llvmTools('llvm-tools', 'Developer tools');
+  serverpodCli('serverpod_cli', 'Serverpod CLI');
 
   const ToolId(this.manifestId, this.displayName);
 
@@ -17,19 +18,22 @@ enum ToolId {
     for (final tool in values) {
       if (tool.manifestId == id) return tool;
     }
-    // Unknown ids are ignored so a newer manifest does not break an older app.
+    // Unknown ids are ignored so a newer file does not break an older app.
     return null;
   }
 }
 
-/// Where a candidate came from. Declaration order is resolution precedence:
-/// a developer's repo tree wins, a host install is the last resort.
+/// Who put a tool on this Mac.
+///
+/// Both are ordinary installs in the ordinary places — App Studio no longer
+/// keeps a private copy of anything. The difference is only whose it is to
+/// update and to offer for removal.
 enum ToolSource {
-  /// App Studio downloaded it into Application Support and updates it.
-  managed('Managed'),
+  /// Installed by App Studio, according to the install record in
+  /// `~/.serverpod`.
+  appStudio('App Studio'),
 
-  /// Already on this Mac — Homebrew, an SDK manager, a manual install. Ours to
-  /// use, never ours to update.
+  /// Already on this Mac — installed by hand, by Homebrew, by an SDK manager.
   host('Native');
 
   const ToolSource(this.label);
@@ -47,14 +51,30 @@ enum ToolFitness {
   /// The tree is there but files are missing — a partial or aborted install.
   incomplete,
 
-  /// An Xcode Command Line Tools shim. Must never be executed: it pops a modal
-  /// installer on a Mac without developer tools.
-  stub,
-
   notFound,
 
   /// Present, but it failed to run or printed something unparseable.
   unusable,
+}
+
+/// What getting a tool into shape takes.
+enum ToolAction {
+  /// Nothing — it is usable.
+  none,
+
+  /// App Studio installs it from scratch.
+  install,
+
+  /// App Studio updates a copy it installed itself (`flutter upgrade`), or
+  /// reinstalls one that is cheap to replace (`dart install`).
+  update,
+
+  /// There is a copy App Studio did not install and must not touch — the user
+  /// updates it themselves. In practice: their own Flutter is too old.
+  manual;
+
+  /// Whether App Studio can carry this out on its own.
+  bool get isAutomatic => this == install || this == update;
 }
 
 class ToolCandidate {
@@ -89,11 +109,11 @@ class ToolCandidate {
   final String? executable;
   final ToolVersion? detectedVersion;
 
-  /// Human-readable explanation shown in the Tools Manager when not satisfied.
+  /// Human-readable explanation shown when not satisfied.
   final String? reason;
 
-  /// Extra resolved paths a consumer needs: `gitExecPath`, `libDir`,
-  /// `flutterRoot`, `dartExecutable`, `engineVersion`.
+  /// Extra resolved paths a consumer needs: `flutterRoot`, `dartExecutable`,
+  /// `channel`.
   final Map<String, String> facts;
 
   bool get isSatisfied => fitness == ToolFitness.satisfied;
@@ -113,13 +133,20 @@ class ToolCandidate {
 }
 
 class ToolStatus {
-  ToolStatus({required this.spec, required List<ToolCandidate> candidates})
-      : candidates = List.unmodifiable(candidates);
+  ToolStatus({
+    required this.spec,
+    required List<ToolCandidate> candidates,
+    this.action = ToolAction.none,
+  }) : candidates = List.unmodifiable(candidates);
 
   final ToolSpec spec;
 
   /// In precedence order.
   final List<ToolCandidate> candidates;
+
+  /// Decided by the probe, which is the one place that knows both what is on
+  /// disk and what App Studio installed.
+  final ToolAction action;
 
   ToolId get id => spec.id;
 
@@ -133,107 +160,63 @@ class ToolStatus {
   bool get isSatisfied => resolved != null;
 
   /// The best thing we found even though it did not qualify — drives the
-  /// "3.5.0-beta.7 (needs >=4.0.0-beta.1)" line in the UI.
+  /// "3.44.0 → 3.47.5" badge and the reason text.
   ToolCandidate? get bestRejected {
-    ToolCandidate? best;
     for (final c in candidates) {
       if (c.isSatisfied || c.fitness == ToolFitness.notFound) continue;
-      best ??= c;
+      return c;
     }
-    return best;
+    return null;
   }
 
-  /// Required by the app but not usable. Drives warnings and the toolbar badge
-  /// — deliberately independent of whether we have anything to install, so a
-  /// tool we cannot supply still gets reported rather than silently ignored.
-  bool get isMissing => !isSatisfied && spec.required;
-
-  /// Whether an artifact exists for this platform that we could download.
-  bool get canInstall => spec.artifactForCurrentPlatform != null;
-
-  /// Missing *and* installable — this is what the download flow acts on.
-  bool get needsDownload => isMissing && canInstall;
+  /// Not usable. Drives the toolbar badge.
+  bool get isMissing => !isSatisfied;
 }
 
 class ToolchainInventory {
-  ToolchainInventory({required this.manifest, required this.tools});
+  ToolchainInventory({
+    required this.manifest,
+    required this.tools,
+    this.legacyInstallFound = false,
+  });
 
   final ToolManifest manifest;
   final Map<ToolId, ToolStatus> tools;
+
+  /// A toolchain from a build that kept its own copies in Application Support,
+  /// or the `PATH` block it wrote. Setup removes both before installing the
+  /// new way.
+  final bool legacyInstallFound;
 
   ToolStatus? operator [](ToolId id) => tools[id];
 
   bool isSatisfied(ToolId id) => tools[id]?.isSatisfied ?? false;
 
-  /// Required tools that are not usable, whether or not we can supply them.
+  /// Tools that are not usable, whatever it takes to fix them.
   List<ToolStatus> get missingRequired =>
       [for (final t in tools.values) if (t.isMissing) t];
 
-  /// The subset we could actually download — what the install flow acts on.
-  List<ToolStatus> get installable =>
-      [for (final t in tools.values) if (t.needsDownload) t];
-
-  /// Managed installs older than the version this manifest pins — what
-  /// "Update All" acts on.
-  ///
-  /// Host copies are excluded deliberately. We did not put them there and must
-  /// not overwrite them, so a newer pin is advice for the user rather than an
-  /// action for us; the Tools tab shows their version and leaves it alone.
-  List<ToolStatus> get updatable => [
-        for (final t in tools.values)
-          if (t.canInstall)
-            if (t.resolved case final r?
-                when r.source == ToolSource.managed &&
-                    r.detectedVersion != null &&
-                    r.detectedVersion! < t.spec.version)
-              t,
+  /// What App Studio can install or update on its own — what the install flow
+  /// acts on.
+  List<ToolStatus> get installable => [
+        for (final id in ToolId.values)
+          if (tools[id] case final t? when t.action.isAutomatic) t,
       ];
+
+  /// Copies the user has to update themselves before anything else can go on.
+  List<ToolStatus> get needsManualUpdate =>
+      [for (final t in tools.values) if (t.action == ToolAction.manual) t];
 
   bool get isComplete => missingRequired.isEmpty;
 
   /// Whether first-run setup still owns the window.
   ///
-  /// [installable], not [isComplete]: a required tool we have no artifact for
-  /// cannot be fixed by the setup screen, so blocking on it would be a dead
-  /// end — that surfaces as the toolbar's warning badge instead.
-  ///
   /// Named because three things have to agree on it: the screen `main.dart`
   /// picks, the App menu items that would walk straight past that screen
   /// (File → Open, Open Recent, Settings), and [StudioShell]'s own settings
   /// route. Written out three times, they would drift.
-  bool get needsSetup => installable.isNotEmpty;
-
-  /// Whether every required tool an outside program would look for is already
-  /// on this Mac rather than only inside our managed directory.
-  ///
-  /// This is the whole point of the global-install opt-in — so an external
-  /// editor or AI agent can find the toolchain — so when it is already true
-  /// there is nothing left for us to add, and the switch is shown satisfied and
-  /// inert rather than inviting an edit to the user's shell config that would
-  /// change nothing.
-  ///
-  /// OpenCode is left out: it *is* the agent, so an external one has no reason
-  /// to look for it, and whether we happen to manage our own copy should not
-  /// decide this.
-  bool get requiredToolsAreNative {
-    final relevant = [
-      for (final t in tools.values)
-        if (t.spec.required && t.id != ToolId.opencode) t,
-    ];
-    // An inventory we could not read is not evidence of anything.
-    if (relevant.isEmpty) return false;
-    return relevant.every((t) => t.resolved?.source == ToolSource.host);
-  }
-
-  /// Bytes to fetch for everything installable, for the preflight dialog.
-  int get downloadBytes => installable.fold(
-        0,
-        (sum, t) => sum + (t.spec.artifactForCurrentPlatform?.downloadBytes ?? 0),
-      );
-
-  int get installedBytes => installable.fold(
-        0,
-        (sum, t) =>
-            sum + (t.spec.artifactForCurrentPlatform?.installedBytes ?? 0),
-      );
+  bool get needsSetup =>
+      legacyInstallFound ||
+      installable.isNotEmpty ||
+      needsManualUpdate.isNotEmpty;
 }

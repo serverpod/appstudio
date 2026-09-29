@@ -10,189 +10,193 @@
 /// `main.dart`, so it is tree-shaken out of release builds.
 library;
 
+import 'package:flutter/foundation.dart';
 
+import '../toolchain/install_plan.dart';
 import '../toolchain/install_progress.dart';
-import '../toolchain/shell_path_state.dart';
 import '../toolchain/tool_status.dart';
 import '../toolchain/tool_version.dart';
 import '../toolchain/toolchain_manifest.dart';
 import '../ui/settings/providers_view.dart';
 import '../ui/toolchain/tools_view.dart';
 
-
-import 'package:flutter/foundation.dart';
-
 // -----------------------------------------------------------------------------
 // Fixtures
 // -----------------------------------------------------------------------------
 
-ToolSpec _spec(
-  ToolId id,
-  String displayName,
-  String version, {
-  bool required = true,
-  int sizeMb = 120,
-}) =>
-    ToolSpec(
+ToolSpec _spec(ToolId id, String accepts) => ToolSpec(
       id: id,
-      displayName: displayName,
+      displayName: id.displayName,
       description: 'Used to build and run Serverpod projects.',
-      version: ToolVersion.tryParse(version)!,
-      build: 1,
-      hostAccepts: VersionRange.tryParse('*')!,
-      required: required,
-      installDir: '${id.manifestId}/$version',
-      platforms: {
-        'macos-arm64': ToolArtifact(
-          path: 'tools/${id.manifestId}/$version/b1/${id.manifestId}.tar.gz',
-          sha256: 'a' * 64,
-          downloadBytes: sizeMb * 1024 * 1024,
-          installedBytes: sizeMb * 3 * 1024 * 1024,
-          format: 'tar.gz',
-          stripComponents: 1,
-        ),
-      },
-      entrypoints: const {},
-      metadata: const {},
+      accepts: VersionRange.tryParse(accepts)!,
     );
 
 /// A manifest with every tool the UI knows about.
 final previewManifest = ToolManifest(
-  manifestId: 'preview-1',
-  baseUrl: Uri.parse('https://example.invalid/'),
   tools: {
-    ToolId.flutter: _spec(ToolId.flutter, 'Flutter SDK', '3.44.2', sizeMb: 662),
-    ToolId.serverpodCli:
-        _spec(ToolId.serverpodCli, 'Serverpod CLI', '4.0.0-beta.2', sizeMb: 11),
-    ToolId.opencode:
-        _spec(ToolId.opencode, 'OpenCode', '1.18.4', required: false, sizeMb: 43),
-    ToolId.git: _spec(ToolId.git, 'Git', '2.53.0-3', sizeMb: 57),
-    ToolId.llvmTools:
-        _spec(ToolId.llvmTools, 'Developer tools', '20.1.8', sizeMb: 9),
+    ToolId.commandLineTools: _spec(ToolId.commandLineTools, '*'),
+    ToolId.flutter: _spec(ToolId.flutter, '>=3.47.0'),
+    ToolId.serverpodCli: _spec(ToolId.serverpodCli, '>=4.0.0 <4.1.0'),
   },
 );
 
-ToolCandidate _found(ToolId id, ToolSource source, String version) =>
+ToolCandidate _found(ToolId id, ToolSource source, String? version) =>
     ToolCandidate(
       id: id,
       source: source,
       fitness: ToolFitness.satisfied,
-      root: '/preview/$id',
-      executable: '/preview/$id/bin/${id.manifestId}',
+      root: '/preview/${id.manifestId}',
+      executable: '/preview/${id.manifestId}/bin/${id.manifestId}',
       detectedVersion: ToolVersion.tryParse(version),
     );
 
-ToolCandidate _tooOld(ToolId id, String version) => ToolCandidate(
+ToolCandidate _tooOld(ToolId id, String version, {String root = '/usr/local'}) =>
+    ToolCandidate(
       id: id,
       source: ToolSource.host,
       fitness: ToolFitness.wrongVersion,
-      root: '/usr/local',
-      executable: '/usr/local/bin/${id.manifestId}',
+      root: root,
+      executable: '$root/bin/${id.manifestId}',
       detectedVersion: ToolVersion.tryParse(version),
-      reason: 'Found $version, which is older than required',
+      reason: '$version (needs ${previewManifest[id]!.accepts})',
+      facts: const {'channel': 'stable'},
     );
 
-ToolchainInventory _inventory(Map<ToolId, List<ToolCandidate>> byTool) =>
+ToolchainInventory _inventory(
+  Map<ToolId, (List<ToolCandidate>, ToolAction)> byTool, {
+  bool legacy = false,
+}) =>
     ToolchainInventory(
       manifest: previewManifest,
+      legacyInstallFound: legacy,
       tools: {
         for (final entry in byTool.entries)
           entry.key: ToolStatus(
             spec: previewManifest[entry.key]!,
-            candidates: entry.value,
+            candidates: entry.value.$1,
+            action: entry.value.$2,
           ),
       },
     );
 
-/// Everything installed and healthy.
+/// Everything installed and healthy — Flutter and the Serverpod CLI by App
+/// Studio, the Command Line Tools already there.
 final completeInventory = _inventory({
-  ToolId.flutter: [_found(ToolId.flutter, ToolSource.managed, '3.44.2')],
-  ToolId.serverpodCli: [
-    _found(ToolId.serverpodCli, ToolSource.managed, '4.0.0-beta.2'),
-  ],
-  ToolId.opencode: [_found(ToolId.opencode, ToolSource.host, '1.18.4')],
-  ToolId.git: [_found(ToolId.git, ToolSource.managed, '2.53.0-3')],
-  ToolId.llvmTools: [_found(ToolId.llvmTools, ToolSource.managed, '20.1.8')],
+  ToolId.commandLineTools: (
+    [_found(ToolId.commandLineTools, ToolSource.host, null)],
+    ToolAction.none,
+  ),
+  ToolId.flutter: (
+    [_found(ToolId.flutter, ToolSource.appStudio, '3.47.5')],
+    ToolAction.none,
+  ),
+  ToolId.serverpodCli: (
+    [_found(ToolId.serverpodCli, ToolSource.appStudio, '4.0.3')],
+    ToolAction.none,
+  ),
 });
 
-/// First run: nothing found anywhere.
+/// First run on a clean Mac: nothing found anywhere.
 final emptyInventory = _inventory({
-  for (final id in ToolId.values) id: const <ToolCandidate>[],
+  for (final id in ToolId.values) id: (const <ToolCandidate>[], ToolAction.install),
 });
 
-/// The awkward middle — one missing, one host copy too old to use.
+/// The awkward middle — developer tools already there, Flutter missing, and a
+/// Serverpod CLI too old to use.
 final mixedInventory = _inventory({
-  ToolId.flutter: [_found(ToolId.flutter, ToolSource.managed, '3.44.2')],
-  ToolId.serverpodCli: [_tooOld(ToolId.serverpodCli, '4.0.0-beta.0')],
-  ToolId.opencode: const <ToolCandidate>[],
-  ToolId.git: [_found(ToolId.git, ToolSource.host, '2.53.0')],
-  ToolId.llvmTools: [_found(ToolId.llvmTools, ToolSource.managed, '20.1.8')],
+  ToolId.commandLineTools: (
+    [_found(ToolId.commandLineTools, ToolSource.host, null)],
+    ToolAction.none,
+  ),
+  ToolId.flutter: (const <ToolCandidate>[], ToolAction.install),
+  ToolId.serverpodCli: (
+    [_tooOld(ToolId.serverpodCli, '3.4.1')],
+    ToolAction.update,
+  ),
 });
 
-/// Every required tool already on this Mac, so the global-install opt-in has
-/// nothing to add and shows satisfied and inert. OpenCode is managed on purpose
-/// — it does not count towards this.
-final allNativeInventory = _inventory({
-  ToolId.flutter: [_found(ToolId.flutter, ToolSource.host, '3.44.2')],
-  ToolId.serverpodCli: [
-    _found(ToolId.serverpodCli, ToolSource.host, '4.0.0-beta.2'),
-  ],
-  ToolId.opencode: [_found(ToolId.opencode, ToolSource.managed, '1.18.4')],
-  ToolId.git: [_found(ToolId.git, ToolSource.host, '2.53.0-3')],
-  ToolId.llvmTools: [_found(ToolId.llvmTools, ToolSource.host, '20.1.8')],
+/// The user's own Flutter is too old, and App Studio leaves updating it to
+/// them.
+final manualUpdateInventory = _inventory({
+  ToolId.commandLineTools: (
+    [_found(ToolId.commandLineTools, ToolSource.host, null)],
+    ToolAction.none,
+  ),
+  ToolId.flutter: (
+    [_tooOld(ToolId.flutter, '3.41.2', root: '/Users/preview/flutter')],
+    ToolAction.manual,
+  ),
+  ToolId.serverpodCli: (
+    [_found(ToolId.serverpodCli, ToolSource.host, '4.0.3')],
+    ToolAction.none,
+  ),
 });
 
-/// Everything healthy, but two managed installs behind the pinned versions —
-/// the only state in which "Update All" is enabled.
-final outdatedInventory = _inventory({
-  ToolId.flutter: [_found(ToolId.flutter, ToolSource.managed, '3.44.0')],
-  ToolId.serverpodCli: [
-    _found(ToolId.serverpodCli, ToolSource.managed, '4.0.0-beta.2'),
-  ],
-  ToolId.opencode: [_found(ToolId.opencode, ToolSource.host, '1.18.4')],
-  // A host copy behind the pin stays put: we did not install it, so it is not
-  // ours to replace, and Update All must leave it alone.
-  ToolId.git: [_found(ToolId.git, ToolSource.host, '2.40.0')],
-  ToolId.llvmTools: [_found(ToolId.llvmTools, ToolSource.managed, '20.1.0')],
+/// A build from before this one left its own toolchain behind.
+final legacyInventory = _inventory(
+  {for (final id in ToolId.values) id: (const <ToolCandidate>[], ToolAction.install)},
+  legacy: true,
+);
+
+/// What preflight finds for [emptyInventory].
+final previewPlan = InstallPlan({
+  ToolId.commandLineTools: const PlannedTool(id: ToolId.commandLineTools),
+  ToolId.flutter: PlannedTool(
+    id: ToolId.flutter,
+    version: ToolVersion.tryParse('3.47.5'),
+    flutterRelease: FlutterRelease(
+      version: ToolVersion.tryParse('3.47.5')!,
+      archiveUrl: Uri.parse('https://example.invalid/flutter.zip'),
+      sha256: 'a' * 64,
+      downloadBytes: 2262108309,
+    ),
+  ),
+  ToolId.serverpodCli: PlannedTool(
+    id: ToolId.serverpodCli,
+    version: ToolVersion.tryParse('4.0.3'),
+  ),
 });
 
-/// A download in flight, so the progress banner can be seen without waiting
-/// for a real 662 MB transfer.
-/// Fixed [startedAt] and [now] so the banner's elapsed/remaining text is
-/// identical on every run.
+/// A download in flight, so the progress view can be seen without waiting for
+/// a real 2 GB transfer. Fixed times so the remaining-time text is identical
+/// on every run.
 final downloadingProgress = InstallProgress(
   startedAt: DateTime.utc(2026, 1, 1, 12),
   now: DateTime.utc(2026, 1, 1, 12, 0, 40),
-  tools: const [
+  tools: [
+    const ToolProgress(id: ToolId.commandLineTools, phase: ToolPhase.done),
     ToolProgress(
       id: ToolId.flutter,
       phase: ToolPhase.downloading,
-      receivedBytes: 271 * 1024 * 1024,
-      totalBytes: 662 * 1024 * 1024,
+      receivedBytes: 871 * 1000 * 1000,
+      totalBytes: 2262 * 1000 * 1000,
+      phaseStartedAt: DateTime.utc(2026, 1, 1, 12),
     ),
+    const ToolProgress(id: ToolId.serverpodCli, phase: ToolPhase.queued),
+  ],
+);
+
+/// Apple's installer is up and App Studio is waiting on it.
+final waitingForAppleProgress = InstallProgress(
+  startedAt: DateTime.utc(2026, 1, 1, 12),
+  now: DateTime.utc(2026, 1, 1, 12, 1),
+  tools: const [
+    ToolProgress(id: ToolId.commandLineTools, phase: ToolPhase.waitingForApple),
+    ToolProgress(id: ToolId.flutter, phase: ToolPhase.queued),
     ToolProgress(id: ToolId.serverpodCli, phase: ToolPhase.queued),
   ],
 );
 
-/// The tail of an install: every download has landed, and the re-probe and the
-/// shell PATH write are still running. The UI stays on the progress view here
-/// rather than dropping back to the plan for a second.
+/// The tail of an install: every step has finished and the re-probe is still
+/// running. The UI stays on the progress view here rather than dropping back
+/// to the plan for a second.
 final finishingProgress = InstallProgress(
   startedAt: DateTime.utc(2026, 1, 1, 12),
-  now: DateTime.utc(2026, 1, 1, 12, 2, 10),
+  now: DateTime.utc(2026, 1, 1, 12, 6, 10),
   tools: const [
-    ToolProgress(
-      id: ToolId.flutter,
-      phase: ToolPhase.done,
-      receivedBytes: 662 * 1024 * 1024,
-      totalBytes: 662 * 1024 * 1024,
-    ),
-    ToolProgress(
-      id: ToolId.serverpodCli,
-      phase: ToolPhase.done,
-      receivedBytes: 11 * 1024 * 1024,
-      totalBytes: 11 * 1024 * 1024,
-    ),
+    ToolProgress(id: ToolId.commandLineTools, phase: ToolPhase.done),
+    ToolProgress(id: ToolId.flutter, phase: ToolPhase.done),
+    ToolProgress(id: ToolId.serverpodCli, phase: ToolPhase.done),
   ],
 );
 
@@ -207,21 +211,23 @@ final finishingProgress = InstallProgress(
 class FakeToolsView extends ChangeNotifier implements ToolsView {
   FakeToolsView({
     ToolchainInventory? inventory,
+    InstallPlan? plan,
     this.progress,
     this.installError,
     this.isBusy = false,
     this.isInstalling = false,
     this.preflightError,
     this.preflightDelay = Duration.zero,
-    this.shellPathState = ShellPathState.absent,
-    this.shellName = 'zsh',
-    this.shellRcLabel = '~/.zshrc',
-    this.shellExportLine =
-        'export PATH="\$HOME/Library/Application Support/App Studio/bin:\$PATH"',
-  }) : inventory = inventory ?? completeInventory;
+    this.flutterInstallLabel = '~/develop/flutter',
+    this.shellProfileLabel = '~/.zprofile',
+    this.manualPathLines = const [],
+  })  : inventory = inventory ?? completeInventory,
+        plan = plan ?? previewPlan;
 
   @override
   ToolchainInventory inventory;
+  @override
+  InstallPlan plan;
   @override
   InstallProgress? progress;
   @override
@@ -230,6 +236,12 @@ class FakeToolsView extends ChangeNotifier implements ToolsView {
   bool isBusy;
   @override
   bool isInstalling;
+  @override
+  String flutterInstallLabel;
+  @override
+  String? shellProfileLabel;
+  @override
+  List<String> manualPathLines;
 
   /// What [preflight] reports back. Non-null drives the setup screen's failure
   /// path, which is otherwise only reachable by unplugging the network.
@@ -239,40 +251,32 @@ class FakeToolsView extends ChangeNotifier implements ToolsView {
   /// long enough to look at.
   Duration preflightDelay;
 
-  @override
-  ShellPathState shellPathState;
-  @override
-  String shellName;
-  @override
-  String shellRcLabel;
-  @override
-  String shellExportLine;
+  /// Counts the calls, for tests that drive the setup screen.
+  int legacyRemovals = 0;
 
   @override
   Future<void> refreshDeep() async => notifyListeners();
-  @override
-  Future<void> refreshShellPathState() async {}
   @override
   Future<String?> preflight() async {
     if (preflightDelay > Duration.zero) await Future.delayed(preflightDelay);
     notifyListeners();
     return preflightError;
   }
-  @override
-  Future<void> install(List<ToolId> ids) async => notifyListeners();
+
   @override
   Future<void> installMissing() async => notifyListeners();
   @override
-  Future<void> uninstall(ToolId id) async => notifyListeners();
-  @override
   void cancelInstall() => notifyListeners();
   @override
-  Future<String?> setShellPathEnabled(bool enabled, {bool force = false}) async {
-    shellPathState = enabled ? ShellPathState.present : ShellPathState.absent;
+  Future<String?> removeLegacyInstall() async {
+    legacyRemovals++;
+    inventory = ToolchainInventory(
+      manifest: inventory.manifest,
+      tools: inventory.tools,
+    );
     notifyListeners();
     return null;
   }
-
 }
 
 /// A [ProvidersView] with a fixed set of keys and models.

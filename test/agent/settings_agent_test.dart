@@ -8,7 +8,6 @@ import 'package:appstudio/toolchain/tool_status.dart';
 import 'package:appstudio/toolchain/toolchain.dart';
 import 'package:appstudio/toolchain/toolchain_controller.dart';
 import 'package:appstudio/toolchain/toolchain_paths.dart';
-import 'package:appstudio/toolchain/toolchain_requirements.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -42,8 +41,7 @@ void main() {
         ToolchainInventory(manifest: manifest, tools: const {}),
       ),
       manifest: manifest,
-      paths: ToolchainPaths(appSupport.path),
-      requirements: ToolchainRequirements.empty,
+      paths: ToolchainPaths(home: appSupport.path, appSupportRoot: appSupport.path),
     );
     final session = ProjectSession();
     agent = AgentController(

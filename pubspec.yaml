@@ -1,7 +1,7 @@
 name: appstudio
 description: Self-contained macOS IDE for Serverpod projects.
 publish_to: 'none'
-version: 0.1.1+17
+version: 0.2.0+19
 
 environment:
   sdk: ^3.12.2

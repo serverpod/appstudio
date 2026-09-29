@@ -44,24 +44,12 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-# --- App Studio toolchain ---
-# Flutter SDK from tool/bundle_toolchain.sh (~1GB+)
-/toolchain/flutter/
+# Build trees from the retired toolchain pipeline (tool/bundle_toolchain.sh).
+# The app installs Flutter and the Serverpod CLI from their official sources
+# now; this only keeps an old checkout's multi-GB leftovers out of git status.
+/toolchain/
 
-# Portable Git (dugite-native) from tool/bundle_toolchain.sh
-/toolchain/git/
-
-# otool + install_name_tool from an official LLVM release
-/toolchain/llvm-tools/
-
-# Prebuilt Serverpod CLI bundles (binary + native libs)
-/toolchain/serverpod_cli/*/bin/
-/toolchain/serverpod_cli/*/lib/
-
-# Bundled OpenCode CLI binary (~40MB+)
-/toolchain/opencode/
-
-# Legacy embed staging (Release syncs from /toolchain)
+# Legacy embed staging
 /macos/Runner/Resources/toolchain/**
 !/macos/Runner/Resources/toolchain/.gitkeep
 

@@ -8,7 +8,7 @@ import 'package:appstudio/terminal/studio_terminal.dart';
 import 'package:appstudio/toolchain/toolchain_controller.dart';
 import 'package:appstudio/toolchain/tool_status.dart';
 import 'package:appstudio/toolchain/toolchain_paths.dart';
-import 'package:appstudio/toolchain/toolchain_requirements.dart';
+import 'package:appstudio/toolchain/install_record.dart';
 import 'package:appstudio/toolchain/toolchain.dart';
 import 'package:appstudio/uninstall/uninstaller.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -17,9 +17,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../support/toolchain_support.dart';
 
-/// Uninstall is irreversible and touches three separate stores, only one of
-/// which is the Application Support directory. Each of these covers a way it
-/// could quietly do less than it claims.
+/// Uninstall is irreversible and reaches well outside the app: the user's
+/// shell config, `~/develop`, `~/.serverpod`. Each of these covers a way it
+/// could quietly do less than it claims — or more.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -37,7 +37,9 @@ void main() {
       'recent_projects': <String>['/tmp/a'],
     });
     tmp = await Directory.systemTemp.createTemp('uninstaller');
-    paths = ToolchainPaths(p.join(tmp.path, kAppSupportDirName));
+    // A scratch home: the steps under test delete ~/.serverpod and
+    // ~/develop/flutter.
+    paths = ToolchainPaths.forHome(tmp.path);
 
     final manifest = await loadTestManifest();
     toolchains = ToolchainController(
@@ -46,7 +48,7 @@ void main() {
       ),
       manifest: manifest,
       paths: paths,
-      requirements: ToolchainRequirements.empty,
+      record: await InstallRecord.load(paths.installRecordFile),
     );
     final session = ProjectSession();
     process = ServerpodProcessController(
@@ -75,109 +77,157 @@ void main() {
         process: process,
         agent: agent,
         mcp: mcp,
-        // Never the real one: the step under test deletes ~/.serverpod.
-        homeOverride: tmp.path,
       );
 
-  /// A stand-in for an install: a file buried in the support directory.
+  Future<UninstallResult> run({
+    Set<ToolId> tools = const {},
+    bool clearPubCache = false,
+  }) =>
+      uninstaller().run(
+        UninstallChoice(tools: tools, clearPubCache: clearPubCache),
+      );
+
+  /// App Studio's own data: something in the support directory.
   Future<File> seedSupportDir() async {
-    final file = File(p.join(paths.toolchainRoot, 'flutter', '3.44.2', 'bin'));
+    final file = File(p.join(paths.appSupportRoot, 'agent-scratch', 'x'));
     await file.parent.create(recursive: true);
-    await file.writeAsString('installed');
+    await file.writeAsString('data');
     return file;
   }
 
-  test('deletes the whole Application Support directory', () async {
-    await seedSupportDir();
-    expect(await Directory(paths.appSupportRoot).exists(), isTrue);
+  /// A Flutter SDK App Studio installed, with the PATH line it added, and a
+  /// controller that knows about it.
+  Future<String> seedOwnedFlutter(String zprofile) async {
+    final bin = File(p.join(paths.flutterInstallDir, 'bin', 'flutter'));
+    await bin.parent.create(recursive: true);
+    await bin.writeAsString('');
+    const line = r'export PATH="$HOME/develop/flutter/bin:$PATH"';
+    await File(zprofile).writeAsString('# mine\n$line\n');
+    final record = InstallRecord.empty.withTool(RecordedInstall(
+      id: ToolId.flutter,
+      path: paths.flutterInstallDir,
+      installedAt: DateTime.utc(2026),
+      pathLines: [RecordedPathLine(file: zprofile, line: line)],
+    ));
+    await record.save(paths.installRecordFile);
+    toolchains = ToolchainController(
+      initial: toolchains.current,
+      manifest: toolchains.manifest,
+      paths: paths,
+      record: record,
+    );
+    return line;
+  }
 
-    final result = await uninstaller().run();
+  test('deletes App Studio\'s own data', () async {
+    await seedSupportDir();
+
+    final result = await run();
 
     expect(await Directory(paths.appSupportRoot).exists(), isFalse);
     expect(result.failures, isEmpty, reason: result.failures.join(', '));
-    expect(result.isClean, isTrue);
   });
 
   test('clears preferences, so a relaunch behaves like a fresh install',
       () async {
-    await seedSupportDir();
-    // The toolchain-setup dialog remembers a dismissal in preferences, not on
-    // disk. Leaving it behind would mean a reinstalled app never offers to
-    // fetch the tools it just deleted.
-    final before = await SharedPreferences.getInstance();
-    expect(before.getString('toolchain_setup_dismissed'), isNotNull);
-
-    await uninstaller().run();
+    await run();
 
     final after = await SharedPreferences.getInstance();
-    expect(after.getString('toolchain_setup_dismissed'), isNull);
     expect(after.getString('theme_mode'), isNull);
     expect(after.getStringList('recent_projects'), isNull);
   });
 
   test('succeeds when there is nothing installed', () async {
-    // Uninstalling a never-set-up copy must not report failures at the user.
-    final result = await uninstaller().run();
-
-    expect(result.isClean, isTrue);
-    expect(await Directory(paths.appSupportRoot).exists(), isFalse);
+    final result = await run();
+    expect(result.isClean, isTrue, reason: result.failures.join(', '));
   });
 
   test('is idempotent', () async {
     await seedSupportDir();
-    expect((await uninstaller().run()).isClean, isTrue);
-    expect((await uninstaller().run()).isClean, isTrue);
+    expect((await run()).isClean, isTrue);
+    expect((await run()).isClean, isTrue);
+  });
+
+  test('removes what an earlier build installed, whatever is ticked', () async {
+    final legacy = Directory(p.join(paths.legacyToolchainRoot, 'flutter'));
+    await legacy.create(recursive: true);
+
+    await run();
+
+    expect(await legacy.exists(), isFalse);
+  });
+
+  test('removes a ticked Flutter and exactly its PATH line', () async {
+    final zprofile = p.join(tmp.path, '.zprofile');
+    await seedOwnedFlutter(zprofile);
+
+    final result = await run(tools: {ToolId.flutter});
+
+    expect(result.failures, isEmpty, reason: result.failures.join(', '));
+    expect(await Directory(paths.flutterInstallDir).exists(), isFalse);
+    expect(await File(zprofile).readAsString(), '# mine\n');
+    // Nothing App Studio installed is left, so neither is the record.
+    expect(await File(paths.installRecordFile).exists(), isFalse);
+  });
+
+  test('leaves an unticked Flutter alone, and remembers it is ours', () async {
+    final zprofile = p.join(tmp.path, '.zprofile');
+    final line = await seedOwnedFlutter(zprofile);
+
+    await run();
+
+    expect(await Directory(paths.flutterInstallDir).exists(), isTrue);
+    expect(await File(zprofile).readAsString(), contains(line));
+    final record = await InstallRecord.load(paths.installRecordFile);
+    expect(record.owns(ToolId.flutter), isTrue);
+  });
+
+  test('keeps ~/.serverpod unless the Serverpod CLI goes', () async {
+    // It is the CLI's own state — the cloud login among it — and the user may
+    // have a Serverpod CLI App Studio never touched.
+    final login = File(p.join(paths.serverpodStateDir, 'cloud', 'auth.json'));
+    await login.parent.create(recursive: true);
+    await login.writeAsString('{}');
+
+    await run();
+
+    expect(await login.exists(), isTrue);
+  });
+
+  test('deletes ~/.serverpod with the Serverpod CLI, but keeps the record of '
+      'what else App Studio installed', () async {
+    final zprofile = p.join(tmp.path, '.zprofile');
+    await seedOwnedFlutter(zprofile);
+    final login = File(p.join(paths.serverpodStateDir, 'cloud', 'auth.json'));
+    await login.parent.create(recursive: true);
+    await login.writeAsString('{}');
+
+    await run(tools: {ToolId.serverpodCli});
+
+    expect(await login.exists(), isFalse);
+    final record = await InstallRecord.load(paths.installRecordFile);
+    expect(record.owns(ToolId.flutter), isTrue);
   });
 
   test('reports a failure instead of aborting the rest', () async {
     await seedSupportDir();
-    // A directory that cannot be removed: make the parent read-only so the
-    // recursive delete fails. Everything after it must still run — stopping
-    // halfway would leave neither a working install nor a clean machine.
-    await Process.run('/bin/chmod', ['500', tmp.path]);
-    addTearDown(() => Process.run('/bin/chmod', ['700', tmp.path]));
+    // Make the support directory's parent read-only so the recursive delete
+    // fails. Everything after it must still run — stopping halfway would leave
+    // neither a working install nor a clean machine.
+    final parent = p.dirname(paths.appSupportRoot);
+    await Process.run('/bin/chmod', ['500', parent]);
+    addTearDown(() => Process.run('/bin/chmod', ['700', parent]));
 
-    final result = await uninstaller().run();
+    final result = await run();
 
     expect(result.isClean, isFalse);
-    expect(
-      result.failures,
-      contains('deleting the App Studio support folder'),
-    );
-    // Preferences come after the delete, and must have been cleared anyway.
+    expect(result.failures, contains('deleting the App Studio support folder'));
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('theme_mode'), isNull);
   });
 
-  test('deletes the Serverpod CLI state directory', () async {
-    // The CLI keeps its own state in ~/.serverpod — template caches per
-    // version, the analytics id, the cloud login. A fresh install would
-    // otherwise inherit all of it.
-    final state = Directory(p.join(tmp.path, '.serverpod'));
-    final login = File(p.join(state.path, 'cloud', 'auth.json'));
-    await login.parent.create(recursive: true);
-    await login.writeAsString('{}');
-    await File(p.join(state.path, 'uuid')).writeAsString('abc');
-
-    final result = await uninstaller().run();
-
-    expect(await state.exists(), isFalse);
-    expect(result.failures, isEmpty, reason: result.failures.join(', '));
-  });
-
-  test('a missing Serverpod CLI state directory is not a failure', () async {
-    expect(await Directory(p.join(tmp.path, '.serverpod')).exists(), isFalse);
-
-    final result = await uninstaller().run();
-
-    expect(result.failures, isEmpty, reason: result.failures.join(', '));
-  });
-
   test('does not touch the pub cache unless asked', () async {
-    // `dart pub cache clean` affects every Dart project on the machine, so it
-    // is opt-in. There is no Dart here, so the assertion is that the default
-    // path does not even attempt it.
-    final result = await uninstaller().run();
+    final result = await run();
     expect(result.failures, isNot(contains('clearing the Dart package cache')));
   });
 }
