@@ -91,7 +91,6 @@ class ServerpodProcessController extends ChangeNotifier
   /// Sign-up code the server last logged, until dismissed or superseded.
   String? get registrationCode => _registrationCode;
 
-  bool get canStart => session.hasProject && _state == ProcessState.idle;
   bool get canStop =>
       _state == ProcessState.running || _state == ProcessState.starting;
 

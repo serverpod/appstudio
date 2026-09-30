@@ -1,7 +1,5 @@
 enum AgentMessageRole { user, assistant, system }
 
-enum AgentPartKind { text, reasoning, tool, permission, question, error }
-
 enum AgentToolStatus { pending, running, completed, error }
 
 /// Wire values accepted by OpenCode's permission reply endpoint.

@@ -438,8 +438,6 @@ class AgentController extends ChangeNotifier implements ProvidersView {
     } catch (_) {}
   }
 
-  Future<void> refreshProviders() => _refreshProviders();
-
   Future<void> _refreshProviders() async {
     try {
       if (_client.baseUrl != null) {

@@ -49,10 +49,6 @@ app.*.map.json
 # now; this only keeps an old checkout's multi-GB leftovers out of git status.
 /toolchain/
 
-# Legacy embed staging
-/macos/Runner/Resources/toolchain/**
-!/macos/Runner/Resources/toolchain/.gitkeep
-
 # Release / distribution artifacts
 /dist/
 

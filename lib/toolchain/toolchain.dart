@@ -20,8 +20,6 @@ class Toolchain {
 
   ToolCandidate? resolvedTool(ToolId id) => inventory[id]?.resolved;
 
-  ToolSource? sourceOf(ToolId id) => resolvedTool(id)?.source;
-
   bool isSatisfied(ToolId id) => inventory.isSatisfied(id);
 
   bool get isComplete => inventory.isComplete;
@@ -35,11 +33,6 @@ class Toolchain {
 
   String? get serverpodExecutable =>
       resolvedTool(ToolId.serverpodCli)?.executable;
-
-  String? get flutterVersion =>
-      resolvedTool(ToolId.flutter)?.detectedVersion?.toString();
-  String? get serverpodCliVersion =>
-      resolvedTool(ToolId.serverpodCli)?.detectedVersion?.toString();
 
   /// Why [id] cannot be used right now, or null when it is fine.
   ///

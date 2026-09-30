@@ -139,8 +139,6 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
     }
   }
 
-  bool get isRefreshing => _refreshing;
-
   /// Non-null while an install is running, and until the next one starts.
   @override
   InstallProgress? get progress => _progress;

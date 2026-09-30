@@ -13,11 +13,6 @@ import 'agent/agent_pane.dart';
 /// The left panel's tabs. With the agent switched off, only the server log.
 enum TerminalPaneTab { agent, serverLogs }
 
-/// What this pane holds, for the toolbar's show/hide tooltip. It is named after
-/// its contents, and with the agent switched off the server log is all of them.
-const String kLeftPanelName =
-    kOpenCodeAgentEnabled ? 'Agent & logs' : 'logs';
-
 /// Font size for the server log terminal. [terminalPaneMinWidth] measures with
 /// it, so the panel's 80-column minimum follows a change here automatically.
 const kTerminalFontSize = 11.0;

@@ -208,14 +208,6 @@ class OpenCodeClient {
     }
   }
 
-  Future<String?> getDefaultModel() async {
-    final res = await _get('/config');
-    final json = _decodeMap(res);
-    final model = json['model']?.toString();
-    if (model == null || model.isEmpty) return null;
-    return model;
-  }
-
   void close() {
     _http.close();
   }
