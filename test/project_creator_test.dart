@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 
 import 'package:appstudio/analytics/app_analytics.dart';
 import 'package:appstudio/process/project_creator.dart';
@@ -98,6 +99,56 @@ void main() {
 
       final settings = await ProjectSettings.load(project.path);
       expect(settings.editors, isEmpty);
+    });
+  });
+
+  group('applyAgentInstructions', () {
+    late Directory project;
+
+    setUp(() {
+      project = Directory.systemTemp.createTempSync('appstudio_creator_test');
+    });
+
+    tearDown(() {
+      if (project.existsSync()) project.deleteSync(recursive: true);
+    });
+
+    Future<ProjectCreator> creator() async => ProjectCreator(
+      toolchains: await emptyToolchainController(),
+      loadAsset: (_) async => 'App Studio agent instructions',
+    );
+
+    test('removes CLAUDE.md and writes the template over AGENTS.md', () async {
+      File(p.join(project.path, 'CLAUDE.md')).writeAsStringSync('old claude');
+      File(p.join(project.path, 'AGENTS.md')).writeAsStringSync('generic');
+
+      await (await creator()).applyAgentInstructions(project.path);
+
+      expect(File(p.join(project.path, 'CLAUDE.md')).existsSync(), isFalse);
+      expect(
+        File(p.join(project.path, 'AGENTS.md')).readAsStringSync(),
+        'App Studio agent instructions',
+      );
+    });
+
+    test('writes AGENTS.md even when neither file exists yet', () async {
+      await (await creator()).applyAgentInstructions(project.path);
+
+      expect(File(p.join(project.path, 'CLAUDE.md')).existsSync(), isFalse);
+      expect(
+        File(p.join(project.path, 'AGENTS.md')).readAsStringSync(),
+        'App Studio agent instructions',
+      );
+    });
+
+    test('never throws when the asset cannot be read', () async {
+      final creator = ProjectCreator(
+        toolchains: await emptyToolchainController(),
+        loadAsset: (_) async => throw Exception('no bundle'),
+      );
+      File(p.join(project.path, 'CLAUDE.md')).writeAsStringSync('old claude');
+
+      await creator.applyAgentInstructions(project.path);
     });
   });
 

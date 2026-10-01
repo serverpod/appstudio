@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 
@@ -18,6 +19,10 @@ import 'ide_integration.dart';
 export 'ide_integration.dart';
 
 final _ansiEscape = RegExp(r'\x1B\[[0-9;]*[A-Za-z]');
+
+/// Agent instructions tuned for App Studio, written into every new project as
+/// its `AGENTS.md`.
+const kAgentsTemplateAsset = 'assets/AGENTS_template.md';
 
 /// Serverpod project names map to Dart package names (`<name>_server`), so the
 /// CLI only accepts lowercase letters, digits and underscores.
@@ -54,9 +59,16 @@ class ProjectCreationException implements Exception {
 /// Creates Serverpod projects with the bundled CLI and configures them for the
 /// App Studio preview pane.
 class ProjectCreator {
-  const ProjectCreator({required this.toolchains});
+  ProjectCreator({
+    required this.toolchains,
+    Future<String> Function(String key)? loadAsset,
+  }) : loadAsset = loadAsset ?? rootBundle.loadString;
 
   final ToolchainController toolchains;
+
+  /// Reads a bundled asset. Injected (normally `rootBundle.loadString`) so a
+  /// test can supply the `AGENTS.md` template without a Flutter asset bundle.
+  final Future<String> Function(String key) loadAsset;
 
   /// Runs `serverpod create` inside [parentDirectory] and returns the path of
   /// the new project. [onStatus] receives CLI progress lines.
@@ -142,7 +154,32 @@ class ProjectCreator {
     onStatus?.call('Configuring preview…');
     await _configureFlutterAppForPreview(projectPath: projectPath, name: name);
     await recordProjectSettings(projectPath: projectPath, ides: ides);
+    await applyAgentInstructions(projectPath);
     return projectPath;
+  }
+
+  /// Drops the project's root `CLAUDE.md` and writes an App Studio–tuned
+  /// `AGENTS.md` over whatever the CLI left there.
+  ///
+  /// `serverpod create` writes a generic `AGENTS.md` (and, for the Claude IDE,
+  /// a `CLAUDE.md` that points at it). App Studio's own instructions tell the
+  /// agent to drive the server through App Studio rather than the command line,
+  /// so the generic pair is replaced with one file.
+  ///
+  /// Never fails the creation: the project is complete and usable with the
+  /// CLI's own instructions, and losing a finished project to an unwritable
+  /// dotfile — or a missing asset — would be a far worse trade.
+  @visibleForTesting
+  Future<void> applyAgentInstructions(String projectPath) async {
+    try {
+      final claude = File(p.join(projectPath, 'CLAUDE.md'));
+      if (await claude.exists()) await claude.delete();
+
+      final template = await loadAsset(kAgentsTemplateAsset);
+      await File(p.join(projectPath, 'AGENTS.md')).writeAsString(template);
+    } catch (_) {
+      // Ignored — see above.
+    }
   }
 
   /// Writes `.appstudio/settings.json` so the toolbar knows which editors this
