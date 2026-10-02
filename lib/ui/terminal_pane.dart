@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shad/shad.dart';
 import 'package:xterm/xterm.dart';
 
@@ -134,21 +135,12 @@ class _TerminalPaneState extends State<TerminalPane> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    final scheme = theme.colorScheme;
-    final xtermTheme = TerminalPane.terminalTheme(theme);
+    final scheme = ShadTheme.of(context).colorScheme;
     final showsAgent = kOpenCodeAgentEnabled;
 
-    final terminal = TerminalView(
-      widget.studioTerminal.terminal,
-      theme: xtermTheme,
-      textStyle: TerminalStyle(
-        fontSize: kTerminalFontSize,
-        fontFamily: kMacMonoFont,
-      ),
-      padding: const EdgeInsets.all(_kTerminalPadding),
+    final terminal = ServerLogView(
+      terminal: widget.studioTerminal.terminal,
       autofocus: _selectedTab == TerminalPaneTab.serverLogs,
-      hardwareKeyboardOnly: true,
     );
 
     return Column(
@@ -180,6 +172,69 @@ class _TerminalPaneState extends State<TerminalPane> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// What the server log answers from the keyboard: copying what is selected and
+/// selecting everything.
+///
+/// ⌘V is listed in order to be refused, and leaving it out is not enough.
+/// xterm puts a paste action above its focus node that writes the clipboard to
+/// the PTY, and `ShadApp`'s default text-editing shortcuts map ⌘V to that
+/// intent — so an unlisted ⌘V bubbles up to them and is pasted into the
+/// running server anyway. Stopping propagation here still reports the key
+/// unhandled, so the menu bar gets it like any other.
+const _kServerLogShortcuts = <ShortcutActivator, Intent>{
+  SingleActivator(LogicalKeyboardKey.keyC, meta: true):
+      CopySelectionTextIntent.copy,
+  SingleActivator(LogicalKeyboardKey.keyA, meta: true):
+      SelectAllTextIntent(SelectionChangedCause.keyboard),
+  SingleActivator(LogicalKeyboardKey.keyV, meta: true):
+      DoNothingAndStopPropagationIntent(),
+};
+
+/// The server log: an xterm showing what `serverpod start` prints.
+///
+/// **Output only.** It still takes focus, because ⌘C and ⌘A act on the focused
+/// widget, but every other key has to come back out unhandled — a key Flutter
+/// reports as handled never reaches the menu bar, so a log that swallowed keys
+/// took ⌘W and every other menu shortcut with it for as long as it held focus,
+/// which with autofocus is from the moment a project opens.
+///
+/// Two settings do that, and the second lives on the [Terminal]:
+///
+/// - `readOnly` with `hardwareKeyboardOnly` left *off*. On, xterm listens with
+///   `CustomKeyboardListener`, which types any key it did not otherwise handle
+///   into the terminal and reports it handled — ⌘W arrived at the server as a
+///   `w`. Off, it uses the text-input path, which `readOnly` keeps from ever
+///   opening an input connection, so nothing is inserted from there either.
+/// - `inputHandler: null` on the terminal itself (see [StudioTerminal]).
+///   `readOnly` does not stop xterm translating Enter, Tab, the arrows and
+///   Ctrl chords into escape sequences for the PTY.
+class ServerLogView extends StatelessWidget {
+  const ServerLogView({
+    super.key,
+    required this.terminal,
+    this.autofocus = false,
+  });
+
+  final Terminal terminal;
+  final bool autofocus;
+
+  @override
+  Widget build(BuildContext context) {
+    return TerminalView(
+      terminal,
+      theme: TerminalPane.terminalTheme(ShadTheme.of(context)),
+      textStyle: const TerminalStyle(
+        fontSize: kTerminalFontSize,
+        fontFamily: kMacMonoFont,
+      ),
+      padding: const EdgeInsets.all(_kTerminalPadding),
+      autofocus: autofocus,
+      shortcuts: _kServerLogShortcuts,
+      readOnly: true,
     );
   }
 }

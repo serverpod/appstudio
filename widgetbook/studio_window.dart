@@ -206,16 +206,6 @@ class _SampleLogState extends State<_SampleLog> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    return TerminalView(
-      _terminal,
-      theme: TerminalPane.terminalTheme(theme),
-      textStyle: const TerminalStyle(
-        fontSize: kTerminalFontSize,
-        fontFamily: kMacMonoFont,
-      ),
-      padding: const EdgeInsets.all(8),
-      readOnly: true,
-    );
+    return ServerLogView(terminal: _terminal);
   }
 }

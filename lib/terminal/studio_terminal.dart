@@ -12,6 +12,12 @@ class StudioTerminal extends ChangeNotifier {
   StudioTerminal() {
     terminal = Terminal(
       maxLines: 10000,
+      // The log is output only, so no key is translated for the PTY: with the
+      // default handler Enter, Tab, the arrows and Ctrl chords are written to
+      // the server and reported handled, which keeps them from anything else
+      // in the window. `onOutput` stays — the terminal's own answers to the
+      // program's queries go through it too.
+      inputHandler: null,
       onOutput: _writeToPty,
       onResize: (width, height, pixelWidth, pixelHeight) {
         _resizePty(width, height);
