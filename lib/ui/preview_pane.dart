@@ -476,6 +476,7 @@ class PreviewPaneState extends State<PreviewPane> {
           ),
           const SizedBox(height: kCompactBarGap),
           CompactControlBar(
+            status: widget.process.status,
             viewMode: mode.viewMode,
             previewBrightness: mode.previewBrightness,
             onViewModeChanged: mode.setViewMode,

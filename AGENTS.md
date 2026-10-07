@@ -213,18 +213,19 @@ The runner still serves `mcp.sock` for the user's own AI agents; App Studio no
 longer touches it. `dart_mcp`, `xterm` and `kyroon_pty` left `pubspec.yaml` with
 it.
 
-## Toolbar
+## Toolbar, Server menu and Logs menu
 
-### Hot Reload, Hot Restart, Full Restart
+### Hot Restart and Full Restart
 
-**Hot Reload** (⚡ `zap`), **Hot Restart** (`refreshCcwDot`) and **Full Restart**
-(`rotateCcw`), left to right, fastest to slowest. All three are
-`ToolbarActionButton` — an outline icon button with a spinner in the icon's
-place while busy — so they cannot drift in size or spinner size.
+**Hot Restart** (⚡ `zap`, ⌘R) and **Full Restart** (`refreshCcwDot`, ⇧⌘R),
+fast and slow. Both are `ToolbarActionButton` — an outline icon button with a
+spinner in the icon's place while busy — so they cannot drift in size or
+spinner size. Both are also in the **Server** menu.
 
-- **Hot Reload** is the runner's `hotReload`: server isolate, then every running
-  Flutter app. Keeps state, so it does not pick up a change to `main()`. It does
-  **not** reload the preview — that would throw away the state it kept.
+- **There is no Hot Reload button, on purpose.** The runner watches the project
+  and hot-reloads on every save; a button would only repeat what has already
+  happened. `RunnerClient.hotReload` still exists on the wire; nothing in the UI
+  sends it.
 - **Hot Restart** is the runner's `hotRestart`: recompile, reboot the server
   process, hot-restart every Flutter app. The RPC answers only once all of that
   has happened (measured ~1 s on the probe project), then the preview is
@@ -232,7 +233,7 @@ place while busy — so they cannot drift in size or spinner size.
   refresh of its own, but through DWDS, which leaves the cached `main.dart.js` in
   place. Only on success: reloading after a failed restart would re-serve the old
   app and make it look like the restart worked.
-- Both read `RunnerActionsView`, are live only while a runner is attached with
+- It reads `RunnerActionsView`, is live only while a runner is attached with
   its server `running`, and only one runner action runs at a time. A failure
   tints the icon destructive and puts the runner's message in the tooltip.
 - **Icon-only, so the tooltip is load-bearing** and carries the name as well as
@@ -257,6 +258,104 @@ place while busy — so they cannot drift in size or spinner size.
 - The buttons talk to `FullRestartView` / `RunnerActionsView`, not the
   controller, for the same reason `ToolsView` exists: the state rules are worth
   testing without a runner behind them.
+
+### The Server menu
+
+Between View and Window (`MacAppMenu._installServerMenu`): **Hot Restart** ⌘R,
+**Full Restart** ⇧⌘R, then **Create and Apply Migrations** ⌘M and **Create
+Repair Migration**. Everything that acts on the running server, in one place;
+the log pane carries no actions.
+
+- **Its own listener on the process** (`_syncServerMenu`), not `_sync`, which
+  rebuilds Open Recent and is too much to redo on every server state change.
+  Each item is enabled exactly when its toolbar counterpart is, and the handler
+  re-checks, since a shortcut can land before the menu catches up.
+- **⌘M was Window → Minimize.** `MainMenu.xib` no longer gives Minimize a key
+  equivalent: two items on one shortcut leave AppKit to pick whichever menu it
+  searches first. Minimize is still in the Window menu and the title bar.
+- **Create and Apply is one command because "migrate" is one intent.** It
+  creates a migration from the models, then applies whatever is pending — even
+  when nothing new was created, since an earlier migration may still be
+  waiting. A create refused for warnings (one that drops data) raises
+  `ForceMigrationDialog` quoting the runner's warning; cancelling applies
+  nothing. The runner's apply also takes pending *repair* migrations, which is
+  why Create Repair Migration only creates.
+- The commands raise a dialog and toasts, so they live in
+  `ui/migration_commands.dart` as functions of a `BuildContext`, and
+  `main.dart` runs them with the navigator's — the menu bar sits above
+  `ShadApp`.
+
+### The server status replaced the project name and path
+
+The toolbar starts with `ServerStatusIndicator`: a green dot (running), a red
+rounded square (stopped, failed or failed to build — the reason in the
+tooltip), or a spinner beside the latest thing the runner is doing. The panel
+toggle that used to lead the bar is Logs → Show/Hide Logs.
+
+- **It is the only place an operation in flight is shown.** The log's pinned
+  footer of running operations was dropped once the status named them: the log
+  records what finished, the status says what is happening.
+- **The compact window shows the mark alone** (`showMessage: false`) at the left
+  of `CompactControlBar`, the bar under the device — the toolbar is gone in
+  that mode, and there is no room for the line. The message moves to the
+  tooltip. Desktop-minimized keeps the preview header, not this bar, and shows
+  no status.
+
+- `ServerpodProcessController.serverStatus()` computes it; `status` wraps it as
+  a `ServerStatusView` listening to the controller *and* its `RunnerLog`,
+  because the operations it names arrive on the log, which the controller
+  deliberately does not notify for.
+- **Latest wins.** Of the runner's operations in flight, the most recently
+  started names the status; with none, the phase does ("Fetching packages",
+  "Starting the server", the app's `launchStage`).
+- **An operation must run 400 ms (`kStatusOperationDelay`) before it shows.**
+  The pod reports every non-internal log scope as an operation — an endpoint
+  call included — and those last milliseconds; shown at once, a busy server
+  would flicker a spinner on every request. A younger one is waited out:
+  `ServerStatus.settlesIn` tells the indicator when to look again.
+- Runner labels lose the trailing dots the CLI writes for a terminal.
+
+### The Logs menu, and `LogViewController`
+
+Right of Server: **Show/Hide Logs**, one checked item per log (Server, then each
+Flutter app by name), and a **Log Level** submenu (Debug, Info, Warning, Error).
+
+- The panel's visibility, selected tab and level live in `LogViewController`
+  (created in `main.dart`), not in widget state: the menu bar sits above
+  `ShadApp` and can only reach state outside a `State`. The panel, the level
+  select and the menu all read and write the one controller; the select is
+  keyed on the level because `ShadSelect.initialValue` is read once.
+- Picking a log from the menu opens the panel too.
+- **The app items are rebuilt only when the runner's app list changes**, judged
+  by a signature of ids and names: the log notifies on every line. Rebuilds are
+  serialised through one future chain, since two overlapping ones would remove
+  and add the same items twice.
+- `test/platform/macos_app_menu_test.dart` drives the real `MacAppMenu` through
+  a recorded `mac_menu_bar` channel. Tests run as Android, where the plugin
+  picks its no-op implementation, so it sets `MacMenuBarPlatform.instance`
+  first.
+
+### The log, drawn like the TUI
+
+`ui/server_log/server_log_view.dart` lays a record out the way the
+`serverpod start` TUI does (`serverpod_tui`'s `LogMessageWidget`): **level, then
+`HH:mm:ss.SSS`, then the message**, in character columns of the mono font, so
+wrapped lines stay under the message. Same labels (`debug`, `info`, `warn`,
+`error`, `fatal`) and the same palette — grey, blue, yellow, red, green — taken
+from the app's tokens (`mutedForeground`, `primary`, `warning`, `destructive`,
+`success`) so it follows the theme.
+
+- An error prints under its message in the error colour; a stack trace sits
+  behind `▸ N-line stack trace`, as in the TUI, outside the selection.
+- A finished operation is `✓ time label (duration)` and a rule to the edge —
+  the TUI's section marker. A failed one is red with `✗`. The label is measured
+  first and the rule takes the rest: a `Flexible` label beside an `Expanded`
+  rule splits the leftover space between them, and the rule stopped halfway.
+- The level filter is a minimum, named as the levels are: Debug, Info,
+  Warning, Error. A failed operation counts as an error, a successful one as
+  info.
+- App Studio's own records (pub get, starting the runner) are dimmed, so the
+  server's own lines stand out.
 
 ### Open in … — handing the project to an external editor
 
@@ -957,7 +1056,7 @@ install. Sparkle would also catch it, but later and less clearly.
 
 - **Shell theme ≠ preview theme.** Preview light/dark toggles a JS shim (`preview_theme.dart`) that fakes `prefers-color-scheme` inside CEF.
 - **View modes:** `PreviewViewMode` — portrait phone (default), landscape phone, desktop. Defined in `preview_device.dart`.
-- **Reload: there is no reload button, and no second path.** Every reload goes through `previewReloadToken` → `PreviewPaneState.reload()`, so it is always the hard one — a plain navigation re-serves the cached `main.dart.js`, so a rebuilt app looks unchanged. Two things bump the token: `ServerpodProcessController.requestPreviewReload()` and a successful Hot Restart (which goes through it). A Hot *Reload* never does — it would throw away the state it kept. The first load needs no reload: the runner publishes the URL before the app's `main()` has run, and loading it is what connects DWDS. Re-apply the theme shim afterwards: it is injected at load start with the brightness captured when the webview was created.
+- **Reload: there is no reload button, and no second path.** Every reload goes through `previewReloadToken` → `PreviewPaneState.reload()`, so it is always the hard one — a plain navigation re-serves the cached `main.dart.js`, so a rebuilt app looks unchanged. Two things bump the token: `ServerpodProcessController.requestPreviewReload()` and a successful Hot Restart (which goes through it). The runner's own hot reload on save never does — a hard reload would throw away the state it kept. The first load needs no reload: the runner publishes the URL before the app's `main()` has run, and loading it is what connects DWDS. Re-apply the theme shim afterwards: it is injected at load start with the brightness captured when the webview was created.
 - **A hard reload has to take three separate caches, and missing any one of them shows the previous build.** `reload()` runs `previewCachePurgeScript` (`preview/preview_cache_purge.dart`) first, because a **service worker and its Cache Storage entries are page state**: they outlive the navigation entirely and then answer the *new* document's requests out of the build that registered them, which no amount of cache-bypassing on our side can reach. Flutter web in debug registers no service worker, but the previewed app is the user's and may. The purge is asynchronous and `executeJavaScript` cannot await it, so `_purgePageCaches` polls `window.__appStudioCachesPurged` — bounded at 1s, then reloads regardless, since not reloading is the worse failure. `reloadIgnoreCache()` then covers the other two: the fork's `WebviewHandler::reloadIgnoreCache` issues DevTools `Network.clearBrowserCache` before `CefBrowser::ReloadIgnoreCache()`, because the latter only bypasses the cache for the requests *this* navigation makes — the stored entries survive it, so the next plain navigation (DWDS triggers one of its own) serves the old bytes again. CEF exposes no cache-clear API; the DevTools protocol is the route, and commands on one session run in order.
 - **Switching projects clears the profile.** The CEF request context (HTTP
   cache, localStorage, service workers, cookies) is global and in-memory — it
@@ -1042,7 +1141,8 @@ controls) strips the shell down to the preview. **Minimized means two different
 things by view mode**, and `PreviewModeController.compactWindow` is the one
 place that policy lives: in a phone mode the window itself becomes the phone
 frame — borderless, transparent, moved by dragging the frame's edges and
-resized aspect-locked from its corners, with a floating control bar (view mode,
+resized aspect-locked from its corners, with a floating control bar (server
+status, view mode,
 app theme, expand) below the frame; in desktop mode the toolbar *and* the
 server-log panel are hidden and the window is untouched — minimized is
 preview-only in every view mode, and the user's own log toggle is preserved for

@@ -19,6 +19,8 @@ import 'toolchain/toolchain_controller.dart';
 import 'update/session_teardown.dart';
 import 'update/update_controller.dart';
 import 'platform/macos_app_menu.dart';
+import 'ui/migration_commands.dart';
+import 'ui/server_log/log_view_controller.dart';
 import 'ui/new_project_dialog.dart';
 import 'ui/project_started_dialog.dart';
 import 'ui/project_startup_dialog.dart';
@@ -50,6 +52,7 @@ Future<void> main() async {
   );
   final editors = ExternalEditorsController(session: session, process: process);
   final previewMode = PreviewModeController(window: CompactWindowChannel());
+  final logView = LogViewController();
 
   // Never blocks launch: create() swallows its own failures and reports the
   // updater as unavailable.
@@ -86,6 +89,7 @@ Future<void> main() async {
       editors: editors,
       updates: updates,
       previewMode: previewMode,
+      logView: logView,
     ),
   );
 }
@@ -101,6 +105,7 @@ class AppStudioApp extends StatefulWidget {
     required this.editors,
     required this.updates,
     required this.previewMode,
+    required this.logView,
   });
 
   final ThemeController themeController;
@@ -111,6 +116,7 @@ class AppStudioApp extends StatefulWidget {
   final ExternalEditorsController editors;
   final UpdateController updates;
   final PreviewModeController previewMode;
+  final LogViewController logView;
 
   @override
   State<AppStudioApp> createState() => _AppStudioAppState();
@@ -169,6 +175,13 @@ class _AppStudioAppState extends State<AppStudioApp> {
           unawaited(widget.updates.setAutomaticallyChecks(enabled)),
       automaticUpdatesEnabled: () => widget.updates.state.automaticallyChecks,
       canOpenProjects: () => !_needsToolchainSetup,
+      onCreateAndApplyMigrations: () => _withNavigatorContext(
+        (context) => createAndApplyMigrations(context, widget.process),
+      ),
+      onCreateRepairMigration: () => _withNavigatorContext(
+        (context) => createRepairMigration(context, widget.process),
+      ),
+      logView: widget.logView,
     );
     // The menu item starts disabled if the updater is not ready yet; re-sync
     // when it settles.
@@ -206,6 +219,13 @@ class _AppStudioAppState extends State<AppStudioApp> {
   }
 
   void _syncMenu() => _macMenu?.refresh();
+
+  /// Runs a menu command that raises dialogs or toasts. The menu bar lives
+  /// above `ShadApp`, so the navigator's context is the one to use.
+  void _withNavigatorContext(Future<void> Function(BuildContext) command) {
+    final context = _navigatorKey.currentContext;
+    if (context != null) unawaited(command(context));
+  }
 
   void _onToolchainsChanged() {
     final canOpen = !_needsToolchainSetup;
@@ -400,6 +420,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
     widget.session.dispose();
     widget.themeController.dispose();
     widget.previewMode.dispose();
+    widget.logView.dispose();
     super.dispose();
   }
 
@@ -448,6 +469,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
                     editors: widget.editors,
               themeController: widget.themeController,
               previewMode: widget.previewMode,
+              logView: widget.logView,
             ),
           },
         );

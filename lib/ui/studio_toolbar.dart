@@ -3,47 +3,47 @@ import 'package:shad/shad.dart';
 
 import '../process/full_restart_view.dart';
 import '../runner/runner_actions_view.dart';
+import '../runner/server_status.dart';
 import '../session/external_editors_view.dart';
 import '../theme/app_theme.dart';
 import 'full_restart_button.dart';
-import 'hot_reload_buttons.dart';
+import 'hot_restart_button.dart';
 import 'open_in_editor_buttons.dart';
 import 'publish_to_cloud_button.dart';
+import 'server_status_indicator.dart';
 import 'toolchain/tools_view.dart';
 
-/// The bar across the top of an open project: the panel toggle, the project's
-/// name and path, then everything that acts on the project.
+/// The bar across the top of an open project: the server's status, then
+/// everything that acts on the project.
+///
+/// The panel toggle that used to lead it is the Logs menu's Show/Hide Logs
+/// now, and the project's name and path gave way to the status — what a user
+/// needs to see here is whether the server is up, and what it is doing if not.
 ///
 /// Built from narrow views rather than the controllers, so it can be drawn in
 /// Widgetbook with every button in every state.
 class StudioToolbar extends StatelessWidget {
   const StudioToolbar({
     super.key,
-    required this.projectName,
-    required this.projectPath,
+    required this.status,
     required this.tools,
     required this.process,
     required this.actions,
     required this.editors,
-    required this.onToggleLeftPanel,
     required this.onManageTools,
   });
 
-  /// Null with no project open, which leaves the middle of the bar empty.
-  final String? projectName;
-  final String? projectPath;
+  final ServerStatusView status;
   final ToolsView tools;
   final FullRestartView process;
   final RunnerActionsView actions;
   final ExternalEditorsView editors;
-  final VoidCallback? onToggleLeftPanel;
   final VoidCallback onManageTools;
 
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final scheme = theme.colorScheme;
-    final textTheme = theme.textTheme;
 
     return Container(
       height: 48,
@@ -54,72 +54,23 @@ class StudioToolbar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          _IconAction(
-            icon: LucideIcons.panelLeft,
-            onPressed: onToggleLeftPanel,
+          const SizedBox(width: 4),
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: ServerStatusIndicator(status: status),
+            ),
           ),
           const SizedBox(width: 12),
-          if (projectName != null)
-            Expanded(
-              child: Row(
-                children: [
-                  Flexible(
-                    child: Text(
-                      projectName ?? '',
-                      style: textTheme.small.medium,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      projectPath ?? '',
-                      style: textTheme.muted.copyWith(
-                        fontFamily: kMacMonoFont,
-                        fontSize: 11,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            )
-          else
-            const Spacer(),
           ToolchainWarningBadge(tools: tools, onTap: onManageTools),
           OpenInEditorButtons(editors: editors),
           const PublishToCloudButton(),
-          const SizedBox(width: 8),
-          HotReloadButton(actions: actions),
           const SizedBox(width: 8),
           HotRestartButton(actions: actions),
           const SizedBox(width: 8),
           FullRestartButton(process: process),
         ],
       ),
-    );
-  }
-}
-
-class _IconAction extends StatelessWidget {
-  const _IconAction({
-    required this.icon,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return ShadIconButton.ghost(
-      icon: Icon(icon, size: 16),
-      // A null handler alone leaves the button inert but undimmed, which
-      // reads as a broken click rather than an unavailable action.
-      enabled: onPressed != null,
-      onPressed: onPressed,
-      width: kToolbarIconButtonSize,
-      height: kToolbarIconButtonSize,
     );
   }
 }

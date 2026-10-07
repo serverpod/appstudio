@@ -3,9 +3,10 @@ import 'package:appstudio/preview/preview_phase.dart';
 import 'package:appstudio/preview/registration_code_toast.dart';
 import 'package:appstudio/toolchain/tool_status.dart';
 import 'package:appstudio/runner/runner_actions_view.dart';
-import 'package:appstudio/ui/hot_reload_buttons.dart';
-import 'package:appstudio/ui/left_pane.dart';
-import 'package:appstudio/ui/server_log/migrations_menu.dart';
+import 'package:appstudio/runner/server_status.dart';
+import 'package:appstudio/ui/hot_restart_button.dart';
+import 'package:appstudio/ui/server_log/log_view_controller.dart';
+import 'package:appstudio/ui/migration_commands.dart';
 import 'package:appstudio/ui/server_log/server_log_view.dart';
 import 'package:appstudio/ui/preview_header_bars.dart';
 import 'package:appstudio/ui/project_started_dialog.dart';
@@ -171,38 +172,12 @@ final projectFolder = WidgetbookFolder(
               height: 520,
               child: ServerLogView(
                 log: log,
-                actions: FakeRunnerActions(),
+                view: LogViewController(),
                 source: const ServerLogSource(),
                 emptyMessage: 'Waiting for the server to start…',
               ),
             ),
           ),
-        WidgetbookUseCase(
-          name: 'Migrations unavailable',
-          builder: (_) => ComponentCanvas(
-            width: 640,
-            height: 520,
-            child: ServerLogView(
-              log: sampleRunnerLog(launching: true),
-              actions: FakeRunnerActions(canMigrate: false),
-              source: const ServerLogSource(),
-            ),
-          ),
-        ),
-        WidgetbookUseCase(
-          name: 'Creating a migration',
-          builder: (_) => ComponentCanvas(
-            width: 640,
-            height: 520,
-            child: ServerLogView(
-              log: sampleRunnerLog(),
-              actions: FakeRunnerActions(
-                runningAction: RunnerAction.createMigration,
-              ),
-              source: const ServerLogSource(),
-            ),
-          ),
-        ),
       ],
     ),
     WidgetbookComponent(
@@ -220,11 +195,11 @@ final projectFolder = WidgetbookFolder(
       ],
     ),
     WidgetbookComponent(
-      name: 'Hot reload and restart',
+      name: 'Hot restart',
       useCases: [
         for (final (name, actions) in [
           ('Ready', FakeRunnerActions()),
-          ('Server not running', FakeRunnerActions(canHotReload: false)),
+          ('Server not running', FakeRunnerActions(canHotRestart: false)),
           (
             'Hot restarting',
             FakeRunnerActions(runningAction: RunnerAction.hotRestart),
@@ -241,14 +216,7 @@ final projectFolder = WidgetbookFolder(
             name: name,
             builder: (_) => ComponentCanvas(
               width: null,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  HotReloadButton(actions: actions),
-                  const SizedBox(width: 8),
-                  HotRestartButton(actions: actions),
-                ],
-              ),
+              child: HotRestartButton(actions: actions),
             ),
           ),
       ],
@@ -294,19 +262,25 @@ final projectFolder = WidgetbookFolder(
               ),
             ),
           ),
-        WidgetbookUseCase(
-          name: 'Compact window control bar',
-          builder: (_) => ComponentCanvas(
-            width: null,
-            child: CompactControlBar(
-              viewMode: PreviewViewMode.phonePortrait,
-              previewBrightness: Brightness.dark,
-              onViewModeChanged: (_) {},
-              onPreviewThemeChanged: (_) {},
-              onExpand: () {},
+        for (final (name, status) in [
+          ('running', const ServerStatus.running()),
+          ('loading', const ServerStatus.busy('Compiling server')),
+          ('stopped', const ServerStatus.stopped('Stopped')),
+        ])
+          WidgetbookUseCase(
+            name: 'Compact window control bar, $name',
+            builder: (_) => ComponentCanvas(
+              width: null,
+              child: CompactControlBar(
+                status: FakeServerStatus(status),
+                viewMode: PreviewViewMode.phonePortrait,
+                previewBrightness: Brightness.dark,
+                onViewModeChanged: (_) {},
+                onPreviewThemeChanged: (_) {},
+                onExpand: () {},
+              ),
             ),
           ),
-        ),
       ],
     ),
   ],

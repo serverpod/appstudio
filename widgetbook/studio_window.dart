@@ -18,7 +18,9 @@ import 'package:appstudio/ui/preview_header_bars.dart';
 import 'package:appstudio/ui/studio_toolbar.dart';
 import 'package:appstudio/runner/runner_actions_view.dart';
 import 'package:appstudio/runner/runner_log.dart';
+import 'package:appstudio/runner/server_status.dart';
 import 'package:appstudio/ui/left_pane.dart';
+import 'package:appstudio/ui/server_log/log_view_controller.dart';
 import 'package:appstudio/ui/server_log/server_log_view.dart';
 import 'package:appstudio/ui/toolchain/tools_view.dart';
 import 'package:flutter/material.dart';
@@ -41,6 +43,7 @@ class StudioWindowMock extends StatelessWidget {
     this.log,
     this.actions,
     this.logTab = LeftPaneTab.server,
+    this.status,
   });
 
   final PreviewPhase phase;
@@ -56,6 +59,29 @@ class StudioWindowMock extends StatelessWidget {
   final RunnerActionsView? actions;
   final LeftPaneTab logTab;
 
+  /// Defaults to what a runner would say at [phase].
+  final ServerStatus? status;
+
+  ServerStatus get _status => status ?? switch (phase) {
+        PreviewPhase.ready => const ServerStatus.running(),
+        PreviewPhase.idle => const ServerStatus.stopped('Stopped'),
+        PreviewPhase.failed => ServerStatus.stopped(
+            'Build failed',
+            detail: errorMessage,
+          ),
+        PreviewPhase.fetchingDependencies =>
+          const ServerStatus.busy('Fetching packages'),
+        PreviewPhase.startingServerpod =>
+          const ServerStatus.busy('Starting Serverpod'),
+        PreviewPhase.waitingForServer =>
+          const ServerStatus.busy('Compiling server'),
+        PreviewPhase.loadingApp => const ServerStatus.busy(
+            'Launching Demo app (first run may take 30-60s)',
+          ),
+        PreviewPhase.connecting => const ServerStatus.busy('Loading the app'),
+        PreviewPhase.stopping => const ServerStatus.busy('Stopping the server'),
+      };
+
   @override
   Widget build(BuildContext context) {
     final scheme = ShadTheme.of(context).colorScheme;
@@ -66,14 +92,13 @@ class StudioWindowMock extends StatelessWidget {
         );
     final actions = this.actions ??
         FakeRunnerActions(
-          canHotReload: phase == PreviewPhase.ready,
+          canHotRestart: phase == PreviewPhase.ready,
           canMigrate: phase == PreviewPhase.ready || phase.isError,
         );
     return Column(
       children: [
         StudioToolbar(
-          projectName: 'bookshelf',
-          projectPath: homePath('Projects/bookshelf'),
+          status: FakeServerStatus(_status),
           tools: tools ?? FakeToolsView(inventory: completeInventory),
           process: process ?? FakeFullRestart(),
           actions: actions,
@@ -82,7 +107,6 @@ class StudioWindowMock extends StatelessWidget {
                 editors: const [cursorEditor, claudeEditor],
                 canOpen: phase == PreviewPhase.ready,
               ),
-          onToggleLeftPanel: () {},
           onManageTools: () {},
         ),
         Expanded(
@@ -102,7 +126,7 @@ class StudioWindowMock extends StatelessWidget {
                     Expanded(
                       child: ServerLogView(
                         log: log,
-                        actions: actions,
+                        view: LogViewController()..tab = logTab,
                         source: switch (logTab) {
                           LogTab(:final source) => source,
                           AgentTab() => const ServerLogSource(),

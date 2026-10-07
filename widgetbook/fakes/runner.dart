@@ -7,13 +7,14 @@ import 'dart:async';
 import 'package:appstudio/runner/runner_actions_view.dart';
 import 'package:appstudio/runner/runner_log.dart';
 import 'package:appstudio/runner/runner_protocol.dart';
+import 'package:appstudio/runner/server_status.dart';
 import 'package:flutter/foundation.dart';
 
 /// Runner actions that answer after a moment, in whatever state they are
 /// built in.
 class FakeRunnerActions extends ChangeNotifier implements RunnerActionsView {
   FakeRunnerActions({
-    this.canHotReload = true,
+    this.canHotRestart = true,
     this.canMigrate = true,
     this.runningAction,
     this.failedAction,
@@ -26,7 +27,7 @@ class FakeRunnerActions extends ChangeNotifier implements RunnerActionsView {
   });
 
   @override
-  bool canHotReload;
+  bool canHotRestart;
 
   @override
   bool canMigrate;
@@ -57,12 +58,6 @@ class FakeRunnerActions extends ChangeNotifier implements RunnerActionsView {
     runningAction = null;
     notifyListeners();
     return result;
-  }
-
-  @override
-  Future<void> hotReload() async {
-    calls.add('hotReload');
-    await _run(RunnerAction.hotReload, null);
   }
 
   @override
@@ -109,6 +104,14 @@ const refusedMigration = MigrationResult(
   abortedForWarnings: true,
   isError: true,
 );
+
+/// A server status that is whatever it was built as.
+class FakeServerStatus extends ChangeNotifier implements ServerStatusView {
+  FakeServerStatus(this.serverStatus);
+
+  @override
+  ServerStatus serverStatus;
+}
 
 const sampleAppId = 'demo';
 

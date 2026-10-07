@@ -1,6 +1,7 @@
 import 'package:appstudio/runner/runner_log.dart';
 import 'package:appstudio/runner/runner_protocol.dart';
 import 'package:appstudio/theme/app_theme.dart';
+import 'package:appstudio/ui/server_log/log_view_controller.dart';
 import 'package:appstudio/ui/server_log/server_log_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -50,7 +51,7 @@ void main() {
         home: Scaffold(
           body: ServerLogView(
             log: runnerLog,
-            actions: FakeRunnerActions(),
+            view: LogViewController(),
             source: source,
           ),
         ),
@@ -72,14 +73,26 @@ void main() {
     expect(text('serverpod runner start'), findsOneWidget);
   });
 
+  testWidgets('an operation’s rule runs to the right edge', (tester) async {
+    await pumpLog(tester);
+
+    // The rule is the 1px-high box on the row; it must end at the row's right
+    // padding, not halfway across.
+    final rule = find.byWidgetPredicate(
+      (w) => w is Container && w.constraints?.maxHeight == 1,
+    );
+    final right = tester.getTopRight(rule.first).dx;
+    expect(right, closeTo(1200 - 12, 1));
+  });
+
   testWidgets('the level filter keeps errors and drops the rest',
       (tester) async {
     await pumpLog(tester);
     expect(text('Webserver listening'), findsOneWidget);
 
-    await tester.tap(find.text('All levels'));
+    await tester.tap(find.text('Debug'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Errors only').last);
+    await tester.tap(find.text('Error').last);
     await tester.pumpAndSettle();
 
     expect(text('Webserver listening'), findsNothing);
@@ -101,15 +114,23 @@ void main() {
     expect(text('Nothing matches'), findsOneWidget);
   });
 
-  testWidgets('an error shows its stack trace behind a disclosure',
+  testWidgets('a record shows its level, as the TUI does', (tester) async {
+    await pumpLog(tester);
+
+    expect(find.text('info'), findsWidgets);
+    expect(find.text('warn'), findsOneWidget);
+    expect(find.text('error'), findsOneWidget);
+  });
+
+  testWidgets('an error shows inline, its stack trace behind a disclosure',
       (tester) async {
     await pumpLog(tester);
+    expect(text('Null check operator'), findsOneWidget);
     expect(text('GreetingEndpoint.hello'), findsNothing);
 
-    await tester.tap(find.byIcon(LucideIcons.chevronRight).first);
+    await tester.tap(text('3-line stack trace'));
     await tester.pump();
 
-    expect(text('Null check operator'), findsOneWidget);
     expect(text('GreetingEndpoint.hello'), findsOneWidget);
   });
 
@@ -119,14 +140,16 @@ void main() {
     expect(text('is being served at http://localhost:49301'), findsOneWidget);
     expect(text('Compiling server'), findsNothing);
     // An app's output has no levels to filter.
-    expect(find.text('All levels'), findsNothing);
+    expect(find.text('Debug'), findsNothing);
   });
 
-  testWidgets('operations in flight are pinned below the log', (tester) async {
+  testWidgets('operations in flight stay out of the log', (tester) async {
     await pumpLog(tester, log: sampleRunnerLog(launching: true));
 
-    expect(text('Launching Demo app'), findsOneWidget);
-    expect(find.byType(ShadSpinner), findsOneWidget);
+    // The toolbar's status names what is in flight; the log only records
+    // what finished.
+    expect(text('Launching Demo app'), findsNothing);
+    expect(find.byType(ShadSpinner), findsNothing);
   });
 
   testWidgets('new lines arrive while the view follows the bottom',

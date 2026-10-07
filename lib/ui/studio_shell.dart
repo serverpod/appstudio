@@ -20,6 +20,7 @@ import 'settings/settings_dialog.dart';
 import 'start_page.dart';
 import 'studio_toolbar.dart';
 import 'left_pane.dart';
+import 'server_log/log_view_controller.dart';
 import 'server_log/server_log_view.dart';
 
 class StudioShell extends StatefulWidget {
@@ -32,6 +33,7 @@ class StudioShell extends StatefulWidget {
     required this.editors,
     required this.themeController,
     required this.previewMode,
+    required this.logView,
   });
 
   final ToolchainController toolchains;
@@ -42,6 +44,10 @@ class StudioShell extends StatefulWidget {
   final ThemeController themeController;
   final PreviewModeController previewMode;
 
+  /// Whether the log panel is open, and what it shows — shared with the Logs
+  /// menu, which is now the only way to toggle it.
+  final LogViewController logView;
+
   @override
   State<StudioShell> createState() => _StudioShellState();
 }
@@ -49,7 +55,6 @@ class StudioShell extends StatefulWidget {
 class _StudioShellState extends State<StudioShell> {
   final _previewKey = GlobalKey<PreviewPaneState>();
   double _splitRatio = 0.42;
-  bool _leftPanelVisible = true;
 
   @override
   void initState() {
@@ -110,6 +115,7 @@ class _StudioShellState extends State<StudioShell> {
         widget.themeController,
         widget.agent,
         widget.previewMode,
+        widget.logView,
       ]),
       builder: (context, _) {
         final hasProject = widget.session.hasProject;
@@ -135,18 +141,12 @@ class _StudioShellState extends State<StudioShell> {
             // drops the toolbar.
             if (!widget.previewMode.minimized)
               StudioToolbar(
-                projectName: widget.session.projectName,
-                projectPath: widget.session.projectPath,
+                status: widget.process.status,
                 tools: widget.toolchains,
                 onManageTools: _openManageTools,
                 process: widget.process,
                 actions: widget.process,
                 editors: widget.editors,
-                onToggleLeftPanel: () {
-                  setState(() {
-                    _leftPanelVisible = !_leftPanelVisible;
-                  });
-                },
               ),
             Expanded(
               child: _Workspace(
@@ -155,7 +155,7 @@ class _StudioShellState extends State<StudioShell> {
                 // the workspace but the server log goes with the toolbar. The
                 // user's own toggle is preserved for the way back.
                 leftPanelVisible:
-                    _leftPanelVisible && !widget.previewMode.minimized,
+                    widget.logView.visible && !widget.previewMode.minimized,
                 onSplitChanged: (value) {
                   setState(() {
                     _splitRatio = value.clamp(
@@ -165,6 +165,7 @@ class _StudioShellState extends State<StudioShell> {
                   });
                 },
                 agent: widget.agent,
+                logView: widget.logView,
                 previewKey: _previewKey,
                 process: widget.process,
                 previewMode: widget.previewMode,
@@ -184,6 +185,7 @@ class _Workspace extends StatelessWidget {
     required this.leftPanelVisible,
     required this.onSplitChanged,
     required this.agent,
+    required this.logView,
     required this.previewKey,
     required this.process,
     required this.previewMode,
@@ -194,6 +196,7 @@ class _Workspace extends StatelessWidget {
   final bool leftPanelVisible;
   final ValueChanged<double> onSplitChanged;
   final AgentController agent;
+  final LogViewController logView;
   final GlobalKey<PreviewPaneState> previewKey;
   final ServerpodProcessController process;
   final PreviewModeController previewMode;
@@ -227,6 +230,7 @@ class _Workspace extends StatelessWidget {
                     child: LeftPane(
                       agent: agent,
                       process: process,
+                      view: logView,
                     ),
                   ),
                 Expanded(

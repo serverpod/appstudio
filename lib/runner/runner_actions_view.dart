@@ -4,7 +4,6 @@ import 'runner_protocol.dart';
 
 /// The commands App Studio sends to a running runner.
 enum RunnerAction {
-  hotReload('Hot reload'),
   hotRestart('Hot restart'),
   createMigration('Create migration'),
   createRepairMigration('Create repair migration'),
@@ -16,12 +15,16 @@ enum RunnerAction {
 
   bool get isMigration => switch (this) {
         createMigration || createRepairMigration || applyMigrations => true,
-        hotReload || hotRestart => false,
+        hotRestart => false,
       };
 }
 
-/// Everything the toolbar's reload buttons and the log pane's migration menu
-/// need, and nothing that touches a socket.
+/// Everything the toolbar's Hot Restart button and the Server menu need, and
+/// nothing that touches a socket.
+///
+/// There is no hot *reload* here on purpose: the runner watches the project and
+/// hot-reloads on every save, so a button for it would only repeat what has
+/// already happened.
 ///
 /// `ServerpodProcessController` implements this directly; the widgets import
 /// only this file, so every state can be drawn in Widgetbook and pinned in a
@@ -31,9 +34,9 @@ enum RunnerAction {
 /// restart racing a migration is not something anyone means to ask for, and a
 /// button that queues silently reads as one that did nothing.
 abstract interface class RunnerActionsView implements Listenable {
-  /// A runner is attached and its server is up, so a reload has something to
-  /// reload.
-  bool get canHotReload;
+  /// A runner is attached and its server is up, so a restart has something to
+  /// restart.
+  bool get canHotRestart;
 
   /// A runner is attached and has a stack — running, or failed to build, which
   /// is often exactly when a migration is wanted.
@@ -45,10 +48,6 @@ abstract interface class RunnerActionsView implements Listenable {
   /// The last action that failed, and why. Cleared by the next action.
   RunnerAction? get failedAction;
   String? get actionError;
-
-  /// Hot-reloads the server isolate, then every running Flutter app. Keeps
-  /// in-memory state, so it does not pick up a change to `main()`.
-  Future<void> hotReload();
 
   /// Restarts the server process and hot-restarts every running Flutter app,
   /// then hard-reloads the preview.

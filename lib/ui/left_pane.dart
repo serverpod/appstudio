@@ -8,37 +8,8 @@ import '../runner/runner_log.dart';
 import '../theme/app_theme.dart';
 import '../widgets/text_segmented_control.dart';
 import 'agent/agent_pane.dart';
+import 'server_log/log_view_controller.dart';
 import 'server_log/server_log_view.dart';
-
-/// A tab in the left panel: the agent, the server log, or a Flutter app's log.
-sealed class LeftPaneTab {
-  const LeftPaneTab();
-
-  static const agent = AgentTab();
-  static const server = LogTab(ServerLogSource());
-}
-
-final class AgentTab extends LeftPaneTab {
-  const AgentTab();
-
-  @override
-  bool operator ==(Object other) => other is AgentTab;
-
-  @override
-  int get hashCode => 1;
-}
-
-final class LogTab extends LeftPaneTab {
-  const LogTab(this.source);
-
-  final LogSource source;
-
-  @override
-  bool operator ==(Object other) => other is LogTab && other.source == source;
-
-  @override
-  int get hashCode => source.hashCode;
-}
 
 /// The tabs for the runner's current Flutter apps, after the server's.
 List<TextSegment<LeftPaneTab>> leftPaneTabs(RunnerLog log) => [
@@ -51,38 +22,31 @@ List<TextSegment<LeftPaneTab>> leftPaneTabs(RunnerLog log) => [
 
 /// The panel left of the preview: the agent (when switched on) and the logs —
 /// the server's, and one per Flutter app the runner knows about.
-class LeftPane extends StatefulWidget {
+class LeftPane extends StatelessWidget {
   const LeftPane({
     super.key,
     required this.agent,
     required this.process,
+    required this.view,
   });
 
   final AgentController agent;
   final ServerpodProcessController process;
 
-  @override
-  State<LeftPane> createState() => _LeftPaneState();
-}
-
-class _LeftPaneState extends State<LeftPane> {
-  /// With the agent switched off, the server log is the first tab — starting
-  /// on the agent would show a pane that is no longer reachable.
-  LeftPaneTab _selected =
-      kOpenCodeAgentEnabled ? LeftPaneTab.agent : LeftPaneTab.server;
+  /// The selected tab and the level filter, shared with the Logs menu.
+  final LogViewController view;
 
   @override
   Widget build(BuildContext context) {
     final scheme = ShadTheme.of(context).colorScheme;
-    final process = widget.process;
 
     return ListenableBuilder(
-      listenable: process.log,
+      listenable: Listenable.merge([process.log, view]),
       builder: (context, _) {
         final tabs = leftPaneTabs(process.log);
         // An app the runner dropped takes its tab with it.
-        final selected = tabs.any((tab) => tab.value == _selected)
-            ? _selected
+        final selected = tabs.any((tab) => tab.value == view.tab)
+            ? view.tab
             : LeftPaneTab.server;
         final source = switch (selected) {
           LogTab(:final source) => source,
@@ -90,8 +54,8 @@ class _LeftPaneState extends State<LeftPane> {
         };
         final logView = ServerLogView(
           log: process.log,
-          actions: process,
           source: source,
+          view: view,
           emptyMessage: switch (process.state) {
             ProcessState.starting => 'Waiting for the server to start…',
             ProcessState.idle => 'The server is not running.',
@@ -105,7 +69,7 @@ class _LeftPaneState extends State<LeftPane> {
             LeftPaneHeader(
               tabs: tabs,
               selected: selected,
-              onChanged: (tab) => setState(() => _selected = tab),
+              onChanged: (tab) => view.tab = tab,
             ),
             Expanded(
               child: ColoredBox(
@@ -118,7 +82,7 @@ class _LeftPaneState extends State<LeftPane> {
                         sizing: StackFit.expand,
                         children: [
                           AgentPane(
-                            controller: widget.agent,
+                            controller: agent,
                             process: process,
                           ),
                           logView,

@@ -58,7 +58,7 @@ void main() {
     final process = _FakeProcess();
     await pumpButton(tester, process);
 
-    expect(find.byIcon(LucideIcons.rotateCcw), findsOneWidget);
+    expect(find.byIcon(LucideIcons.refreshCcwDot), findsOneWidget);
     // Icon-only, so the name has to survive as the accessibility label.
     expect(
       tester
@@ -88,7 +88,7 @@ void main() {
     expect(process.calls, 1);
 
     await hover(tester);
-    expect(find.text('Full restart'), findsOneWidget);
+    expect(find.text('Full restart (⇧⌘R)'), findsOneWidget);
   });
 
   testWidgets('spins and refuses a second click while in flight', (
@@ -98,7 +98,7 @@ void main() {
     await pumpButton(tester, process);
 
     expect(find.byType(ShadSpinner), findsOneWidget);
-    expect(find.byIcon(LucideIcons.rotateCcw), findsNothing);
+    expect(find.byIcon(LucideIcons.refreshCcwDot), findsNothing);
     expect(isEnabled(tester), isFalse);
 
     await tester.tap(find.byType(ShadIconButton), warnIfMissed: false);

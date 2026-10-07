@@ -3,9 +3,11 @@ import 'package:shad/shad.dart';
 
 import '../preview/preview_device.dart';
 import '../preview/preview_mode_controller.dart';
+import '../runner/server_status.dart';
 import '../theme/app_theme.dart';
 import '../widgets/icon_segmented_control.dart';
 import '../widgets/text_segmented_control.dart';
+import 'server_status_indicator.dart';
 
 enum _PreviewHeaderLabel { preview }
 
@@ -123,6 +125,7 @@ class PreviewHeaderBar extends StatelessWidget {
 class CompactControlBar extends StatelessWidget {
   const CompactControlBar({
     super.key,
+    required this.status,
     required this.viewMode,
     required this.previewBrightness,
     required this.onViewModeChanged,
@@ -130,6 +133,9 @@ class CompactControlBar extends StatelessWidget {
     required this.onExpand,
   });
 
+  /// The server's state as a mark alone — the toolbar it lives in otherwise is
+  /// hidden in the compact window, and this is the one place left to show it.
+  final ServerStatusView status;
   final PreviewViewMode viewMode;
   final Brightness previewBrightness;
   final ValueChanged<PreviewViewMode> onViewModeChanged;
@@ -157,6 +163,14 @@ class CompactControlBar extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: ServerStatusIndicator(
+                  status: status,
+                  showMessage: false,
+                ),
+              ),
+              const SizedBox(width: 4),
               IconSegmentedControl<PreviewViewMode>(
                 value: viewMode,
                 onChanged: onViewModeChanged,

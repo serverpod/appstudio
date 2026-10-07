@@ -10,6 +10,8 @@ import '../agent/agent_controller.dart';
 import '../process/serverpod_process.dart';
 import '../session/project_session.dart';
 import '../theme/theme_controller.dart';
+import '../ui/server_log/log_view_controller.dart';
+import '../ui/server_log/server_log_view.dart';
 
 /// Adds custom menus to the native macOS menu bar while preserving the
 /// standard items from MainMenu.xib.
@@ -27,9 +29,15 @@ class MacAppMenu {
     required this.onSetAutomaticUpdates,
     required this.automaticUpdatesEnabled,
     required this.canOpenProjects,
+    required this.onCreateAndApplyMigrations,
+    required this.onCreateRepairMigration,
+    required this.logView,
   }) {
     session.addListener(_sync);
     themeController.addListener(_sync);
+    process.addListener(_syncServerMenu);
+    logView.addListener(_syncLogsMenu);
+    process.log.addListener(_onLogChanged);
   }
 
   static const _checkUpdatesId = 'app_check_updates';
@@ -60,6 +68,20 @@ class MacAppMenu {
   static const _appearanceSystemId = 'view_appearance_system';
   static const _appearanceLightId = 'view_appearance_light';
   static const _appearanceDarkId = 'view_appearance_dark';
+  static const _serverMenuId = 'server';
+  static const _hotRestartId = 'server_hot_restart';
+  static const _fullRestartId = 'server_full_restart';
+  static const _serverSepId = 'server_sep';
+  static const _migrateId = 'server_migrate';
+  static const _repairMigrationId = 'server_repair_migration';
+  static const _logsMenuId = 'logs';
+  static const _logsToggleId = 'logs_toggle';
+  static const _logsSourcesSepId = 'logs_sources_sep';
+  static const _logsServerId = 'logs_source_server';
+  static const _logsLevelSepId = 'logs_level_sep';
+  static const _logsLevelMenuId = 'logs_level';
+  static const _logsAppPrefix = 'logs_source_app_';
+  static const _logsLevelPrefix = 'logs_level_';
 
   final ProjectSession session;
   final ServerpodProcessController process;
@@ -94,6 +116,25 @@ class MacAppMenu {
   /// to either, so the menu has to agree.
   final bool Function() canOpenProjects;
 
+  /// The Server menu's migration commands. They raise a dialog and toasts, so
+  /// `main.dart` runs them with the navigator's context.
+  final VoidCallback onCreateAndApplyMigrations;
+  final VoidCallback onCreateRepairMigration;
+
+  /// The log panel's visibility, selected log and level — what the Logs menu
+  /// sets, and what its checkmarks follow.
+  final LogViewController logView;
+
+  /// The Flutter apps the Logs menu lists, by item id, in the runner's order.
+  /// Rebuilt only when the runner's app list changes: the log notifies on
+  /// every line, and removing and re-adding items that often would be absurd.
+  List<(String id, String appId)> _logApps = [];
+  String _logAppsSignature = '';
+
+  /// Rebuilds run one after another: two overlapping ones would remove the
+  /// same items twice and add theirs twice.
+  Future<void> _logAppsQueue = Future.value();
+
   bool _installed = false;
   List<String> _recentItemIds = [];
 
@@ -127,11 +168,16 @@ class MacAppMenu {
 
     await _installFileMenu();
     await _installViewMenu();
+    await _installServerMenu();
+    await _installLogsMenu();
     await _installAppMenuItems();
 
     _installed = true;
     await _syncRecents();
     await _syncAppearance();
+    await _syncServerMenu();
+    await (_logAppsQueue = _logAppsQueue.then((_) => _syncLogApps()));
+    await _syncLogsMenu();
   }
 
   String get _checkUpdatesLabel {
@@ -342,9 +388,223 @@ class MacAppMenu {
     );
   }
 
+  /// The running project's commands: the two restarts and the database
+  /// migrations, all of which act on the Serverpod runner. Between View and
+  /// Window, where an app's own verbs go.
+  ///
+  /// ⌘M is taken from Window → Minimize, whose shortcut MainMenu.xib no longer
+  /// sets: two items on one key equivalent leave AppKit to pick whichever it
+  /// meets first, and Minimize is a click away in the window's title bar.
+  Future<void> _installServerMenu() async {
+    await MacMenuBar.addSubmenu(
+      parentMenuId: 'main',
+      submenuId: _serverMenuId,
+      title: 'Server',
+      index: 4,
+    );
+
+    await MacMenuBar.addMenuItem(
+      menuId: _serverMenuId,
+      itemId: _hotRestartId,
+      title: 'Hot Restart',
+      index: 0,
+      systemImage: 'bolt',
+      shortcut: const SingleActivator(LogicalKeyboardKey.keyR, meta: true),
+      enabled: false,
+    );
+
+    await MacMenuBar.addMenuItem(
+      menuId: _serverMenuId,
+      itemId: _fullRestartId,
+      title: 'Full Restart',
+      index: 1,
+      systemImage: 'arrow.counterclockwise',
+      shortcut: const SingleActivator(
+        LogicalKeyboardKey.keyR,
+        meta: true,
+        shift: true,
+      ),
+      enabled: false,
+    );
+
+    await MacMenuBar.addMenuSeparator(
+      menuId: _serverMenuId,
+      itemId: _serverSepId,
+      index: 2,
+    );
+
+    await MacMenuBar.addMenuItem(
+      menuId: _serverMenuId,
+      itemId: _migrateId,
+      title: 'Create and Apply Migrations',
+      index: 3,
+      systemImage: 'cylinder.split.1x2',
+      shortcut: const SingleActivator(LogicalKeyboardKey.keyM, meta: true),
+      enabled: false,
+    );
+
+    await MacMenuBar.addMenuItem(
+      menuId: _serverMenuId,
+      itemId: _repairMigrationId,
+      title: 'Create Repair Migration',
+      index: 4,
+      systemImage: 'wrench.and.screwdriver',
+      enabled: false,
+    );
+  }
+
+  /// Follows the runner: each command is live exactly when the matching
+  /// toolbar button is, and nothing is offered while another runner action is
+  /// in flight. Its own listener rather than [_sync], which rebuilds Open
+  /// Recent — too much to redo on every server state change.
+  Future<void> _syncServerMenu() async {
+    if (!_installed) return;
+    final idle = process.runningAction == null;
+    await MacMenuBar.setMenuItemEnabled(
+      _hotRestartId,
+      process.canHotRestart && idle,
+    );
+    await MacMenuBar.setMenuItemEnabled(_fullRestartId, process.canRestart);
+    await MacMenuBar.setMenuItemEnabled(_migrateId, process.canMigrate && idle);
+    await MacMenuBar.setMenuItemEnabled(
+      _repairMigrationId,
+      process.canMigrate && idle,
+    );
+  }
+
+  /// The log panel and what it shows: Show/Hide Logs, one checked item per log
+  /// — the server's, then each Flutter app's — and the lowest level shown.
+  /// Right of Server, before Window.
+  Future<void> _installLogsMenu() async {
+    await MacMenuBar.addSubmenu(
+      parentMenuId: 'main',
+      submenuId: _logsMenuId,
+      title: 'Logs',
+      index: 5,
+    );
+
+    await MacMenuBar.addMenuItem(
+      menuId: _logsMenuId,
+      itemId: _logsToggleId,
+      title: 'Hide Logs',
+      index: 0,
+      systemImage: 'sidebar.left',
+      enabled: false,
+    );
+
+    await MacMenuBar.addMenuSeparator(
+      menuId: _logsMenuId,
+      itemId: _logsSourcesSepId,
+      index: 1,
+    );
+
+    await MacMenuBar.addMenuItem(
+      menuId: _logsMenuId,
+      itemId: _logsServerId,
+      title: 'Server',
+      index: 2,
+      enabled: false,
+    );
+
+    // The apps go between the server and this separator (`_syncLogApps`).
+    await MacMenuBar.addMenuSeparator(
+      menuId: _logsMenuId,
+      itemId: _logsLevelSepId,
+      index: 3,
+    );
+
+    await MacMenuBar.addSubmenu(
+      parentMenuId: _logsMenuId,
+      submenuId: _logsLevelMenuId,
+      title: 'Log Level',
+      index: 4,
+      systemImage: 'line.3.horizontal.decrease',
+    );
+
+    for (final (index, level) in LogLevelFilter.values.indexed) {
+      await MacMenuBar.addMenuItem(
+        menuId: _logsLevelMenuId,
+        itemId: '$_logsLevelPrefix${level.name}',
+        title: level.label,
+        index: index,
+      );
+    }
+  }
+
+  String _appsSignature() => [
+        for (final app in process.log.apps) '${app.id}\u0000${app.name}',
+      ].join('\u0001');
+
+  void _onLogChanged() {
+    if (!_installed) return;
+    final signature = _appsSignature();
+    if (signature == _logAppsSignature) return;
+    // Claimed now, so the lines that follow do not queue a rebuild each.
+    _logAppsSignature = signature;
+    _logAppsQueue = _logAppsQueue
+        .then((_) => _syncLogApps())
+        .then((_) => _syncLogsMenu());
+  }
+
+  /// Replaces the app items with the runner's current apps.
+  Future<void> _syncLogApps() async {
+    if (!_installed) return;
+    final apps = process.log.apps;
+    _logAppsSignature = _appsSignature();
+    for (final (id, _) in _logApps) {
+      await MacMenuBar.removeMenuItem(id);
+    }
+    _logApps = [];
+    for (final (index, app) in apps.indexed) {
+      final id = '$_logsAppPrefix$index';
+      await MacMenuBar.addMenuItem(
+        menuId: _logsMenuId,
+        itemId: id,
+        title: app.name,
+        index: 3 + index,
+      );
+      _logApps.add((id, app.id));
+    }
+  }
+
+  /// Checkmarks and enabled state follow the panel. Nothing is offered with no
+  /// project open: there is no panel to show and no log to pick.
+  Future<void> _syncLogsMenu() async {
+    if (!_installed) return;
+    final open = session.hasProject;
+    await MacMenuBar.updateMenuItem(
+      itemId: _logsToggleId,
+      title: logView.visible ? 'Hide Logs' : 'Show Logs',
+      enabled: open,
+    );
+    final tab = logView.tab;
+    await MacMenuBar.setMenuItemEnabled(_logsServerId, open);
+    await MacMenuBar.setMenuItemChecked(
+      _logsServerId,
+      tab == LeftPaneTab.server,
+    );
+    for (final (id, appId) in _logApps) {
+      await MacMenuBar.setMenuItemEnabled(id, open);
+      await MacMenuBar.setMenuItemChecked(
+        id,
+        tab == LogTab(AppLogSource(appId)),
+      );
+    }
+    await MacMenuBar.setMenuItemEnabled(_logsLevelMenuId, open);
+    for (final level in LogLevelFilter.values) {
+      await MacMenuBar.setMenuItemChecked(
+        '$_logsLevelPrefix${level.name}',
+        logView.level == level,
+      );
+    }
+  }
+
   void dispose() {
     session.removeListener(_sync);
     themeController.removeListener(_sync);
+    process.removeListener(_syncServerMenu);
+    logView.removeListener(_syncLogsMenu);
+    process.log.removeListener(_onLogChanged);
   }
 
   void _onItemSelected(String itemId) {
@@ -369,7 +629,34 @@ class MacAppMenu {
         unawaited(themeController.setMode(ThemeMode.light));
       case _appearanceDarkId:
         unawaited(themeController.setMode(ThemeMode.dark));
+      // Re-checked here as well as by the enabled state: a shortcut can land
+      // between a state change and the menu catching up with it.
+      case _hotRestartId:
+        if (process.canHotRestart) unawaited(process.hotRestart());
+      case _fullRestartId:
+        if (process.canRestart) unawaited(process.restart());
+      case _migrateId:
+        onCreateAndApplyMigrations();
+      case _repairMigrationId:
+        onCreateRepairMigration();
+      case _logsToggleId:
+        if (session.hasProject) logView.toggleVisible();
+      case _logsServerId:
+        logView.show(const ServerLogSource());
       default:
+        if (itemId.startsWith(_logsLevelPrefix)) {
+          final name = itemId.substring(_logsLevelPrefix.length);
+          for (final level in LogLevelFilter.values) {
+            if (level.name == name) logView.level = level;
+          }
+          return;
+        }
+        if (itemId.startsWith(_logsAppPrefix)) {
+          for (final (id, appId) in _logApps) {
+            if (id == itemId) logView.show(AppLogSource(appId));
+          }
+          return;
+        }
         if (itemId.startsWith('file_recent_')) {
           final index = int.tryParse(itemId.substring('file_recent_'.length));
           if (index != null && index < session.recents.length) {
@@ -412,6 +699,7 @@ class MacAppMenu {
     );
     unawaited(_syncRecents());
     unawaited(_syncAppearance());
+    unawaited(_syncLogsMenu());
   }
 
   Future<void> _syncRecents() async {

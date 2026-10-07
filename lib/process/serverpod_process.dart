@@ -14,6 +14,7 @@ import '../runner/runner_discovery.dart';
 import '../runner/runner_log.dart';
 import '../runner/runner_ownership.dart';
 import '../runner/runner_protocol.dart';
+import '../runner/server_status.dart';
 import '../session/project_session.dart';
 import '../toolchain/tool_status.dart';
 import '../toolchain/toolchain.dart';
@@ -132,6 +133,74 @@ class ServerpodProcessController extends ChangeNotifier
   /// The runner's stage, or null with no runner attached.
   RunnerStage? get stage => _stage;
 
+  /// The toolbar's status line. Its own listenable: it follows the runner's
+  /// operations too, which this controller deliberately does not notify for.
+  late final ServerStatusView status = _ProcessServerStatus(this);
+
+  /// What the server is doing, in one line: running, stopped and why, or —
+  /// while busy — the latest operation in flight.
+  ServerStatus serverStatus({DateTime? now}) {
+    switch (state) {
+      case ProcessState.stopping:
+        return const ServerStatus.busy('Stopping the server');
+      case ProcessState.idle:
+        return _error == null
+            ? const ServerStatus.stopped('Stopped')
+            : ServerStatus.stopped('Stopped', detail: _error);
+      case ProcessState.starting || ProcessState.running:
+        break;
+    }
+    if (_stage == RunnerStage.degraded) {
+      return ServerStatus.stopped('Build failed', detail: error);
+    }
+    if (_error case final error?) {
+      return ServerStatus.stopped('Failed', detail: error);
+    }
+
+    // The latest operation that has been running long enough to be worth
+    // naming. A younger one is waited out rather than ignored.
+    final at = now ?? DateTime.now();
+    Duration? settlesIn;
+    for (final operation in log.activeOperations.reversed) {
+      final age = at.difference(operation.startedAt);
+      if (age >= kStatusOperationDelay) {
+        return ServerStatus.busy(_sentence(operation.label));
+      }
+      final wait = kStatusOperationDelay - age;
+      if (settlesIn == null || wait < settlesIn) settlesIn = wait;
+    }
+
+    final app = previewApp;
+    return switch (phase) {
+      PreviewPhase.ready => const ServerStatus.running(),
+      PreviewPhase.fetchingDependencies =>
+        ServerStatus.busy('Fetching packages', settlesIn: settlesIn),
+      PreviewPhase.startingServerpod =>
+        ServerStatus.busy('Starting Serverpod', settlesIn: settlesIn),
+      PreviewPhase.waitingForServer =>
+        ServerStatus.busy('Starting the server', settlesIn: settlesIn),
+      PreviewPhase.loadingApp => ServerStatus.busy(
+          switch (app?.status.launchStage) {
+            final stage? => _sentence(stage),
+            null => 'Launching ${app?.name ?? 'the app'}',
+          },
+          settlesIn: settlesIn,
+        ),
+      PreviewPhase.connecting =>
+        ServerStatus.busy('Loading the app', settlesIn: settlesIn),
+      PreviewPhase.idle ||
+      PreviewPhase.stopping ||
+      PreviewPhase.failed =>
+        const ServerStatus.stopped('Stopped'),
+    };
+  }
+
+  /// A runner label as a status line, without the trailing dots the CLI adds
+  /// for a terminal (`Launching Flutter app...`) — the spinner beside it
+  /// already says it is in progress.
+  static String _sentence(String label) =>
+      label.replaceAll(RegExp(r'[.…\s]+$'), '');
+
   /// Whether the attached runner is one App Studio started, and so stops.
   bool get ownsRunner => _owned;
 
@@ -239,7 +308,7 @@ class ServerpodProcessController extends ChangeNotifier
   bool get isStopped => state == ProcessState.idle;
 
   @override
-  bool get canHotReload =>
+  bool get canHotRestart =>
       _client != null && _stage == RunnerStage.running && !_stopping;
 
   @override
@@ -726,12 +795,6 @@ class ServerpodProcessController extends ChangeNotifier
     notifyListeners();
   }
 
-  @override
-  Future<void> hotReload() async {
-    if (!canHotReload) return;
-    await _run(RunnerAction.hotReload, (client) => client.hotReload());
-  }
-
   /// The runner answers once the server has rebooted and every Flutter app has
   /// restarted, so the reload lands on the new build. It also triggers a
   /// browser refresh of its own, but through DWDS, which leaves the cached
@@ -740,7 +803,7 @@ class ServerpodProcessController extends ChangeNotifier
   /// app and make it look like the restart worked.
   @override
   Future<void> hotRestart() async {
-    if (!canHotReload) return;
+    if (!canHotRestart) return;
     final ok = await _run(RunnerAction.hotRestart, (client) async {
       await client.hotRestart();
       return true;
@@ -875,4 +938,24 @@ Future<RunnerLaunch> launchRunnerProcess({
     exitCode: process.exitCode,
     kill: process.kill,
   );
+}
+
+/// [ServerpodProcessController.serverStatus] as a listenable: it changes with
+/// the controller and with the runner's log, which carries the operations.
+class _ProcessServerStatus implements ServerStatusView {
+  _ProcessServerStatus(this._process)
+      : _changes = Listenable.merge([_process, _process.log]);
+
+  final ServerpodProcessController _process;
+  final Listenable _changes;
+
+  @override
+  ServerStatus get serverStatus => _process.serverStatus();
+
+  @override
+  void addListener(VoidCallback listener) => _changes.addListener(listener);
+
+  @override
+  void removeListener(VoidCallback listener) =>
+      _changes.removeListener(listener);
 }

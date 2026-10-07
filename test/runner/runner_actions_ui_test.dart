@@ -1,8 +1,7 @@
 import 'package:appstudio/runner/runner_actions_view.dart';
 import 'package:appstudio/theme/app_theme.dart';
-import 'package:appstudio/ui/hot_reload_buttons.dart';
-import 'package:appstudio/ui/server_log/migrations_menu.dart';
-import 'package:appstudio/ui/server_log/server_log_view.dart';
+import 'package:appstudio/ui/hot_restart_button.dart';
+import 'package:appstudio/ui/migration_commands.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shad/shad.dart';
@@ -23,70 +22,80 @@ void main() {
     await tester.pump();
   }
 
-  ShadIconButton iconButton(WidgetTester tester, String label) =>
-      tester.widget<ShadIconButton>(
-        find.byWidgetPredicate(
-          (w) => w is ShadIconButton && w.semanticLabel == label,
-        ),
-      );
+  ShadIconButton hotRestart(WidgetTester tester) =>
+      tester.widget<ShadIconButton>(find.byType(ShadIconButton));
 
-  group('hot reload and restart buttons', () {
-    Widget buttons(RunnerActionsView actions) => Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            HotReloadButton(actions: actions),
-            HotRestartButton(actions: actions),
-          ],
-        );
-
-    testWidgets('send their action to the runner', (tester) async {
+  group('hot restart button', () {
+    testWidgets('sends the restart to the runner', (tester) async {
       final actions = FakeRunnerActions(delay: Duration.zero);
-      await pump(tester, buttons(actions));
+      await pump(tester, HotRestartButton(actions: actions));
 
       await tester.tap(find.byIcon(LucideIcons.zap));
       await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(LucideIcons.refreshCcwDot));
-      await tester.pumpAndSettle();
 
-      expect(actions.calls, ['hotReload', 'hotRestart']);
+      expect(actions.calls, ['hotRestart']);
     });
 
-    testWidgets('are disabled until the server is running, and dim',
-        (tester) async {
-      await pump(tester, buttons(FakeRunnerActions(canHotReload: false)));
-
-      for (final label in ['Hot reload', 'Hot restart']) {
-        final button = iconButton(tester, label);
-        // `enabled` drives the dimming; a null handler alone would not.
-        expect(button.enabled, isFalse, reason: label);
-        expect(button.onPressed, isNull, reason: label);
-      }
-    });
-
-    testWidgets('one in flight holds the other off and shows a spinner',
+    testWidgets('is disabled until the server is running, and dims',
         (tester) async {
       await pump(
         tester,
-        buttons(FakeRunnerActions(runningAction: RunnerAction.hotRestart)),
+        HotRestartButton(actions: FakeRunnerActions(canHotRestart: false)),
+      );
+
+      // `enabled` drives the dimming; a null handler alone would not.
+      expect(hotRestart(tester).enabled, isFalse);
+      expect(hotRestart(tester).onPressed, isNull);
+    });
+
+    testWidgets('shows a spinner while restarting, and is held off',
+        (tester) async {
+      await pump(
+        tester,
+        HotRestartButton(
+          actions: FakeRunnerActions(runningAction: RunnerAction.hotRestart),
+        ),
       );
 
       expect(find.byType(ShadSpinner), findsOneWidget);
-      expect(iconButton(tester, 'Hot reload').enabled, isFalse);
+      expect(hotRestart(tester).enabled, isFalse);
     });
   });
 
-  group('migrations menu', () {
-    testWidgets('a migration refused for warnings asks, then forces',
+  group('migration commands', () {
+    /// Stands in for the Server menu: a button that runs [command] with the
+    /// context under the toaster and the navigator, as `main.dart` does.
+    Widget trigger(
+      Future<void> Function(BuildContext, RunnerActionsView) command,
+      RunnerActionsView actions,
+    ) =>
+        Builder(
+          builder: (context) => ShadButton(
+            onPressed: () => command(context, actions),
+            child: const Text('Run'),
+          ),
+        );
+
+    testWidgets('create and apply creates, then applies', (tester) async {
+      final actions = FakeRunnerActions(delay: Duration.zero);
+      await pump(tester, trigger(createAndApplyMigrations, actions));
+
+      await tester.tap(find.text('Run'));
+      await tester.pumpAndSettle();
+
+      expect(actions.calls, ['createMigration', 'applyMigrations']);
+      expect(find.text('Migration created and applied'), findsOneWidget);
+    });
+
+    testWidgets('a create refused for warnings asks, forces, then applies',
         (tester) async {
       final actions = FakeRunnerActions(
         delay: Duration.zero,
         migrationResult: refusedMigration,
       );
-      await pump(tester, MigrationsMenu(actions: actions));
+      await pump(tester, trigger(createAndApplyMigrations, actions));
 
-      await tester.tap(find.text('Migrations'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Create migration'));
+      await tester.tap(find.text('Run'));
       await tester.pumpAndSettle();
 
       expect(find.text('Create the migration anyway?'), findsOneWidget);
@@ -99,20 +108,22 @@ void main() {
       await tester.tap(find.text('Create anyway'));
       await tester.pumpAndSettle();
 
-      expect(actions.calls, ['createMigration', 'createMigration(force)']);
-      expect(find.text('Created a migration'), findsOneWidget);
+      expect(actions.calls, [
+        'createMigration',
+        'createMigration(force)',
+        'applyMigrations',
+      ]);
     });
 
-    testWidgets('cancelling the force creates nothing', (tester) async {
+    testWidgets('cancelling the force creates and applies nothing',
+        (tester) async {
       final actions = FakeRunnerActions(
         delay: Duration.zero,
         migrationResult: refusedMigration,
       );
-      await pump(tester, MigrationsMenu(actions: actions));
+      await pump(tester, trigger(createAndApplyMigrations, actions));
 
-      await tester.tap(find.text('Migrations'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Create migration'));
+      await tester.tap(find.text('Run'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
@@ -120,40 +131,25 @@ void main() {
       expect(actions.calls, ['createMigration']);
     });
 
-    testWidgets('apply reports success', (tester) async {
-      final actions = FakeRunnerActions(delay: Duration.zero);
-      await pump(tester, MigrationsMenu(actions: actions));
+    testWidgets('does nothing without a stack to migrate', (tester) async {
+      final actions = FakeRunnerActions(canMigrate: false);
+      await pump(tester, trigger(createAndApplyMigrations, actions));
 
-      await tester.tap(find.text('Migrations'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Apply migrations'));
+      await tester.tap(find.text('Run'));
       await tester.pumpAndSettle();
 
-      expect(actions.calls, ['applyMigrations']);
-      expect(find.text('Migrations applied'), findsOneWidget);
+      expect(actions.calls, isEmpty);
     });
 
-    testWidgets('is unavailable without a stack to migrate', (tester) async {
-      await pump(
-        tester,
-        SizedBox(
-          width: 640,
-          height: 400,
-          child: ServerLogView(
-            log: sampleRunnerLog(),
-            actions: FakeRunnerActions(canMigrate: false),
-            source: const ServerLogSource(),
-          ),
-        ),
-      );
+    testWidgets('repair creates and does not apply', (tester) async {
+      final actions = FakeRunnerActions(delay: Duration.zero);
+      await pump(tester, trigger(createRepairMigration, actions));
 
-      final button = tester.widget<ShadButton>(
-        find.ancestor(
-          of: find.text('Migrations'),
-          matching: find.byType(ShadButton),
-        ),
-      );
-      expect(button.enabled, isFalse);
+      await tester.tap(find.text('Run'));
+      await tester.pumpAndSettle();
+
+      expect(actions.calls, ['createRepairMigration']);
+      expect(find.text('Created a repair migration'), findsOneWidget);
     });
   });
 }

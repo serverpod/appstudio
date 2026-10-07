@@ -29,9 +29,9 @@ class FullRestartButton extends StatelessWidget {
 
         return ToolbarActionButton(
           label: 'Full Restart',
-          icon: LucideIcons.rotateCcw,
+          icon: LucideIcons.refreshCcwDot,
           busy: busy,
-          tooltip: busy ? 'Restarting the server…' : 'Full restart',
+          tooltip: busy ? 'Restarting the server…' : 'Full restart (⇧⌘R)',
           onPressed: process.canRestart
               ? () => unawaited(process.restart())
               : null,

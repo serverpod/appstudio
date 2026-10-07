@@ -6,6 +6,7 @@ import 'package:appstudio/process/serverpod_process.dart';
 import 'package:appstudio/runner/runner_actions_view.dart';
 import 'package:appstudio/runner/runner_ownership.dart';
 import 'package:appstudio/runner/runner_protocol.dart';
+import 'package:appstudio/runner/server_status.dart';
 import 'package:appstudio/session/project_session.dart';
 import 'package:appstudio/toolchain/toolchain.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -285,12 +286,12 @@ void main() {
       await open(runner);
       expect(process.state, ProcessState.starting);
       expect(process.phase, PreviewPhase.waitingForServer);
-      expect(process.canHotReload, isFalse);
+      expect(process.canHotRestart, isFalse);
 
       runner.emit({'event': 'stage', 'stage': 'running'});
       await until(() => process.state == ProcessState.running);
 
-      expect(process.canHotReload, isTrue);
+      expect(process.canHotRestart, isTrue);
     });
 
     test('a failed build is a failure Full Restart retries', () async {
@@ -300,7 +301,7 @@ void main() {
       expect(process.phase, PreviewPhase.failed);
       expect(process.error, contains('failed to build'));
       expect(process.canMigrate, isTrue);
-      expect(process.canHotReload, isFalse);
+      expect(process.canHotRestart, isFalse);
 
       await process.restart();
 
@@ -326,23 +327,6 @@ void main() {
       expect(runner.calls, contains('hotRestart'));
       expect(process.previewReloadToken, before + 1);
       expect(process.runningAction, isNull);
-    });
-
-    test('hot reload keeps the page, so state survives', () async {
-      final runner = await projectWithRunner(
-        snapshot: {
-          'flutterApps': [demoApp],
-          'runningFlutterApps': ['demo'],
-          'flutterAppUrls': {'demo': 'http://localhost:51234'},
-        },
-      );
-      await open(runner);
-      final before = process.previewReloadToken;
-
-      await process.hotReload();
-
-      expect(runner.calls, contains('hotReload'));
-      expect(process.previewReloadToken, before);
     });
 
     test('a refused hot restart is reported and does not reload', () async {
@@ -442,6 +426,93 @@ void main() {
       await until(() => process.log.serverItems.length >= 20);
 
       expect(notifications, 0);
+    });
+  });
+
+  group('server status', () {
+    test('stopped with no project', () {
+      expect(process.serverStatus().kind, ServerStatusKind.stopped);
+      expect(process.serverStatus().message, 'Stopped');
+    });
+
+    test('running once the app is live in the preview', () async {
+      final runner = await projectWithRunner(
+        snapshot: {
+          'flutterApps': [demoApp],
+          'runningFlutterApps': ['demo'],
+          'flutterAppUrls': {'demo': 'http://localhost:51234'},
+        },
+      );
+      await open(runner);
+      expect(process.serverStatus().kind, ServerStatusKind.busy);
+      expect(process.serverStatus().message, 'Loading the app');
+
+      process.markPreviewLive();
+
+      expect(process.serverStatus(), const ServerStatus.running());
+    });
+
+    test('names the latest operation, without the terminal dots', () async {
+      final runner = await projectWithRunner(stage: 'starting');
+      await open(runner);
+      final started = DateTime.now().subtract(const Duration(seconds: 3));
+      runner
+        ..emit({
+          'event': 'operationStarted',
+          'id': 'a',
+          'label': 'Analyzing changes',
+          'startedAt': started.toIso8601String(),
+        })
+        ..emit({
+          'event': 'operationStarted',
+          'id': 'b',
+          'label': 'Compiling server...',
+          'startedAt': started.add(const Duration(seconds: 1)).toIso8601String(),
+        });
+      await until(() => process.log.activeOperations.length == 2);
+
+      final status = process.serverStatus();
+      expect(status.kind, ServerStatusKind.busy);
+      expect(status.message, 'Compiling server');
+    });
+
+    test('an operation too young to show is waited out, not shown', () async {
+      final runner = await projectWithRunner(
+        snapshot: {
+          'flutterApps': [demoApp],
+          'runningFlutterApps': ['demo'],
+          'flutterAppUrls': {'demo': 'http://localhost:51234'},
+        },
+      );
+      await open(runner);
+      process.markPreviewLive();
+      final now = DateTime.now();
+      runner.emit({
+        'event': 'operationStarted',
+        'id': 'scope',
+        'label': 'greeting.hello',
+        'startedAt': now.toIso8601String(),
+      });
+      await until(() => process.log.activeOperations.isNotEmpty);
+
+      final early = process.serverStatus(now: now);
+      expect(early.kind, ServerStatusKind.running);
+
+      final later = process.serverStatus(
+        now: now.add(kStatusOperationDelay),
+      );
+      expect(later.kind, ServerStatusKind.busy);
+      expect(later.message, 'greeting.hello');
+    });
+
+    test('a failed build is stopped, with the reason in the detail', () async {
+      final runner = await projectWithRunner(stage: 'degraded');
+      await open(runner);
+
+      final status = process.serverStatus();
+      expect(status.kind, ServerStatusKind.stopped);
+      expect(status.message, 'Build failed');
+      expect(status.detail, contains('failed to build'));
     });
   });
 }

@@ -1,59 +1,65 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shad/shad.dart';
 
-import '../../runner/runner_actions_view.dart';
 import '../../runner/runner_log.dart';
 import '../../runner/runner_protocol.dart';
 import '../../theme/app_theme.dart';
-import 'migrations_menu.dart';
+import 'log_view_controller.dart';
 
-/// Font size for log text. [serverLogMinWidth] measures with it, so the
-/// panel's minimum follows a change here automatically.
+/// Font size for log text. Every column is measured in characters of it, and
+/// [serverLogMinWidth] follows a change here automatically.
 const kServerLogFontSize = 11.5;
 
 /// How wide a log line is allowed to get before the panel stops shrinking.
 const _kMinLogColumns = 80;
 
-const _kRowPadding = EdgeInsets.symmetric(horizontal: 12, vertical: 2);
+const _kRowPadding = EdgeInsets.symmetric(horizontal: 12, vertical: 1.5);
 
-/// The time column's width, wide enough for `00:00:00` in the log font.
-const _kTimeColumnWidth = 70.0;
+/// The level column, in characters: `debug`, `info`, `warn`, `error`, `fatal`.
+const _kLevelColumns = 5;
 
-double? _cachedMinWidth;
+/// The time column, in characters: `HH:mm:ss.SSS`.
+const _kTimeColumns = 12;
 
-/// Minimum width for the panel that keeps an 80-column log line visible,
-/// padding and the time column included.
-///
-/// Measured from the log's own font rather than hardcoded, so it cannot drift
-/// when [kServerLogFontSize] or [kMacMonoFont] moves. Cached — the metrics
-/// cannot change at runtime.
-double serverLogMinWidth() => _cachedMinWidth ??= _measureMinWidth();
+double? _cachedCharWidth;
 
-double _measureMinWidth() {
-  final painter = TextPainter(
-    text: TextSpan(
-      text: ''.padRight(_kMinLogColumns, 'M'),
-      style: const TextStyle(
-        fontFamily: kMacMonoFont,
-        fontSize: kServerLogFontSize,
-      ),
-    ),
-    textDirection: TextDirection.ltr,
-  )..layout();
-  final width = painter.width + _kRowPadding.horizontal;
-  painter.dispose();
-  return width;
-}
+/// The advance of one character of the log font. Menlo is monospaced, so the
+/// columns are character counts times this — the way the TUI lays them out.
+double _charWidth() => _cachedCharWidth ??= () {
+      final painter = TextPainter(
+        text: const TextSpan(
+          text: 'M',
+          style: TextStyle(
+            fontFamily: kMacMonoFont,
+            fontSize: kServerLogFontSize,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final width = painter.width;
+      painter.dispose();
+      return width;
+    }();
 
-/// Which records the server log shows.
+double get _levelWidth => _kLevelColumns * _charWidth();
+double get _timeWidth => _kTimeColumns * _charWidth();
+double get _gap => _charWidth();
+
+/// Where a message starts: after the level, the time and a gap after each.
+double get _messageIndent => _levelWidth + _gap + _timeWidth + _gap;
+
+/// Minimum width for the panel that keeps an 80-column message visible, the
+/// level and time columns and padding included.
+double serverLogMinWidth() =>
+    _kMinLogColumns * _charWidth() + _messageIndent + _kRowPadding.horizontal;
+
+/// The lowest level the server log shows, named as the levels themselves are.
 enum LogLevelFilter {
-  all('All levels', RunnerLogLevel.debug),
-  info('Info and above', RunnerLogLevel.info),
-  warnings('Warnings and errors', RunnerLogLevel.warning),
-  errors('Errors only', RunnerLogLevel.error);
+  debug('Debug', RunnerLogLevel.debug),
+  info('Info', RunnerLogLevel.info),
+  warning('Warning', RunnerLogLevel.warning),
+  error('Error', RunnerLogLevel.error);
 
   const LogLevelFilter(this.label, this.minimum);
 
@@ -89,14 +95,55 @@ final class AppLogSource extends LogSource {
   int get hashCode => appId.hashCode;
 }
 
-/// What the runner logs, drawn natively rather than as a terminal.
+/// The colours a log is drawn in: the TUI's palette — grey debug, blue info,
+/// yellow warnings, red errors, green successes — taken from the app's own
+/// tokens, so it follows the theme like everything else.
+class _LogPalette {
+  _LogPalette(ShadColorScheme scheme)
+      : text = scheme.foreground,
+        dim = scheme.mutedForeground,
+        rule = scheme.border,
+        debug = scheme.mutedForeground,
+        info = scheme.primary,
+        warning = scheme.warning,
+        error = scheme.destructive,
+        success = scheme.success;
+
+  final Color text;
+  final Color dim;
+  final Color rule;
+  final Color debug;
+  final Color info;
+  final Color warning;
+  final Color error;
+  final Color success;
+
+  Color level(RunnerLogLevel level) => switch (level) {
+        RunnerLogLevel.debug => debug,
+        RunnerLogLevel.info => info,
+        RunnerLogLevel.warning => warning,
+        RunnerLogLevel.error || RunnerLogLevel.fatal => error,
+      };
+}
+
+/// The level as the TUI prints it.
+String _levelLabel(RunnerLogLevel level) => switch (level) {
+      RunnerLogLevel.debug => 'debug',
+      RunnerLogLevel.info => 'info',
+      RunnerLogLevel.warning => 'warn',
+      RunnerLogLevel.error => 'error',
+      RunnerLogLevel.fatal => 'fatal',
+    };
+
+/// What the runner logs, drawn natively rather than as a terminal — and laid
+/// out the way the `serverpod start` TUI draws it, so the two read alike.
 ///
-/// The server source is the runner's *structured* log — the pod's entries and
-/// the runner's own, each with a level, a time and, for a failure, the error
-/// and stack trace behind a disclosure — interleaved with the operations it
-/// finished (compiles, launches, migrations) and their durations. Operations
-/// still in flight sit pinned at the bottom with a live timer. An app source
-/// is that Flutter app's output, line by line.
+/// The server source is the runner's *structured* log: each record is its
+/// level, its time and its message, with an error under the message and a
+/// stack trace behind a disclosure. Finished operations — compiles, launches,
+/// migrations — are ruled lines with their durations. What is still in flight
+/// is not shown here: the toolbar's status names it. An app source is that
+/// Flutter app's output, line by line.
 ///
 /// **Output only, and it must stay that way for the keyboard.** A key Flutter
 /// reports as handled never reaches the menu bar, so a log that swallowed keys
@@ -106,14 +153,16 @@ class ServerLogView extends StatefulWidget {
   const ServerLogView({
     super.key,
     required this.log,
-    required this.actions,
     required this.source,
+    required this.view,
     this.emptyMessage,
   });
 
   final RunnerLog log;
-  final RunnerActionsView actions;
   final LogSource source;
+
+  /// Owns the level filter, which the Logs menu sets too.
+  final LogViewController view;
 
   /// Shown on an empty server log, such as what the server is doing instead.
   final String? emptyMessage;
@@ -126,7 +175,8 @@ class _ServerLogViewState extends State<ServerLogView> {
   final _searchController = TextEditingController();
   final _scroll = ScrollController();
   final _expanded = Set<RunnerLogRecord>.identity();
-  LogLevelFilter _level = LogLevelFilter.all;
+
+  LogLevelFilter get _level => widget.view.level;
 
   /// Following the newest line. Scrolling up lets go; scrolling back to the
   /// bottom — or the jump button — takes hold again.
@@ -229,17 +279,19 @@ class _ServerLogViewState extends State<ServerLogView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _FilterBar(
-          searchController: _searchController,
-          level: widget.source is ServerLogSource ? _level : null,
-          onLevelChanged: (level) => setState(() => _level = level),
-          actions: widget.actions,
+        ListenableBuilder(
+          listenable: widget.view,
+          builder: (context, _) => _FilterBar(
+            searchController: _searchController,
+            level: widget.source is ServerLogSource ? _level : null,
+            onLevelChanged: (level) => widget.view.level = level,
+          ),
         ),
         Expanded(
           child: ColoredBox(
             color: scheme.background,
             child: ListenableBuilder(
-              listenable: widget.log,
+              listenable: Listenable.merge([widget.log, widget.view]),
               builder: (context, _) => _buildBody(context),
             ),
           ),
@@ -254,9 +306,7 @@ class _ServerLogViewState extends State<ServerLogView> {
       _lastCount = rows.length;
       if (_following) _followAfterFrame();
     }
-    final active = widget.source is ServerLogSource
-        ? widget.log.activeOperations
-        : const <ActiveOperation>[];
+    final palette = _LogPalette(ShadTheme.of(context).colorScheme);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -273,7 +323,7 @@ class _ServerLogViewState extends State<ServerLogView> {
                     padding: const EdgeInsets.symmetric(vertical: 6),
                     itemCount: rows.length,
                     itemBuilder: (context, index) =>
-                        _buildRow(context, rows[index]),
+                        _buildRow(rows[index], palette),
                   ),
                 ),
               if (!_following && rows.isNotEmpty)
@@ -290,7 +340,6 @@ class _ServerLogViewState extends State<ServerLogView> {
             ],
           ),
         ),
-        if (active.isNotEmpty) _ActiveOperations(operations: active),
       ],
     );
   }
@@ -299,9 +348,9 @@ class _ServerLogViewState extends State<ServerLogView> {
     if (_query.isNotEmpty) return 'Nothing matches “${_searchController.text}”.';
     switch (widget.source) {
       case ServerLogSource():
-        if (_level != LogLevelFilter.all &&
+        if (_level != LogLevelFilter.debug &&
             widget.log.serverItems.isNotEmpty) {
-          return 'Nothing at this level yet.';
+          return 'Nothing at ${_level.label.toLowerCase()} level or above yet.';
         }
         return widget.emptyMessage ?? 'Nothing logged yet.';
       case AppLogSource(:final appId):
@@ -310,34 +359,33 @@ class _ServerLogViewState extends State<ServerLogView> {
     }
   }
 
-  Widget _buildRow(BuildContext context, Object row) => switch (row) {
+  Widget _buildRow(Object row, _LogPalette palette) => switch (row) {
         RunnerLogRecord() => _RecordRow(
             record: row,
+            palette: palette,
             expanded: _expanded.contains(row),
             onToggle: () => setState(() {
               if (!_expanded.remove(row)) _expanded.add(row);
             }),
           ),
-        RunnerOperation() => _OperationRow(operation: row),
-        final String line => _LineRow(line: line),
+        RunnerOperation() => _OperationRow(operation: row, palette: palette),
+        final String line => _LineRow(line: line, palette: palette),
         _ => const SizedBox.shrink(),
       };
 }
 
-TextStyle _monoStyle(BuildContext context, {Color? color}) {
-  final scheme = ShadTheme.of(context).colorScheme;
-  return TextStyle(
-    fontFamily: kMacMonoFont,
-    fontSize: kServerLogFontSize,
-    height: 1.45,
-    color: color ?? scheme.foreground,
-  );
-}
+TextStyle _mono(Color color) => TextStyle(
+      fontFamily: kMacMonoFont,
+      fontSize: kServerLogFontSize,
+      height: 1.45,
+      color: color,
+    );
 
 String _clock(DateTime time) {
   final local = time.toLocal();
   String two(int n) => n.toString().padLeft(2, '0');
-  return '${two(local.hour)}:${two(local.minute)}:${two(local.second)}';
+  final millis = local.millisecond.toString().padLeft(3, '0');
+  return '${two(local.hour)}:${two(local.minute)}:${two(local.second)}.$millis';
 }
 
 String formatLogDuration(Duration duration) {
@@ -349,190 +397,228 @@ String formatLogDuration(Duration duration) {
   return '${duration.inMinutes}m ${seconds}s';
 }
 
-/// One structured log record: time, level, message, and — behind a
-/// disclosure — the error and stack trace.
+/// The level and time columns every server row starts with.
+class _Gutter extends StatelessWidget {
+  const _Gutter({required this.lead, required this.time, required this.dim});
+
+  final Widget lead;
+  final DateTime time;
+  final Color dim;
+
+  @override
+  Widget build(BuildContext context) => Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(width: _levelWidth, child: lead),
+          SizedBox(width: _gap),
+          SizedBox(
+            width: _timeWidth,
+            child: Text(_clock(time), style: _mono(dim)),
+          ),
+          SizedBox(width: _gap),
+        ],
+      );
+}
+
+/// One structured log record: `level  time  message`, then its error and a
+/// stack trace behind a disclosure.
 class _RecordRow extends StatelessWidget {
   const _RecordRow({
     required this.record,
+    required this.palette,
     required this.expanded,
     required this.onToggle,
   });
 
   final RunnerLogRecord record;
+  final _LogPalette palette;
   final bool expanded;
   final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = ShadTheme.of(context).colorScheme;
     final level = record.level;
-    final levelColor = switch (level) {
-      RunnerLogLevel.warning => scheme.warning,
-      RunnerLogLevel.error || RunnerLogLevel.fatal => scheme.destructive,
-      RunnerLogLevel.debug => scheme.mutedForeground,
-      RunnerLogLevel.info => null,
-    };
-    final fromAppStudio = record.source == RunnerLogSource.appStudio;
-    final messageColor = levelColor ??
-        (fromAppStudio ? scheme.mutedForeground : scheme.foreground);
-    final muted = _monoStyle(context, color: scheme.mutedForeground);
+    final levelColor = palette.level(level);
+    // App Studio's own records — pub get, starting the runner — recede, so
+    // what the server said stands out.
+    final messageColor = record.source == RunnerLogSource.appStudio
+        ? palette.dim
+        : palette.text;
+    final error = record.error;
+    final stack = record.stackTrace?.trimRight();
 
-    final message = Text.rich(
-      TextSpan(
-        children: [
-          if (level.isAtLeast(RunnerLogLevel.warning))
-            TextSpan(
-              text: '${level.name.toUpperCase()} ',
-              style: _monoStyle(context, color: levelColor)
-                  .copyWith(fontWeight: FontWeight.w600),
-            ),
-          TextSpan(text: record.message),
-          if (record.scope case final scope?)
-            TextSpan(text: '  · $scope', style: muted),
-        ],
-      ),
-      style: _monoStyle(context, color: messageColor),
-    );
-
-    return Padding(
-      padding: _kRowPadding,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: _kTimeColumnWidth,
-                child: Text(_clock(record.time), style: muted),
-              ),
-              Expanded(child: message),
-              if (record.hasDetails)
-                _DisclosureButton(expanded: expanded, onPressed: onToggle),
-            ],
-          ),
-          if (expanded && record.hasDetails)
-            Padding(
-              padding: const EdgeInsets.only(
-                left: _kTimeColumnWidth,
-                top: 2,
-                bottom: 4,
-              ),
-              child: _RecordDetails(record: record),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RecordDetails extends StatelessWidget {
-  const _RecordDetails({required this.record});
-
-  final RunnerLogRecord record;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    final scheme = theme.colorScheme;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.muted,
-        borderRadius: theme.radii.sm,
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (record.error case final error? when error.isNotEmpty)
-              Text(error, style: _monoStyle(context, color: scheme.destructive)),
-            if (record.stackTrace case final stack?)
-              Text(
-                stack.trimRight(),
-                style: _monoStyle(context, color: scheme.mutedForeground)
-                    .copyWith(fontSize: kServerLogFontSize - 1),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DisclosureButton extends StatelessWidget {
-  const _DisclosureButton({required this.expanded, required this.onPressed});
-
-  final bool expanded;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = ShadTheme.of(context).colorScheme;
-    // Outside the selection: a click here toggles, it does not select.
-    return SelectionContainer.disabled(
-      child: ShadTooltip(
-        builder: (context) =>
-            Text(expanded ? 'Hide details' : 'Show error and stack trace'),
-        child: ShadIconButton.ghost(
-          width: 20,
-          height: 20,
-          padding: EdgeInsets.zero,
-          onPressed: onPressed,
-          icon: Icon(
-            expanded ? LucideIcons.chevronDown : LucideIcons.chevronRight,
-            size: 14,
-            color: scheme.mutedForeground,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A finished operation: what it was, whether it worked, and how long it took.
-class _OperationRow extends StatelessWidget {
-  const _OperationRow({required this.operation});
-
-  final RunnerOperation operation;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = ShadTheme.of(context).colorScheme;
-    final color = operation.success ? scheme.success : scheme.destructive;
-    final muted = _monoStyle(context, color: scheme.mutedForeground);
     return Padding(
       padding: _kRowPadding,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: _kTimeColumnWidth,
-            child: Text(_clock(operation.completedAt), style: muted),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(top: 2, right: 6),
-            child: Icon(
-              operation.success ? LucideIcons.check : LucideIcons.x,
-              size: 12,
-              color: color,
+          _Gutter(
+            lead: Text(
+              _levelLabel(level),
+              style: _mono(levelColor).copyWith(
+                // Menlo is not variable: `fontWeight` is the lever here.
+                fontWeight: level.isAtLeast(RunnerLogLevel.error)
+                    ? FontWeight.w700
+                    : FontWeight.w500,
+              ),
             ),
+            time: record.time,
+            dim: palette.dim,
           ),
           Expanded(
-            child: Text.rich(
-              TextSpan(
-                children: [
-                  TextSpan(text: operation.label),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text.rich(
                   TextSpan(
-                    text: '  ${formatLogDuration(operation.duration)}',
-                    style: muted,
+                    children: [
+                      TextSpan(text: record.message),
+                      if (record.scope case final scope?)
+                        TextSpan(
+                          text: '  $scope',
+                          style: _mono(palette.dim),
+                        ),
+                    ],
                   ),
+                  style: _mono(messageColor),
+                ),
+                if (error != null && error.isNotEmpty)
+                  Text(error, style: _mono(palette.error)),
+                if (stack != null && stack.isNotEmpty) ...[
+                  _StackTraceToggle(
+                    lines: stack.split('\n').length,
+                    expanded: expanded,
+                    color: palette.dim,
+                    onPressed: onToggle,
+                  ),
+                  if (expanded)
+                    Padding(
+                      padding: EdgeInsets.only(left: _charWidth() * 2),
+                      child: Text(
+                        stack,
+                        style: _mono(palette.dim)
+                            .copyWith(fontSize: kServerLogFontSize - 1),
+                      ),
+                    ),
                 ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// `▸ 12-line stack trace`, as the TUI writes it. A click toggles; selection
+/// skips it, so copying an error does not copy the affordance.
+class _StackTraceToggle extends StatefulWidget {
+  const _StackTraceToggle({
+    required this.lines,
+    required this.expanded,
+    required this.color,
+    required this.onPressed,
+  });
+
+  final int lines;
+  final bool expanded;
+  final Color color;
+  final VoidCallback onPressed;
+
+  @override
+  State<_StackTraceToggle> createState() => _StackTraceToggleState();
+}
+
+class _StackTraceToggleState extends State<_StackTraceToggle> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = '${widget.expanded ? '▾' : '▸'} ${widget.lines}-line stack '
+        'trace';
+    return SelectionContainer.disabled(
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.onPressed,
+          child: Text(
+            label,
+            style: _mono(widget.color).copyWith(
+              decoration:
+                  _hovered ? TextDecoration.underline : TextDecoration.none,
+              decorationColor: widget.color,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A finished operation: `✓  time  label (duration)` and a rule to the edge,
+/// in the success or failure colour — the TUI's section marker.
+class _OperationRow extends StatelessWidget {
+  const _OperationRow({required this.operation, required this.palette});
+
+  final RunnerOperation operation;
+  final _LogPalette palette;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = operation.success ? palette.success : palette.error;
+    final label = Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(text: operation.label),
+          TextSpan(
+            text: ' (${formatLogDuration(operation.duration)})',
+            style: _mono(palette.dim),
+          ),
+        ],
+      ),
+      style: _mono(color).copyWith(fontWeight: FontWeight.w600),
+    );
+    return Padding(
+      padding: _kRowPadding.add(const EdgeInsets.symmetric(vertical: 2)),
+      child: Row(
+        children: [
+          _Gutter(
+            lead: Center(
+              child: Icon(
+                operation.success ? LucideIcons.check : LucideIcons.x,
+                size: kServerLogFontSize + 1,
+                color: color,
               ),
-              style: _monoStyle(
-                context,
-                color: operation.success ? scheme.foreground : color,
-              ),
+            ),
+            time: operation.completedAt,
+            dim: palette.dim,
+          ),
+          // The label takes what it needs and the rule takes *all* the rest,
+          // out to the row's right padding. A `Flexible` label beside an
+          // `Expanded` rule would split the leftover space between them
+          // instead, and the rule would stop halfway across.
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final minRule = _charWidth() * 2;
+                return Row(
+                  children: [
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: (constraints.maxWidth - _gap - minRule)
+                            .clamp(0, double.infinity),
+                      ),
+                      child: label,
+                    ),
+                    SizedBox(width: _gap),
+                    Expanded(child: Container(height: 1, color: palette.rule)),
+                  ],
+                );
+              },
             ),
           ),
         ],
@@ -543,14 +629,15 @@ class _OperationRow extends StatelessWidget {
 
 /// One line of a Flutter app's output.
 class _LineRow extends StatelessWidget {
-  const _LineRow({required this.line});
+  const _LineRow({required this.line, required this.palette});
 
   final String line;
+  final _LogPalette palette;
 
   @override
   Widget build(BuildContext context) => Padding(
         padding: _kRowPadding,
-        child: Text(line, style: _monoStyle(context)),
+        child: Text(line, style: _mono(palette.text)),
       );
 }
 
@@ -575,99 +662,12 @@ class _EmptyLog extends StatelessWidget {
   }
 }
 
-/// Operations in flight, pinned under the log with a live elapsed time — the
-/// compile or launch that explains why nothing has happened for a minute.
-class _ActiveOperations extends StatefulWidget {
-  const _ActiveOperations({required this.operations});
-
-  final List<ActiveOperation> operations;
-
-  @override
-  State<_ActiveOperations> createState() => _ActiveOperationsState();
-}
-
-class _ActiveOperationsState extends State<_ActiveOperations> {
-  Timer? _ticker;
-
-  @override
-  void initState() {
-    super.initState();
-    _ticker = Timer.periodic(
-      const Duration(seconds: 1),
-      (_) => setState(() {}),
-    );
-  }
-
-  @override
-  void dispose() {
-    _ticker?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = ShadTheme.of(context).colorScheme;
-    final now = DateTime.now();
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.muted,
-        border: Border(top: paneBorderSide(scheme.border)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            for (final operation in widget.operations)
-              Padding(
-                padding: _kRowPadding,
-                child: Row(
-                  children: [
-                    const SizedBox(
-                      width: _kTimeColumnWidth,
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: ShadSpinner(size: 12),
-                      ),
-                    ),
-                    Expanded(
-                      child: Text(
-                        operation.label,
-                        overflow: TextOverflow.ellipsis,
-                        style: _monoStyle(context),
-                      ),
-                    ),
-                    Text(
-                      formatLogDuration(
-                        Duration(
-                          seconds: now
-                              .difference(operation.startedAt)
-                              .inSeconds
-                              .clamp(0, 1 << 30),
-                        ),
-                      ),
-                      style: _monoStyle(
-                        context,
-                        color: scheme.mutedForeground,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Search, the level filter (server only) and the migrations menu.
+/// Search, and the level filter on the server log.
 class _FilterBar extends StatelessWidget {
   const _FilterBar({
     required this.searchController,
     required this.level,
     required this.onLevelChanged,
-    required this.actions,
   });
 
   final TextEditingController searchController;
@@ -675,12 +675,10 @@ class _FilterBar extends StatelessWidget {
   /// Null hides the filter — an app's output has no levels.
   final LogLevelFilter? level;
   final ValueChanged<LogLevelFilter> onLevelChanged;
-  final RunnerActionsView actions;
 
   @override
   Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    final scheme = theme.colorScheme;
+    final scheme = ShadTheme.of(context).colorScheme;
     final level = this.level;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -729,21 +727,26 @@ class _FilterBar extends StatelessWidget {
           ),
           if (level != null) ...[
             const SizedBox(width: 6),
-            ShadSelect<LogLevelFilter>(
-              initialValue: level,
-              minWidth: 168,
-              onChanged: (value) {
-                if (value != null) onLevelChanged(value);
-              },
-              options: [
-                for (final option in LogLevelFilter.values)
-                  ShadOption(value: option, child: Text(option.label)),
-              ],
-              selectedOptionBuilder: (context, value) => Text(value.label),
+            ShadTooltip(
+              builder: (context) =>
+                  const Text('Show this level and everything above it'),
+              child: ShadSelect<LogLevelFilter>(
+                // Keyed on the value: the Logs menu sets the level too, and
+                // `initialValue` is only read once.
+                key: ValueKey(level),
+                initialValue: level,
+                minWidth: 120,
+                onChanged: (value) {
+                  if (value != null) onLevelChanged(value);
+                },
+                options: [
+                  for (final option in LogLevelFilter.values)
+                    ShadOption(value: option, child: Text(option.label)),
+                ],
+                selectedOptionBuilder: (context, value) => Text(value.label),
+              ),
             ),
           ],
-          const SizedBox(width: 6),
-          MigrationsMenu(actions: actions),
         ],
       ),
     );
