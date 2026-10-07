@@ -2,7 +2,6 @@ import 'package:appstudio/preview/preview_mode_controller.dart';
 import 'package:appstudio/preview/preview_theme.dart';
 import 'package:appstudio/process/serverpod_process.dart';
 import 'package:appstudio/session/project_session.dart';
-import 'package:appstudio/terminal/studio_terminal.dart';
 import 'package:appstudio/theme/app_theme.dart';
 import 'package:appstudio/ui/preview_pane.dart';
 import 'package:flutter/material.dart';
@@ -35,7 +34,6 @@ void main() {
       process = ServerpodProcessController(
         toolchains: await emptyToolchainController(),
         session: ProjectSession(),
-        terminal: StudioTerminal(),
       );
     });
     addTearDown(process.dispose);
@@ -45,7 +43,6 @@ void main() {
         theme: buildDarkTheme(),
         home: Scaffold(
           body: PreviewPane(
-            previewUrl: Uri.parse('http://localhost:9998'),
             process: process,
             mode: PreviewModeController(window: FakeCompactWindow()),
           ),

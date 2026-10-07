@@ -13,7 +13,6 @@ class ProjectSession extends ChangeNotifier implements RecentProjectsView {
   static const _recentsKey = 'recent_projects';
   static const _newProjectDirectoryKey = 'new_project_directory';
   static const _maxRecents = 5;
-  static final previewUri = Uri.parse('http://localhost:9998');
 
   String? _projectPath;
   String? _error;

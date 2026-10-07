@@ -251,18 +251,29 @@ void main() {
   });
 
   group('patchFlutterAppForPreview', () {
-    test('appends device and web-port to the app entry', () {
+    test('appends the headless web device to the app entry', () {
       final patched = patchFlutterAppForPreview(_serverPubspec)!;
       expect(
         patched,
         endsWith(
           '      target: lib/driver.dart\n'
-          '      device: web-server\n'
-          '      web-port: 9998\n',
+          '      device: web-server\n',
         ),
       );
+      // No port: the runner publishes whichever one Flutter picks.
+      expect(patched, isNot(contains('    web-port:')));
       // Commented example values are left alone.
       expect(patched, contains('#   web-port: 8090'));
+    });
+
+    test('leaves a port the user pinned alone', () {
+      final pinned = _serverPubspec.replaceFirst(
+        '      target: lib/driver.dart\n',
+        '      target: lib/driver.dart\n      web-port: 7000\n',
+      );
+      final patched = patchFlutterAppForPreview(pinned)!;
+      expect(patched, contains('      web-port: 7000\n'));
+      expect(patched, contains('      device: web-server\n'));
     });
 
     test('replaces values that are already set', () {

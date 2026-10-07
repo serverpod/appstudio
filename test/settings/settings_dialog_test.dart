@@ -1,7 +1,6 @@
 import 'package:appstudio/agent/agent_controller.dart';
 import 'package:appstudio/process/serverpod_process.dart';
 import 'package:appstudio/session/project_session.dart';
-import 'package:appstudio/terminal/studio_terminal.dart';
 import 'package:appstudio/theme/app_theme.dart';
 import 'package:appstudio/toolchain/toolchain_controller.dart';
 import 'package:appstudio/ui/settings/providers_settings_pane.dart';
@@ -38,7 +37,6 @@ void main() {
       process: ServerpodProcessController(
         toolchains: toolchains,
         session: session,
-        terminal: StudioTerminal(),
       ),
     );
   });

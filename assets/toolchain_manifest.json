@@ -16,7 +16,7 @@
       "id": "serverpod_cli",
       "displayName": "Serverpod",
       "description": "Creates projects, generates code and runs the server.",
-      "accepts": ">=4.0.0 <4.1.0"
+      "accepts": ">=4.1.0-beta.1 <4.2.0"
     }
   ]
 }

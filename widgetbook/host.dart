@@ -238,12 +238,20 @@ const landingBackdrop = LandingScaffold(child: SizedBox.shrink());
 
 /// A standalone widget on the app's background, with room around it.
 class ComponentCanvas extends StatelessWidget {
-  const ComponentCanvas({super.key, required this.child, this.width = 520});
+  const ComponentCanvas({
+    super.key,
+    required this.child,
+    this.width = 520,
+    this.height,
+  });
 
   final Widget child;
 
   /// Wide components (panes, tables) need a width to lay out against.
   final double? width;
+
+  /// Panes that fill their parent — the server log — need a height too.
+  final double? height;
 
   @override
   Widget build(BuildContext context) {
@@ -253,7 +261,7 @@ class ComponentCanvas extends StatelessWidget {
       child: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(32),
-          child: SizedBox(width: width, child: child),
+          child: SizedBox(width: width, height: height, child: child),
         ),
       ),
     );

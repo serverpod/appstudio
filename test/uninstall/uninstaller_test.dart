@@ -1,10 +1,8 @@
 import 'dart:io';
 
 import 'package:appstudio/agent/agent_controller.dart';
-import 'package:appstudio/mcp/mcp_controller.dart';
 import 'package:appstudio/process/serverpod_process.dart';
 import 'package:appstudio/session/project_session.dart';
-import 'package:appstudio/terminal/studio_terminal.dart';
 import 'package:appstudio/toolchain/toolchain_controller.dart';
 import 'package:appstudio/toolchain/tool_status.dart';
 import 'package:appstudio/toolchain/toolchain_paths.dart';
@@ -29,7 +27,6 @@ void main() {
   late ToolchainController toolchains;
   late ServerpodProcessController process;
   late AgentController agent;
-  late McpController mcp;
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({
@@ -56,14 +53,8 @@ void main() {
     process = ServerpodProcessController(
       toolchains: toolchains,
       session: session,
-      terminal: StudioTerminal(),
     );
     agent = AgentController(
-      toolchains: toolchains,
-      session: session,
-      process: process,
-    );
-    mcp = McpController(
       toolchains: toolchains,
       session: session,
       process: process,
@@ -78,7 +69,6 @@ void main() {
         toolchains: toolchains,
         process: process,
         agent: agent,
-        mcp: mcp,
       );
 
   Future<UninstallResult> run({Set<ToolId> tools = const {}}) =>

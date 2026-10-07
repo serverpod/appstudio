@@ -1,6 +1,6 @@
 # App Studio — agent notes
 
-macOS Flutter IDE for **Serverpod 4** projects: open a project, run `serverpod start` in an embedded terminal, preview the Flutter web app in CEF at `http://localhost:9998`.
+macOS Flutter IDE for **Serverpod 4.1** projects: open a project, start or attach to its Serverpod runner, show the runner's structured log natively, and preview the Flutter web app in CEF at the URL the runner publishes.
 
 ## Project layout
 
@@ -8,12 +8,11 @@ macOS Flutter IDE for **Serverpod 4** projects: open a project, run `serverpod s
 lib/
   main.dart              # ShadApp, wires controllers
   agent/                 # OpenCode serve client, SSE, AgentController, transcript
-  ui/                    # studio_shell, preview_pane, terminal_pane, agent/, settings/
-  mcp/                   # serverpod mcp-server bridge, McpController (hot restart)
+  ui/                    # studio_shell, preview_pane, left_pane, server_log/, agent/, settings/
+  runner/                # Serverpod runner: protocol, client, discovery, log mirror, ownership
   preview/               # CEF preview: device modes, theme shim, surface sync
-  process/               # ServerpodProcessController (start/stop/reload), ProjectCreator
+  process/               # ServerpodProcessController (runner lifecycle, actions), ProjectCreator
   session/               # ProjectSession (open project, recents)
-  terminal/              # xterm wrapper
   theme/                 # Shad themes, layout constants, ThemeController
   toolchain/             # Probe + install CLT, Flutter, Serverpod CLI (official sources)
   widgets/               # Shared UI (IconSegmentedControl, MenuItemTile)
@@ -72,125 +71,192 @@ Tests that cover the switched-on behaviour are skipped, not deleted —
   the card is attached next to that tool part and the raw row is hidden.
 - Ground truth for events/endpoints is the running server: `curl <base>/doc`.
 
-## Hot Restart (Serverpod MCP) — switched off
+## The Serverpod runner (Serverpod 4.1)
 
-**`kServerpodMcpEnabled` in `lib/feature_flags.dart` is `false`, and everything
-in this section is dormant behind it.** The bridge cannot yet deliver a hot
-restart to the runner App Studio starts; the code is all still here, and
-flipping the flag to `true` brings it back intact. Read the rest of this section
-as what happens when it is on.
+Serverpod 4.1 split `serverpod start` in two: a **detached runner**
+(`serverpod runner serve`) that *is* the development stack — generator,
+watcher, compiler, server, database, Flutter apps — and **clients** that attach
+to its socket. The CLI's own TUI is one client; App Studio is another. There is
+no PTY and no output to scrape any more: stages, log entries, operations and the
+Flutter app's URL arrive as structured events, and hot reload, hot restart and
+migrations are commands on the same connection.
 
-Off, two things step back:
+- `lib/runner/runner_protocol.dart` decodes the protocol (pure Dart, Widgetbook
+  feeds it), `runner_client.dart` is the wire, `runner_discovery.dart` finds a
+  project's runner, `runner_log.dart` mirrors its history for the log pane,
+  `runner_ownership.dart` records which runner is ours.
+  `ServerpodProcessController` owns the policy; `RunnerActionsView` is what the
+  toolbar and the log pane see.
+- **Ground truth is the CLI source** — `serverpod_cli-4.1.0-beta.1/lib/src/runner/`
+  in the pub cache (`runner_event.dart`, `runner_snapshot.dart`,
+  `runner_socket_server.dart`, `runner_discovery.dart`) — and a live runner:
+  connect to the socket, send `{"jsonrpc":"2.0","id":1,"method":"snapshot","params":{}}`
+  and read the events that follow.
 
-- **`McpController` registers no listeners**, so no project and no running
-  server ever spawns a `serverpod mcp-server`, nothing is probed, the connection
-  stays `idle` and `hotRestart()` finds no bridge. It is still constructed,
-  still handed to `UpdateController` and the uninstaller, and `teardownSession`
-  still awaits its `stop()`.
-- **The toolbar keeps its Hot Restart button**, always enabled, opening
-  `HotRestartComingSoonDialog` rather than restarting. The connection never
-  leaves `idle`, so the rules below would otherwise leave it permanently
-  disabled reading "start the server first" for a server that is running. The
-  dialog points the user at their own AI agent, which reaches the same Serverpod
-  MCP tool today, and at Full Restart next to it.
+### The protocol
 
-Tests covering the switched-on behaviour are skipped, not deleted —
-`test/support/mcp_flag.dart` carries `skipWhenMcpOff` / `skipWhenMcpOn`.
+- **Newline-delimited JSON-RPC 2.0 on `<serverDir>/.dart_tool/serverpod/tui.sock`**,
+  through `package:json_rpc_2` — the package the runner serves it with. Every
+  call passes an object for `params`, even `{}`: the runner's handlers read named
+  params and `json_rpc_2` rejects an absent one there.
+- **`snapshot` first, then `event` notifications.** The snapshot *replaces* the
+  mirrored history (a reconnect may reach a different runner); every event
+  appends. The runner subscribes a client the moment it computes the snapshot,
+  so an event can overtake the reply on the wire — `RunnerClient.attach` holds
+  events until the snapshot is applied, as the CLI's own client does.
+- **The first `snapshot` a runner ever answers arms its Flutter auto-launch.**
+  A runner brought up by `serverpod runner start` with nobody attached has not
+  launched its apps yet; App Studio attaching is what starts them. A probe that
+  only connects (liveness) arms nothing.
+- **Raw pod output (`serverLine`) is not shown, on purpose.** The log is the
+  structured one — the pod's own entries arrive there too. A `flutterLog` entry
+  is only used when flagged `appendedToLines` (a VM-service event such as
+  `Flutter.Error` that never printed); otherwise it duplicates `flutterLine`s.
+- **Stages:** `starting` → `running`, or `degraded` (the project failed to build;
+  the watcher recovers it on the next good save, or `retryStart`), then
+  `stopping` with an `exitCode`. `runner.json` mirrors the stage and survives the
+  runner, so only a socket connection proves one is alive.
+- Operation `completedAt` times carry no zone while log times are UTC —
+  `DateTime.parse` reads both correctly; do not "fix" one to match the other.
+- `protocolVersion` in the manifest is 1. A runner publishing another one is
+  refused (`IncompatibleRunner`), as the CLI refuses it.
 
-The toolbar's **Hot Restart** button recompiles and reboots the running server,
-then hot-restarts the Flutter app and force-reloads the preview. It goes through
-`serverpod mcp-server`, the CLI's own MCP bridge —
-`lib/mcp/serverpod_mcp_bridge.dart` speaks the protocol, `McpController` owns the
-policy, `HotRestartButton` is the one control.
+### Finding the runner
 
-- **It runs the bridge's `hot_restart`, and the button says so.** `hot_reload`
-  also exists and is *not* what this is: it preserves in-memory state and skips
-  the server reboot, which means it does not pick up a change to `main()`.
-  Switching is a one-line change in `McpController.hotRestart` — a behaviour
-  change, and the label would have to move with it.
+- **The runner is keyed by the server package, not the project root.**
+  `findServerDirectory` looks in the opened folder and two levels down, the way
+  the CLI's `ServerDirectoryFinder` does, and refuses a folder with two servers.
+  `serverpod runner start --directory` is given exactly that path, so both ends
+  agree on which `runner.json` to watch.
+- **A Unix socket address is at most 104 bytes on macOS**, and a project a few
+  folders deep blows straight through it. `runnerSocketPath` then uses the
+  runner's registry link, `~/.serverpod/runners/<projectId>/tui.sock`
+  (`SERVERPOD_RUNNER_REGISTRY_DIR` overrides it) — the same choice the CLI's
+  clients make. The probe project under the scratchpad needed this; it is not
+  an edge case.
+- A runner that is `stopping` still holds the package's lock; `_settle` waits it
+  out (15 s) rather than spawning one that would die on the lock.
 
-- **Transport is stdio MCP** — newline-delimited JSON-RPC 2.0, protocol
-  `2024-11-05`…`2025-11-25`, server name `serverpod-bridge`. We use
-  `package:dart_mcp`, which is the *same* package the bridge is built on, so the
-  two ends cannot drift. Ground truth is the running bridge: pipe an
-  `initialize` + `tools/list` into `serverpod mcp-server` and read the answer.
-- The bridge forwards to a unix socket the runner opens at
-  `<serverDir>/.dart_tool/serverpod/mcp.sock`. **Nothing has to be enabled on
-  `serverpod start`** — the socket is unconditional, in both TUI and `--no-tui`
-  mode, so App Studio's `--no-tui` runner is fine. No flag, no env var.
-- `serverDir` is auto-detected from the working directory, and we hand the bridge
-  the *same* project root `serverpod start` gets. Both ends then run the same
-  detection and cannot end up pointed at different projects. Do not compute the
-  `*_server` path here — nothing else in the app does either.
-- **The bridge starts and answers happily with no runner behind it**, and
-  `tools/list` returns the full surface either way, so "the bridge is up" says
-  nothing about whether anything can be delivered. The only honest signal is the
-  `serverpod://vm-service` resource: `{"uri": …}` with a runner,
-  `{"uri": null, "error": "not-running"}` without — and the latter is *not*
-  flagged as an error result, so the payload has to be read.
-- That answer is **polled** (2s). The bridge only re-emits resource updates from
-  a runner it is already talking to, so nothing arrives to announce a runner's
-  *arrival* — subscribing would not help. Polling stops while a hot restart is in
-  flight, so the button cannot flicker disabled mid-restart.
-- Spawned with **`-q`** (a *global* option, so it precedes the command) and every
-  stdout line that is not a JSON object is dropped before it reaches the
-  protocol. The CLI's update notice is written to stdout, which is the protocol
-  channel, and one stray line is a parse error that takes the connection down.
-  Dropped lines are kept as diagnostics and reported.
-- **Shut the bridge down by closing the protocol channel, never by killing it.**
-  A `SIGKILL`ed bridge leaves the runner writing into a dead socket, which it
-  reports in the user's server log as an internal error with a 35-frame stack
-  trace and a "file an issue" banner. `stop()` closes the channel, waits, and
-  only then falls back to a signal; `teardownSession` awaits it for the same
-  reason the server and agent are awaited.
-- **The runner's socket accepts one client at a time and evicts the previous
-  one.** Our bridge therefore displaces an IDE-spawned `serverpod mcp-server`
-  for the same project, and it displaces ours. Calls reconnect lazily, so this
-  self-heals, but it is why two App Studio windows on one project would fight.
-- **A success force-reloads the preview** via
-  `ServerpodProcessController.requestPreviewReload()`. The runner does trigger a
-  browser refresh of its own (`✓ Browser refresh triggered.` in the server log)
-  and the preview does come back without us — but that goes through DWDS and
-  leaves the cached `main.dart.js` in place, so it cannot be *trusted* to be
-  showing the code that was just compiled. Ours ignores the cache. Only on
-  success: reloading after a failed restart would just re-serve the old app and
-  make it look like the restart worked.
-- `hot_reload` exists on the bridge too, along with migrations, log tails and
-  `get_flutter_app_dtd`. Only `hot_restart` is wired up.
+### Starting, attaching, stopping
 
-### The restart surface is two buttons, and that is all of it
+- **Opening a project attaches to a runner if one is already up** — a terminal
+  `serverpod start`, an AI agent, or an earlier App Studio. Only when none is
+  answering does App Studio run `pub get` and then `serverpod runner start
+  --directory <serverDir>` (`launchRunnerProcess`).
+- **`serverpod runner start`, not the hidden `runner serve`.** It is the CLI's
+  public way up: it handles the lock, a runner another client is starting at the
+  same moment, and option mismatches. It returns only once the whole stack is up
+  — minutes on a cold project — but the runner answers within seconds of being
+  spawned, so App Studio attaches as soon as it does and lets the CLI finish on
+  its own. Its output goes to the log until then. Its exit only means failure if
+  it comes before an attach.
+- **App Studio stops the runners it started and only detaches from the rest.**
+  Closing a project, switching, quitting and Sparkle's relaunch all go through
+  `stop()`; for a runner App Studio found, that is a detach and a log line saying
+  so. A runner may be the user's terminal session or their agent's.
+- **Ownership is written to disk** (`appstudio-runner.json` in the temp dir:
+  server dir + pid). The runner is detached by the CLI, so nothing takes it down
+  with us; `main()` → `cleanupOrphanedDevSession` → `reclaimOwnedRunner` stops one
+  a crashed or hot-restarted App Studio left behind — **over its socket**, so its
+  Postgres, Docker services and Flutter apps go down with it. A record only
+  matches a live runner whose manifest names the same pid. It is consumed either
+  way, so a stale one cannot become a signal for whatever inherits the pid.
+- **No pid file, no group kill, no port reclaim for the runner.** It is not our
+  child, and the preview has no fixed port to reclaim. `DevProcessKind` is down
+  to the agent.
+- **`pub get` still runs before a start, and only then** — never under a runner
+  that is already up. The old step that deleted `.dart_tool/serverpod` to force a
+  recompile is gone: that directory now holds the live runner's manifest, lock
+  and socket.
+- The runner gets `TERM=dumb` (and no `COLORTERM`/`COLORFGBG`): nothing renders
+  escape codes now. ANSI is stripped on decode as well, for what slips through.
+- **A dropped connection is not a stopped runner.** `_onDisconnected` keeps the
+  state while it re-resolves: a live runner is reattached (fresh snapshot); a
+  manifest with exit code 0 means someone stopped it (idle, with a log line); no
+  exit code or a non-zero one is a failure.
+- **Only phase-level changes notify the controller's listeners** — stage, preview
+  URL, app launching/running, registration code. Every listener of the process
+  rebuilds the shell, and a busy server logs many times a second; the log pane
+  listens to `RunnerLog` for the rest. A test pins this.
 
-**Hot Restart** (fast, MCP) and **Full Restart** (slow, process). Both are
-`ToolbarActionButton` — an outline icon button with a spinner in the icon's place
-while busy — so they cannot drift in size or spinner size sitting next to each
-other.
+### The preview URL comes from the runner
 
+- **No fixed port.** `flutter run -d web-server` picks a free one and the runner
+  publishes it in `flutterAppState.url` (and the snapshot's `flutterAppUrls`). A
+  progress update for a running app carries no URL — keep the last, as the CLI
+  does. `PreviewPane` loads `process.previewUrl` and recreates the webview if the
+  app comes back on a different port.
+- **The preview app** is the one with a URL, else the one on `device: web-server`,
+  else the first. If the runner did not launch it (no `auto_launch`), App Studio
+  asks once per attach — the runner ignores a launch for an app already starting.
+- **"Live" is still decided in the page.** With `-d web-server` the app's `main()`
+  only runs once a page has connected, so the URL arriving means "load it", and
+  `markPreviewLive()` (from `_waitForFlutterMain`) means "it is running". After
+  the page connects the runner completes its `Connecting to <app> VM service`
+  operation and sends no further app state — do not wait for one.
+- **New projects get `device: web-server`** on their app entry and nothing else
+  (`patchFlutterAppForPreview`). Without it the runner's default device is
+  `web-server-launch-browser`, which also opens the system browser. A `web-port`
+  already there is left alone; App Studio no longer needs one. A project created
+  elsewhere with no `device` still works — the app also opens in a browser.
+- The CLI range in `assets/toolchain_manifest.json` is `>=4.1.0-beta.1 <4.2.0`.
+  4.0 has no runner to attach to. The installer prefers a stable release in range
+  and otherwise takes the newest prerelease, so this resolves to the beta today
+  and to 4.1.0 once it ships.
+
+### The MCP bridge is gone
+
+`lib/mcp/` (the `serverpod mcp-server` bridge and `McpController`) and the
+`kServerpodMcpEnabled` flag were removed: everything it existed for — a hot
+restart and "is a runner attached" — is a direct call on the runner socket now.
+The runner still serves `mcp.sock` for the user's own AI agents; App Studio no
+longer touches it. `dart_mcp`, `xterm` and `kyroon_pty` left `pubspec.yaml` with
+it.
+
+## Toolbar
+
+### Hot Reload, Hot Restart, Full Restart
+
+**Hot Reload** (⚡ `zap`), **Hot Restart** (`refreshCcwDot`) and **Full Restart**
+(`rotateCcw`), left to right, fastest to slowest. All three are
+`ToolbarActionButton` — an outline icon button with a spinner in the icon's
+place while busy — so they cannot drift in size or spinner size.
+
+- **Hot Reload** is the runner's `hotReload`: server isolate, then every running
+  Flutter app. Keeps state, so it does not pick up a change to `main()`. It does
+  **not** reload the preview — that would throw away the state it kept.
+- **Hot Restart** is the runner's `hotRestart`: recompile, reboot the server
+  process, hot-restart every Flutter app. The RPC answers only once all of that
+  has happened (measured ~1 s on the probe project), then the preview is
+  hard-reloaded via `requestPreviewReload()`. The runner triggers a browser
+  refresh of its own, but through DWDS, which leaves the cached `main.dart.js` in
+  place. Only on success: reloading after a failed restart would re-serve the old
+  app and make it look like the restart worked.
+- Both read `RunnerActionsView`, are live only while a runner is attached with
+  its server `running`, and only one runner action runs at a time. A failure
+  tints the icon destructive and puts the runner's message in the tooltip.
 - **Icon-only, so the tooltip is load-bearing** and carries the name as well as
   the reason it is unavailable. `label` is still passed: it becomes
   `semanticLabel`, which is otherwise the icon glyph and nothing.
-
 - **Full Restart replaced separate Start and Stop icons.** They were two controls
   for one question, and the pair invited the state that actually breaks things:
   stopped on purpose, with a preview pane and an agent still waiting for a server
-  that is never coming back. `ServerpodProcessController.restart()` is stop → wait
-  → start.
+  that is never coming back. `ServerpodProcessController.restart()` is stop →
+  start, and the new runner is App Studio's — even if the old one was not, since
+  the user asked for the restart.
+- **On a project that failed to build, Full Restart is `retryStart`**: the runner
+  is still up and rebuilding is the part that needs doing.
 - **It stays enabled with the server stopped**, where it is a plain start. That is
-  the recovery path after a crash or a failed compile, and it is now the only
-  control that can bring the server back — disabling it there would strand the
-  user. `test/process/full_restart_button_test.dart` pins this.
-- **`restart()` waits for the preview port to go quiet before starting.** `stop()`
-  returns once the PTY is reaped, but the runner's children can outlive the
-  process-group kill by a moment and they still hold the port; a start that races
-  them comes up unable to bind, which reads as a broken restart rather than a
-  collision. Bounded at 5s, then `releaseTcpPort` takes the port back — the same
-  reclaim `main()` runs on launch.
+  the recovery path after a crash, and it is the only control that can bring the
+  server back — disabling it there would strand the user.
+  `test/process/full_restart_button_test.dart` pins this.
 - **`isRestarting` spans the stop *and* the start.** Without it the UI sees a
   moment of `ProcessState.idle` between them and flips the button to "start the
   server", which reads as the restart having failed. `isTransitioning` is what the
   button actually reads.
-- The button talks to `FullRestartView`, not the controller, for the same reason
-  `ToolsView` exists: the state rules are worth testing without spawning a real
-  Serverpod runner.
+- The buttons talk to `FullRestartView` / `RunnerActionsView`, not the
+  controller, for the same reason `ToolsView` exists: the state rules are worth
+  testing without a runner behind them.
 
 ### Open in … — handing the project to an external editor
 
@@ -307,8 +373,10 @@ directory. The fix is to spawn what Cursor's own `bin/cursor` script spawns:
 
 ## Child processes and teardown
 
-App Studio spawns four long-lived children: the `serverpod start` PTY, `opencode
-serve`, `serverpod mcp-server`, and CEF's helpers. Getting them all down is
+App Studio has three long-lived things to take down: the Serverpod runner it
+started, `opencode serve`, and CEF's helpers. The runner is not a child at all —
+the CLI detaches it — so see The Serverpod runner for how it is stopped and
+reclaimed; the rest of this section is about real children. Getting them down is
 harder than it looks, and the failure is silent — an orphan is reparented to
 launchd, where nothing will ever clean it up. This was found with **17 orphaned
 `opencode serve` processes** on one machine, accumulated over days, one per
@@ -318,21 +386,21 @@ Three mechanisms, and all three are needed:
 
 1. **`AppLifecycleListener.onExitRequested`** (`main.dart`) is the *only* place a
    quit can be awaited. `dispose()` is synchronous, and on ⌘Q the isolate is
-   killed at the OS's convenience — measured: the server and the bridge died with
-   us because they are stdio/PTY-coupled, but `opencode serve` is an ordinary
-   `Process.start` child and survived **every** quit. `AppDelegate` must keep
+   killed at the OS's convenience — measured: `opencode serve` is an ordinary
+   `Process.start` child and survived **every** quit, and the runner is detached
+   by design, so nothing at all takes it down with us. `AppDelegate` must keep
    *not* overriding `applicationShouldTerminate`, or this hook stops firing.
    It always answers `AppExitResponse.exit`: refusing would make the app
    unquittable, which is far worse than a stray process.
 2. **An awaitable `stop()` on every controller that owns a child.**
-   `AgentController.stop()` and `McpController.stop()` exist for this and are
-   what `teardownSession` calls. It used to call `agent.dispose()`, which could
+   `AgentController.stop()` and `ServerpodProcessController.stop()` exist for
+   this and are what `teardownSession` calls. It used to call `agent.dispose()`, which could
    only fire the teardown and return — the stop was never awaited by anyone.
 3. **A pid file per child, reclaimed on next launch** (`dev_session_cleanup.dart`,
    `DevProcessKind`). The backstop for a crash, a `kill -9`, and a Flutter hot
    restart — which re-runs `main()` without `dispose()`, so the previous
-   isolate's children are already orphaned by the time the new one starts. Only
-   the PTY used to register, which is why only the PTY was ever reclaimed.
+   isolate's children are already orphaned by the time the new one starts. The
+   runner's equivalent is its ownership record, stopped over its socket.
 
 ### The group-kill trap
 
@@ -340,7 +408,7 @@ Three mechanisms, and all three are needed:
 failure by **returning `false`, not by throwing**. The old reclaim wrapped it in
 a `try`/`catch` with a single-pid fallback in the `catch`, so the fallback never
 ran. That mattered because only a child that called `setsid` leads its own group:
-the PTY does, so `-pid` reaches its whole tree, but a plain `Process.start` child
+a PTY child does, so `-pid` reaches its whole tree, but a plain `Process.start` child
 inherits our group and leads nothing, so `-pid` matched **nothing, silently**.
 That is how orphaned agents survived every launch even with a reclaim in place.
 `_signal` now branches on the return value. `test/process/dev_session_cleanup_test.dart`
@@ -883,20 +951,20 @@ install. Sparkle would also catch it, but later and less clearly.
 - **`onPressed: null` does not grey out a `ShadButton` — pass `enabled: false` too.** The dimming is an `Opacity(.5)` driven by `ShadState.disabled`, which shad sets from the `enabled` property alone; that defaults to `true` no matter what `onPressed` is. A null handler on its own gets you a button that is inert but looks live, which reads as a broken click rather than an unavailable action. Settings → Tools passes both. The toolbar's `_IconAction` derives it as `enabled: onPressed != null`, so Start and Stop dim like everything else.
 - **A `ShadTooltip` never opens on a disabled `ShadButton`** — which is exactly when its text is worth reading. `ShadTooltip` owns no `MouseRegion`: it injects `onHoverChange` into the theme's hover strategies and relies on the *child* to report hover, and a disabled button puts its content behind an `AbsorbPointer`, so nothing ever reports. Wrap the button in a bare `ShadGestureDetector` — that sits outside the absorber and reports hover regardless. `HotRestartButton` does this, because "start the server first" is the whole point of the tooltip there.
 - **Success and warning badges go through `appSuccessBadge` / `appWarningBadge`** (`app_theme.dart`), which wash the status colour at 10% (light) / 20% (dark) the way shad tints `destructive`. Warning, not destructive, is right for "not installed yet": nothing is broken and there is a button on the same screen that fixes it.
-- **Terminal tabs:** VS Code–style; selected tab overlaps bottom border via `Transform.translate`, not negative margin.
 - **Split resize:** panes meet with no gap. Draw a full-height 1px `ColoredBox` in a `Stack` on the split line; overlay a transparent drag handle (`kSplitHandleWidth`). Do not use a separate wide column or `DecoratedBox` border behind opaque pane content — it won't show.
 
 ## Preview panel
 
 - **Shell theme ≠ preview theme.** Preview light/dark toggles a JS shim (`preview_theme.dart`) that fakes `prefers-color-scheme` inside CEF.
 - **View modes:** `PreviewViewMode` — portrait phone (default), landscape phone, desktop. Defined in `preview_device.dart`.
-- **Reload: there is no reload button, and no second path.** Every reload goes through `previewReloadToken` → `PreviewPaneState.reload()`, so it is always the hard one — a plain navigation re-serves the cached `main.dart.js`, so a rebuilt app looks unchanged. Three things bump the token: the DWDS attach, `ServerpodProcessController.requestPreviewReload()`, and a successful Hot Restart. Re-apply the theme shim afterwards: it is injected at load start with the brightness captured when the webview was created.
+- **Reload: there is no reload button, and no second path.** Every reload goes through `previewReloadToken` → `PreviewPaneState.reload()`, so it is always the hard one — a plain navigation re-serves the cached `main.dart.js`, so a rebuilt app looks unchanged. Two things bump the token: `ServerpodProcessController.requestPreviewReload()` and a successful Hot Restart (which goes through it). A Hot *Reload* never does — it would throw away the state it kept. The first load needs no reload: the runner publishes the URL before the app's `main()` has run, and loading it is what connects DWDS. Re-apply the theme shim afterwards: it is injected at load start with the brightness captured when the webview was created.
 - **A hard reload has to take three separate caches, and missing any one of them shows the previous build.** `reload()` runs `previewCachePurgeScript` (`preview/preview_cache_purge.dart`) first, because a **service worker and its Cache Storage entries are page state**: they outlive the navigation entirely and then answer the *new* document's requests out of the build that registered them, which no amount of cache-bypassing on our side can reach. Flutter web in debug registers no service worker, but the previewed app is the user's and may. The purge is asynchronous and `executeJavaScript` cannot await it, so `_purgePageCaches` polls `window.__appStudioCachesPurged` — bounded at 1s, then reloads regardless, since not reloading is the worse failure. `reloadIgnoreCache()` then covers the other two: the fork's `WebviewHandler::reloadIgnoreCache` issues DevTools `Network.clearBrowserCache` before `CefBrowser::ReloadIgnoreCache()`, because the latter only bypasses the cache for the requests *this* navigation makes — the stored entries survive it, so the next plain navigation (DWDS triggers one of its own) serves the old bytes again. CEF exposes no cache-clear API; the DevTools protocol is the route, and commands on one session run in order.
-- **Every project serves from the same origin, so switching projects clears the
-  profile.** The CEF request context (HTTP cache, localStorage, service
-  workers, cookies) is global and in-memory — it outlives the per-project
-  webview, and `http://localhost:9998` is the same origin for every project, so
-  project B's first load could be answered out of project A's state.
+- **Switching projects clears the profile.** The CEF request context (HTTP
+  cache, localStorage, service workers, cookies) is global and in-memory — it
+  outlives the per-project webview. Each run is served on whatever free port
+  Flutter picked, so two projects usually get different origins, but ports are
+  reused and nothing promises it; project B's first load could be answered out
+  of project A's state.
   `_ensureWebView` tracks which project the profile last served (module-level
   in `preview_pane.dart` — the pane's State unmounts when a project closes, the
   profile does not) and on a switch calls the fork's
@@ -910,7 +978,7 @@ install. Sparkle would also catch it, but later and less clearly.
   localStorage survives a Full Restart within one session. Keeping the profile
   in-memory (the `cache_path` note below) is unchanged — this is about state
   crossing projects inside one app run, not across launches.
-- **The runner is not racing us.** `serverpod`'s `hot_restart` MCP tool is `WatchSession.forceRestart`, which awaits the full compile, the server reboot, `_restartAllFlutterApps()` (a VM-service hot restart of the running `flutter run`) and `_notifyBrowserRefresh()` before it answers — so by the time `McpController` bumps the token, the web server is already serving the new output. If the preview still shows old code, it is a cache and not timing.
+- **The runner is not racing us.** The runner's `hotRestart` awaits the full compile, the server reboot, the Flutter apps' hot restart and its own browser refresh before it answers — so by the time `ServerpodProcessController` bumps the token, the web server is already serving the new output. If the preview still shows old code, it is a cache and not timing.
 - The header's reload button is **gone on purpose.** Hot Restart now force-reloads the preview itself, so the button's only remaining job was papering over a reload that had not happened — and the honest fix for that is the token, not a second control that does the same thing by hand.
 - **Backdrop:** CEF composites with alpha, so an opaque `ColoredBox` (`previewBackdropColor`) sits under the surface, following the *previewed* app's brightness, not the shell's.
 - **CEF sizing:** `PreviewSurfaceSync` + `burstSyncPreviewSurface` keep the webview sized on panel/mode changes. Defer layout reads to post-frame callbacks; avoid `MediaQuery` in `initState`.
@@ -962,7 +1030,7 @@ install. Sparkle would also catch it, but later and less clearly.
   when the browser going away is the focused one. It is also allocated once and
   never destroyed, so no exit-time release exists to get this wrong again.
 - The fork's event getters (`onToolTip`, `onCursorChanged`, `onFocusedNodeChangeMessage`, …) carry **explicit types**; upstream leaves them inferred, which makes them `dynamic` and silences the analyzer at every call site. Annotating them surfaced a real one: `onFocusedNodeChangeMessage` was invoked unguarded while every sibling case used `?.call`, so a focus change arriving before a WebView registered its callback would throw. Keep the annotations through any rebase — they are what makes that class of bug visible.
-- **Registration codes:** `serverpod start` logs `Registration code for <email>: <code>` instead of mailing it. `ServerpodProcessController` reassembles console lines across PTY chunks (`_scanLines`) and exposes `registrationCode`; `RegistrationCodeToast` floats it over the preview until dismissed or superseded.
+- **Registration codes:** the server logs `Registration code for <email>: <code>` instead of mailing it. `ServerpodProcessController` reads it from each structured log event's message (no line reassembly — an entry is whole) and exposes `registrationCode`; `RegistrationCodeToast` floats it over the preview until dismissed or superseded.
 - **Keyboard into CEF (macOS):** a local `NSEvent` monitor (`CefWrapper.processKeyboardEvent`) routes keys. It only forwards to `current_focused_browser_`, which is set from `setClientFocus` — never let it consume an event it can't deliver, or the webview looks dead.
 - **Clipboard:** off-screen browsers are not in the responder chain, so Chromium never turns ⌘X/C/V/A/Z into editing commands. They are translated to `CefFrame::Cut/Copy/Paste/…` (`WebviewHandler::sendEditCommand`). Every other ⌘ chord is left uncaptured so the app's menu bar wins.
 - **IME:** while a web input is focused, text keys go to the OS input method and come back as `imeCommitText`/`imeSetComposition`; only navigation/control keys are sent raw. Don't reattach the text input client while it is already active — that kills a live composition.
@@ -1235,10 +1303,10 @@ make widgetbook    # every screen and dialog, in every state, light and dark
   test also builds the studio window at exactly the minimum
   (`kMinAppWindowSize`), which is the overflow a real user could hit.
 - **`StudioWindowMock` is an open project assembled from the real parts** —
-  `StudioToolbar`, `TerminalPaneHeader`, `PreviewHeaderBar`,
-  `PreviewStatusOverlay`, `RegistrationCodeToast`. Two parts are stand-ins
-  because they are native: the server log is an xterm with sample output, and
-  the preview is a placeholder where CEF would draw the app. As a use case of
+  `StudioToolbar`, `LeftPaneHeader`, `ServerLogView`, `PreviewHeaderBar`,
+  `PreviewStatusOverlay`, `RegistrationCodeToast`. The log is the real view fed
+  a sample `RunnerLog` (`widgetbook/fakes/runner.dart` — the tests use the same
+  one); the preview is a placeholder where CEF would draw the app. As a use case of
   its own it is live — hover shows tooltips, the toolbar's dialogs open inside
   the canvas; as a dialog's backdrop it ignores the pointer.
 - **The widgets take narrow interfaces so they can be faked**, the pattern
@@ -1259,17 +1327,17 @@ make widgetbook    # every screen and dialog, in every state, light and dark
   next time someone opens Widgetbook. Add new screens to the catalog; the test
   picks them up.
 - **Not covered:** the agent pane (switched off, and it takes a concrete
-  `AgentController`), the live terminal and CEF itself. Their surroundings are.
+  `AgentController`), a live runner and CEF itself. Their surroundings are.
 
 ## Architecture notes
 
-- Long-lived controllers created in `main.dart`: `ThemeController`, `ProjectSession`, `StudioTerminal`, `ServerpodProcessController`, `AgentController`, `McpController`.
-- **`teardownSession` takes every controller that owns a child process, and the parameters are required on purpose.** It is the one function both the quit path and Sparkle's `prepareForRelaunch` call, so anything optional there is a stray process waiting to happen — a bridge still shutting down when Sparkle swaps the bundle.
-- `ServerpodProcessController` owns process lifecycle and signals when preview is ready to load.
+- Long-lived controllers created in `main.dart`: `ThemeController`, `ProjectSession`, `ServerpodProcessController` (which owns the `RunnerLog`), `AgentController`.
+- **`teardownSession` takes every controller that owns a child process, and the parameters are required on purpose.** It is the one function both the quit path and Sparkle's `prepareForRelaunch` call, so anything optional there is a stray process waiting to happen — a runner of ours left up when Sparkle swaps the bundle.
+- `ServerpodProcessController` owns the runner's lifecycle and the attach, and signals when the preview is ready to load.
 - The menu bar lives above `ShadApp`, so menu-triggered dialogs use the `navigatorKey` context from `main.dart`.
 - **Swapping `home` does not clear what is pushed over it — call `_clearPushedRoutes()`.** `home` is the *first* route, so a screen swap happens underneath any open route and is simply invisible: uninstalling with the Create Project screen up left the user filling in a form for an app that had just deleted itself. The menu bar stays live behind every dialog and every full-screen route, so this is reachable from all three transitions that replace the screen, and all three call it — uninstall, the toolchain flip that swaps setup for the shell, and a project opening (⌘O and Open Recent work while Create Project is up, and the project would otherwise load behind it). `Navigator.pop` ignores `PopScope`, which is what lets this clear a screen the *user* may not dismiss; `test/new_project_dialog_test.dart` pins that.
 - **The toolchain caller defers to a post-frame callback and the other two do not.** `ToolchainSetupDialog` closes itself on the same `ToolchainController` notification and is a later listener, so popping synchronously there would land first and leave its own `Navigator.pop` to hit `home`, emptying the navigator.
-- **A key Flutter reports as handled never reaches the menu bar**, so a focused widget that swallows keys takes every menu shortcut with it. The server log (`ServerLogView` in `ui/terminal_pane.dart`) autofocuses and did exactly that: xterm's `hardwareKeyboardOnly` listener types any key it did not otherwise handle into the terminal and calls it handled, so ⌘W arrived at the server as a `w`. The log is output only now — `readOnly` on the view, `inputHandler: null` on `StudioTerminal`'s `Terminal` — and answers ⌘C and ⌘A alone. ⌘V is refused explicitly: unlisted, it bubbles to `ShadApp`'s default text-editing shortcuts and xterm's paste action writes the clipboard to the PTY. `test/server_log_view_test.dart` pins all of it.
+- **A key Flutter reports as handled never reaches the menu bar**, so a focused widget that swallows keys takes every menu shortcut with it. The old xterm server log did exactly that — ⌘W arrived at the server as a `w`. The log is a `SelectionArea` over a list now (`ui/server_log/server_log_view.dart`), which answers ⌘C and ⌘A and lets everything else through; the search field is an ordinary text field. `test/server_log_view_test.dart` pins ⌘W and plain typing passing through, and copy working.
 - **`MacAppMenu.install()` calls `MacMenuBar.reset()` first, and must keep doing so.** A hot restart replaces the Dart isolate but not the engine, its plugins or the native `NSMenu`, so without it every menu is added again on each restart — and `_recentItemIds` comes back empty, so Open Recent duplicates too. `reset()` removes exactly the items this plugin added: those are the ones carrying a String `representedObject`, which is also how the plugin finds items by id, so stock MainMenu.xib entries cannot be stripped.
 - **Never return `menuItem.isEnabled` from `validateMenuItem`** for an item the plugin overrode. Under automatic enabling AppKit *writes* `isEnabled` from the previous validation pass, so reading it back is a latch, not a query. MainMenu.xib ships `Preferences…` with no action at all, so AppKit disabled it before the override was installed and it could never re-enable — the Settings item was permanently greyed out. Overridden standard items are tracked in `overriddenItems` and validate to `true`; the Dart handler decides what happens when they fire.
 
@@ -1435,7 +1503,7 @@ that could not work — there is no Flutter SDK to build with yet.
 - **Picking one is mandatory, and Create is what says so.** `_canCreate` waits on the editor as well as the name. This replaced a set of checkboxes that could all be left clear plus a "No external editor selected" prompt (Continue / Pick Editor) raised *after* the user had committed — a control that cannot express the empty answer says the same thing up front and needs no prompt. `_hasExternalEditor` and `_confirmNoExternalEditor` are gone with it.
 - **`builtIn` still exists and nothing sets it any more.** It meant "configured whether or not it was asked for", and OpenCode was the only one, because App Studio ran it as its own agent. With `kOpenCodeAgentEnabled` off there is no Agent tab, so `IdeIntegration.opencode` takes `builtIn: kOpenCodeAgentEnabled` and a new project gets exactly what was picked. `configuredIdes()` is consequently an identity function today; it is kept because the flag can come back. Do not mark OpenCode's option specially — a checked-and-disabled box was tried and deliberately reverted.
 - Names must match `^[a-z][a-z0-9_]*$` (they become Dart package names); the input folds case and drops separators as you type.
-- After the CLI succeeds, `patchFlutterAppForPreview` adds `device: web-server` and `web-port: 9998` to the `flutter_apps` entry in `<name>_server/pubspec.yaml` — without it `serverpod start` opens a browser instead of feeding the preview pane. The project is then opened, which auto-starts it.
+- After the CLI succeeds, `patchFlutterAppForPreview` sets `device: web-server` on the `flutter_apps` entry in `<name>_server/pubspec.yaml` — without it the runner launches the app on `web-server-launch-browser`, which also opens the system browser. No port: the runner publishes the URL. The project is then opened, which auto-starts it.
 - Last used location is remembered in `ProjectSession` (`new_project_directory` pref).
 - **`IdeIntegration` lives in `process/ide_integration.dart`, not in the creator**, purely so `ProjectSettings` can use it without dragging `dart:io` in. `project_creator.dart` re-exports it, so every existing import still reads naturally.
 - **`configuredIdes()` is the one place "which editors got configured" is computed**, shared by the `--ide` flags and the settings write below. Two lists of the same thing is how the record drifts from the reality.
@@ -1592,9 +1660,9 @@ switch is the Theme addon in the right-hand panel.
   hot reload all work over DTD, but driver commands do not — a plain
   `make start` has no driver extension. Ask before stopping their run.
 - **Prefer Widgetbook to the real app.** The real app acts on the machine:
-  `main()` reclaims processes left in the dev-session pid files (it will kill a
-  `serverpod start` another App Studio session owns), opening a project runs
-  `serverpod start`, the setup screen installs the Command Line Tools and
+  `main()` reclaims what the dev-session files name (it will stop a runner
+  another App Studio session started), opening a project starts a Serverpod
+  runner or attaches to the user's own, the setup screen installs the Command Line Tools and
   Flutter and edits `~/.zprofile`, and Uninstall deletes tools. Do not press
   Install, Uninstall or Create Project in the real app without asking.
 - **Quit is `exit(0)` everywhere**, Widgetbook included — pressing it ends the

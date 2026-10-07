@@ -4,7 +4,6 @@ library;
 
 import 'dart:async';
 
-import 'package:appstudio/mcp/hot_restart_view.dart';
 import 'package:appstudio/process/full_restart_view.dart';
 import 'package:appstudio/process/new_project_view.dart';
 import 'package:appstudio/process/project_creator.dart';
@@ -146,22 +145,6 @@ class FakeFullRestart extends ChangeNotifier implements FullRestartView {
     isStopped = false;
     notifyListeners();
   }
-}
-
-/// With `kServerpodMcpEnabled` off the button never reads this; it is here so
-/// the toolbar can be built.
-class FakeHotRestart extends ChangeNotifier implements HotRestartView {
-  @override
-  McpConnection get mcpConnection => McpConnection.idle;
-
-  @override
-  bool get isHotRestarting => false;
-
-  @override
-  String? get hotRestartError => null;
-
-  @override
-  Future<void> hotRestart() async {}
 }
 
 class FakeExternalEditors extends ChangeNotifier implements ExternalEditorsView {

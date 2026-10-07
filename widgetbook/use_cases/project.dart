@@ -2,7 +2,11 @@ import 'package:appstudio/preview/preview_device.dart';
 import 'package:appstudio/preview/preview_phase.dart';
 import 'package:appstudio/preview/registration_code_toast.dart';
 import 'package:appstudio/toolchain/tool_status.dart';
-import 'package:appstudio/ui/hot_restart_button.dart';
+import 'package:appstudio/runner/runner_actions_view.dart';
+import 'package:appstudio/ui/hot_reload_buttons.dart';
+import 'package:appstudio/ui/left_pane.dart';
+import 'package:appstudio/ui/server_log/migrations_menu.dart';
+import 'package:appstudio/ui/server_log/server_log_view.dart';
 import 'package:appstudio/ui/preview_header_bars.dart';
 import 'package:appstudio/ui/project_started_dialog.dart';
 import 'package:appstudio/ui/project_startup_dialog.dart';
@@ -11,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:widgetbook/widgetbook.dart';
 
 import '../fakes/project.dart';
+import '../fakes/runner.dart';
 import '../fakes/tools.dart';
 import '../host.dart';
 import '../studio_window.dart';
@@ -53,12 +58,31 @@ final projectFolder = WidgetbookFolder(
             builder: (_) => screen(StudioWindowMock(phase: phase)),
           ),
         WidgetbookUseCase(
-          name: 'Server failed to start',
+          name: 'Project failed to build',
           builder: (_) => screen(
             const StudioWindowMock(
               phase: PreviewPhase.failed,
-              errorMessage: 'The server exited with code 1. See the server '
-                  'log for details.',
+              errorMessage: 'The project failed to build, so the server is '
+                  'not running. The server log has the errors — it starts '
+                  'again as soon as the project builds.',
+            ),
+          ),
+        ),
+        WidgetbookUseCase(
+          name: 'App log tab',
+          builder: (_) => screen(
+            const StudioWindowMock(
+              logTab: LogTab(AppLogSource(sampleAppId)),
+            ),
+          ),
+        ),
+        WidgetbookUseCase(
+          name: 'Hot restarting',
+          builder: (_) => screen(
+            StudioWindowMock(
+              actions: FakeRunnerActions(
+                runningAction: RunnerAction.hotRestart,
+              ),
             ),
           ),
         ),
@@ -132,12 +156,101 @@ final projectFolder = WidgetbookFolder(
       ],
     ),
     WidgetbookComponent(
-      name: 'Hot restart is coming soon',
+      name: 'Server log',
+      useCases: [
+        for (final (name, log) in [
+          ('Running', sampleRunnerLog()),
+          ('With an error', sampleRunnerLog(failure: true)),
+          ('Launching the app', sampleRunnerLog(launching: true)),
+          ('Empty', sampleRunnerLog(empty: true)),
+        ])
+          WidgetbookUseCase(
+            name: name,
+            builder: (_) => ComponentCanvas(
+              width: 640,
+              height: 520,
+              child: ServerLogView(
+                log: log,
+                actions: FakeRunnerActions(),
+                source: const ServerLogSource(),
+                emptyMessage: 'Waiting for the server to start…',
+              ),
+            ),
+          ),
+        WidgetbookUseCase(
+          name: 'Migrations unavailable',
+          builder: (_) => ComponentCanvas(
+            width: 640,
+            height: 520,
+            child: ServerLogView(
+              log: sampleRunnerLog(launching: true),
+              actions: FakeRunnerActions(canMigrate: false),
+              source: const ServerLogSource(),
+            ),
+          ),
+        ),
+        WidgetbookUseCase(
+          name: 'Creating a migration',
+          builder: (_) => ComponentCanvas(
+            width: 640,
+            height: 520,
+            child: ServerLogView(
+              log: sampleRunnerLog(),
+              actions: FakeRunnerActions(
+                runningAction: RunnerAction.createMigration,
+              ),
+              source: const ServerLogSource(),
+            ),
+          ),
+        ),
+      ],
+    ),
+    WidgetbookComponent(
+      name: 'Create the migration anyway?',
       useCases: [
         WidgetbookUseCase(
           name: 'Default',
-          builder: (_) => _overStudio(const HotRestartComingSoonDialog()),
+          builder: (_) => _overStudio(
+            ForceMigrationDialog(
+              kind: 'migration',
+              message: refusedMigration.message,
+            ),
+          ),
         ),
+      ],
+    ),
+    WidgetbookComponent(
+      name: 'Hot reload and restart',
+      useCases: [
+        for (final (name, actions) in [
+          ('Ready', FakeRunnerActions()),
+          ('Server not running', FakeRunnerActions(canHotReload: false)),
+          (
+            'Hot restarting',
+            FakeRunnerActions(runningAction: RunnerAction.hotRestart),
+          ),
+          (
+            'Hot restart failed',
+            FakeRunnerActions(
+              failedAction: RunnerAction.hotRestart,
+              actionError: 'Compilation failed.',
+            ),
+          ),
+        ])
+          WidgetbookUseCase(
+            name: name,
+            builder: (_) => ComponentCanvas(
+              width: null,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  HotReloadButton(actions: actions),
+                  const SizedBox(width: 8),
+                  HotRestartButton(actions: actions),
+                ],
+              ),
+            ),
+          ),
       ],
     ),
     WidgetbookComponent(

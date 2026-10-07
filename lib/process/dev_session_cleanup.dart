@@ -3,8 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
-/// Preview web-server port (Serverpod `flutter_apps` default).
-const kPreviewPort = 9998;
+import '../runner/runner_ownership.dart';
 
 /// A long-lived child process whose pid is written to disk so the *next* launch
 /// can reclaim it.
@@ -13,15 +12,13 @@ const kPreviewPort = 9998;
 /// of care in `dispose()` fixes: `ChangeNotifier.dispose()` is synchronous and
 /// cannot await a process exit, and a hard quit can kill the isolate before any
 /// teardown runs at all. Every child that outlives a frame registers here.
+///
+/// The Serverpod runner is not one of these. It is detached by design, so a pid
+/// file and a group kill are the wrong tools for it; it gets an ownership
+/// record instead ([OwnedRunner]), and is stopped through its socket.
 enum DevProcessKind {
-  /// The `serverpod start` PTY.
-  server('server'),
-
   /// `opencode serve` — the agent.
-  agent('agent'),
-
-  /// `serverpod mcp-server` — the Hot Restart bridge.
-  mcpBridge('mcp');
+  agent('agent');
 
   const DevProcessKind(this.id);
 
@@ -40,17 +37,15 @@ enum DevProcessKind {
 /// Hot restart re-runs [main] without awaiting widget [dispose], so children can
 /// outlive the old isolate — and once they do they are reparented to launchd,
 /// where nothing else will ever clean them up.
+///
+/// The runner a previous run started is stopped too — gracefully, over its
+/// socket, so its database and Flutter apps go down with it.
 Future<void> cleanupOrphanedDevSession() async {
   await reclaimRegisteredPids();
-  await releaseTcpPort(kPreviewPort);
+  await reclaimOwnedRunner();
 }
 
 /// Kills every child registered by a previous run.
-///
-/// Split out from [cleanupOrphanedDevSession] deliberately: the other half
-/// reclaims port 9998 from whatever holds it, which is the right thing to do on
-/// launch and the wrong thing to do from a test on a machine where a real
-/// preview server may be serving.
 Future<void> reclaimRegisteredPids() async {
   for (final kind in DevProcessKind.values) {
     await _killRegisteredSessionPid(kind);
@@ -82,32 +77,6 @@ Future<void> _killRegisteredSessionPid(DevProcessKind kind) async {
   } catch (_) {}
 }
 
-Future<void> releaseTcpPort(int port) async {
-  if (!Platform.isMacOS && !Platform.isLinux) return;
-
-  final pids = await _pidsListeningOnPort(port);
-  if (pids.isEmpty) return;
-
-  for (final pid in pids) {
-    await _killProcessTree(pid);
-  }
-}
-
-Future<Set<int>> _pidsListeningOnPort(int port) async {
-  try {
-    final result = await Process.run('lsof', ['-ti', 'tcp:$port']);
-    if (result.exitCode != 0) return {};
-    return (result.stdout as String)
-        .trim()
-        .split('\n')
-        .map((line) => int.tryParse(line.trim()))
-        .whereType<int>()
-        .toSet();
-  } catch (_) {
-    return {};
-  }
-}
-
 Future<void> _killProcessTree(int pid) async {
   _signal(pid, ProcessSignal.sigterm);
 
@@ -129,8 +98,8 @@ Future<void> _killProcessTree(int pid) async {
 /// `Process.killPid` reports failure with `false` — it does not throw — so a
 /// `try`/`catch` around the group kill never fires and the single-process
 /// fallback never runs. That matters because only a child that called `setsid`
-/// leads its own group: the `serverpod start` PTY does, so `-pid` reaches its
-/// whole tree, but a plain `Process.start` child like `opencode serve` inherits
+/// leads its own group: a PTY child does, so `-pid` reaches its whole
+/// tree, but a plain `Process.start` child like `opencode serve` inherits
 /// our group and leads nothing, so `-pid` matches nothing at all. Silently. That
 /// is exactly how orphaned agents survived every reclaim on launch.
 void _signal(int pid, ProcessSignal signal) {

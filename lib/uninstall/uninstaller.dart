@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../agent/agent_controller.dart';
-import '../mcp/mcp_controller.dart';
 import '../process/serverpod_process.dart';
 import '../toolchain/tool_status.dart';
 import '../toolchain/toolchain_controller.dart';
@@ -42,13 +41,11 @@ class Uninstaller {
     required this.toolchains,
     required this.process,
     required this.agent,
-    required this.mcp,
   });
 
   final ToolchainController toolchains;
   final ServerpodProcessController process;
   final AgentController agent;
-  final McpController mcp;
 
   Future<UninstallResult> run(UninstallChoice choice) async {
     final failures = <String>[];
@@ -65,7 +62,7 @@ class Uninstaller {
     // Stop the world first. Deleting a tool out from under a running server
     // would leave processes pointing at missing binaries.
     await step('shutting down the session', () async {
-      await teardownSession(process: process, agent: agent, mcp: mcp);
+      await teardownSession(process: process, agent: agent);
     });
 
     // Both need Dart, so both run before Flutter can go.

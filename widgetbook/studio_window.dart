@@ -1,9 +1,8 @@
 /// An open project's window, assembled from the real toolbar, pane headers and
 /// preview overlay — the context most dialogs and all the chrome appear in.
 ///
-/// Two parts are stand-ins, because they are native: the server log is a plain
-/// xterm with sample output rather than a live PTY, and the preview is a
-/// placeholder where CEF would draw the app.
+/// The server log is the real log view, fed a sample runner log rather than a
+/// live runner. The preview is a placeholder where CEF would draw the app.
 library;
 
 import 'package:appstudio/preview/preview_device.dart';
@@ -17,13 +16,16 @@ import 'package:appstudio/session/external_editors_view.dart';
 import 'package:appstudio/theme/app_theme.dart';
 import 'package:appstudio/ui/preview_header_bars.dart';
 import 'package:appstudio/ui/studio_toolbar.dart';
-import 'package:appstudio/ui/terminal_pane.dart';
+import 'package:appstudio/runner/runner_actions_view.dart';
+import 'package:appstudio/runner/runner_log.dart';
+import 'package:appstudio/ui/left_pane.dart';
+import 'package:appstudio/ui/server_log/server_log_view.dart';
 import 'package:appstudio/ui/toolchain/tools_view.dart';
 import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
-import 'package:xterm/xterm.dart';
 
 import 'fakes/project.dart';
+import 'fakes/runner.dart';
 import 'fakes/tools.dart';
 
 class StudioWindowMock extends StatelessWidget {
@@ -36,6 +38,9 @@ class StudioWindowMock extends StatelessWidget {
     this.process,
     this.registrationCode,
     this.viewMode = PreviewViewMode.phonePortrait,
+    this.log,
+    this.actions,
+    this.logTab = LeftPaneTab.server,
   });
 
   final PreviewPhase phase;
@@ -46,9 +51,24 @@ class StudioWindowMock extends StatelessWidget {
   final String? registrationCode;
   final PreviewViewMode viewMode;
 
+  /// Defaults to a sample log matching [phase].
+  final RunnerLog? log;
+  final RunnerActionsView? actions;
+  final LeftPaneTab logTab;
+
   @override
   Widget build(BuildContext context) {
     final scheme = ShadTheme.of(context).colorScheme;
+    final log = this.log ??
+        sampleRunnerLog(
+          failure: phase.isError,
+          launching: phase != PreviewPhase.ready && !phase.isError,
+        );
+    final actions = this.actions ??
+        FakeRunnerActions(
+          canHotReload: phase == PreviewPhase.ready,
+          canMigrate: phase == PreviewPhase.ready || phase.isError,
+        );
     return Column(
       children: [
         StudioToolbar(
@@ -56,7 +76,7 @@ class StudioWindowMock extends StatelessWidget {
           projectPath: homePath('Projects/bookshelf'),
           tools: tools ?? FakeToolsView(inventory: completeInventory),
           process: process ?? FakeFullRestart(),
-          mcp: FakeHotRestart(),
+          actions: actions,
           editors: editors ??
               FakeExternalEditors(
                 editors: const [cursorEditor, claudeEditor],
@@ -70,15 +90,25 @@ class StudioWindowMock extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               SizedBox(
-                width: 460,
+                width: 560,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    TerminalPaneHeader(
-                      tab: TerminalPaneTab.serverLogs,
+                    LeftPaneHeader(
+                      tabs: leftPaneTabs(log),
+                      selected: logTab,
                       onChanged: (_) {},
                     ),
-                    Expanded(child: _SampleLog(failed: phase.isError)),
+                    Expanded(
+                      child: ServerLogView(
+                        log: log,
+                        actions: actions,
+                        source: switch (logTab) {
+                          LogTab(:final source) => source,
+                          AgentTab() => const ServerLogSource(),
+                        },
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -162,50 +192,5 @@ class _AppPlaceholder extends StatelessWidget {
         style: theme.textTheme.muted.copyWith(color: Colors.black54),
       ),
     );
-  }
-}
-
-/// A server log with what `serverpod start` prints on a good day — or, with
-/// [failed], a compile error.
-class _SampleLog extends StatefulWidget {
-  const _SampleLog({required this.failed});
-
-  final bool failed;
-
-  @override
-  State<_SampleLog> createState() => _SampleLogState();
-}
-
-class _SampleLogState extends State<_SampleLog> {
-  final _terminal = Terminal(maxLines: 1000);
-
-  static const _green = '\x1B[32m';
-  static const _red = '\x1B[31m';
-  static const _dim = '\x1B[2m';
-  static const _reset = '\x1B[0m';
-
-  @override
-  void initState() {
-    super.initState();
-    final lines = [
-      '${_dim}Serverpod 4.0.3$_reset',
-      '$_green✓$_reset Generated code in 1.2s',
-      if (widget.failed) ...[
-        '$_red✗$_reset Compiling server',
-        'lib/src/endpoints/book_endpoint.dart:14:5: Error: Undefined name '
-            "'shelf'.",
-      ] else ...[
-        '$_green✓$_reset Compiled server in 8.4s',
-        'Server listening on http://localhost:8080',
-        'Flutter web server on http://localhost:9998',
-        '$_green✓$_reset Browser refresh triggered.',
-      ],
-    ];
-    _terminal.write(lines.join('\r\n'));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ServerLogView(terminal: _terminal);
   }
 }

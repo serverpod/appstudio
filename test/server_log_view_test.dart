@@ -1,34 +1,25 @@
-import 'package:appstudio/terminal/studio_terminal.dart';
+import 'package:appstudio/runner/runner_log.dart';
+import 'package:appstudio/runner/runner_protocol.dart';
 import 'package:appstudio/theme/app_theme.dart';
-import 'package:appstudio/ui/terminal_pane.dart';
+import 'package:appstudio/ui/server_log/server_log_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shad/shad.dart';
 
+import '../widgetbook/fakes/runner.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  late StudioTerminal studio;
-  late List<String> writtenToServer;
   late List<String> copied;
 
   setUp(() {
-    // The real terminal, not a bare one: half of "output only" is how
-    // StudioTerminal configures it.
-    studio = StudioTerminal();
-    writtenToServer = [];
-    studio.terminal.onOutput = writtenToServer.add;
-    studio.terminal.write('Server listening on http://localhost:8080');
-
     copied = [];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform, (call) async {
       if (call.method == 'Clipboard.setData') {
         copied.add((call.arguments as Map)['text'] as String);
-      }
-      if (call.method == 'Clipboard.getData') {
-        return <String, dynamic>{'text': 'pasted'};
       }
       return null;
     });
@@ -37,7 +28,6 @@ void main() {
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform, null);
-    studio.dispose();
   });
 
   // Run as macOS, the only platform the app has. Left on the test default
@@ -45,110 +35,189 @@ void main() {
   // would answer for a key the log is supposed to let through.
   final macOS = TargetPlatformVariant.only(TargetPlatform.macOS);
 
-  Future<void> pumpFocusedLog(WidgetTester tester) async {
+  Future<RunnerLog> pumpLog(
+    WidgetTester tester, {
+    RunnerLog? log,
+    LogSource source = const ServerLogSource(),
+  }) async {
+    final runnerLog = log ?? sampleRunnerLog(failure: true);
+    tester.view.physicalSize = const Size(1200, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(
       ShadApp(
         theme: buildLightTheme(),
         home: Scaffold(
-          body: ServerLogView(terminal: studio.terminal, autofocus: true),
+          body: ServerLogView(
+            log: runnerLog,
+            actions: FakeRunnerActions(),
+            source: source,
+          ),
         ),
       ),
     );
     await tester.pump();
-
-    // Every assertion below is about keys sent to a log that holds focus;
-    // unfocused, nothing would be handled and they would all pass vacuously.
-    final focused = FocusManager.instance.primaryFocus?.context;
-    expect(
-      focused?.findAncestorWidgetOfExactType<ServerLogView>(),
-      isNotNull,
-      reason: 'the server log should hold focus',
-    );
+    return runnerLog;
   }
 
-  /// Presses [key] with ⌘ held, as macOS delivers it: the event carries the
-  /// key's character. Answers whether Flutter reported it handled — which is
-  /// what decides whether the menu bar ever sees it.
-  Future<bool> pressWithCommand(
-    WidgetTester tester,
-    LogicalKeyboardKey key,
-    String character,
-  ) async {
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft,
-        platform: 'macos');
-    final handled = await tester.sendKeyDownEvent(
-      key,
-      platform: 'macos',
-      character: character,
-    );
-    await tester.sendKeyUpEvent(key, platform: 'macos');
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft,
-        platform: 'macos');
-    await tester.pump();
-    return handled;
-  }
+  Finder text(String fragment) => find.textContaining(fragment, findRichText: true);
 
-  testWidgets('a menu shortcut passes through the focused log', (tester) async {
-    await pumpFocusedLog(tester);
+  testWidgets('shows records, operations and their durations', (tester) async {
+    await pumpLog(tester);
 
-    final handled =
-        await pressWithCommand(tester, LogicalKeyboardKey.keyW, 'w');
+    expect(text('Compiling server'), findsOneWidget);
+    expect(text('4.9s'), findsWidgets);
+    expect(text('Webserver listening'), findsOneWidget);
+    // App Studio's own records interleave with the runner's.
+    expect(text('serverpod runner start'), findsOneWidget);
+  });
 
-    expect(handled, isFalse, reason: '⌘W has to reach the menu bar');
-    expect(writtenToServer, isEmpty);
-  }, variant: macOS);
+  testWidgets('the level filter keeps errors and drops the rest',
+      (tester) async {
+    await pumpLog(tester);
+    expect(text('Webserver listening'), findsOneWidget);
 
-  testWidgets('typing reaches neither the log nor the server', (tester) async {
-    await pumpFocusedLog(tester);
+    await tester.tap(find.text('All levels'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Errors only').last);
+    await tester.pumpAndSettle();
 
-    final typed = await tester.sendKeyDownEvent(
-      LogicalKeyboardKey.keyW,
-      platform: 'macos',
-      character: 'w',
-    );
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyW, platform: 'macos');
-    final entered =
-        await tester.sendKeyEvent(LogicalKeyboardKey.enter, platform: 'macos');
-    final escaped =
-        await tester.sendKeyEvent(LogicalKeyboardKey.escape, platform: 'macos');
+    expect(text('Webserver listening'), findsNothing);
+    expect(text('Slow query'), findsNothing);
+    expect(text('Failed to call endpoint'), findsOneWidget);
+  });
 
-    // Ctrl-C is the one that would do damage: it is SIGINT to the server.
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft,
-        platform: 'macos');
-    final interrupted =
-        await tester.sendKeyEvent(LogicalKeyboardKey.keyC, platform: 'macos');
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft,
-        platform: 'macos');
+  testWidgets('search narrows the log to matching lines', (tester) async {
+    await pumpLog(tester);
 
-    expect([typed, entered, escaped, interrupted], everyElement(isFalse));
-    expect(writtenToServer, isEmpty);
-  }, variant: macOS);
-
-  testWidgets('select all and copy still work', (tester) async {
-    await pumpFocusedLog(tester);
-
-    expect(
-      await pressWithCommand(tester, LogicalKeyboardKey.keyA, 'a'),
-      isTrue,
-    );
-    expect(
-      await pressWithCommand(tester, LogicalKeyboardKey.keyC, 'c'),
-      isTrue,
-    );
-
-    expect(copied, hasLength(1));
-    expect(copied.single, contains('Server listening on'));
-    expect(writtenToServer, isEmpty);
-  }, variant: macOS);
-
-  testWidgets('paste does not reach the server', (tester) async {
-    await pumpFocusedLog(tester);
-
-    final handled =
-        await pressWithCommand(tester, LogicalKeyboardKey.keyV, 'v');
+    await tester.enterText(find.byType(EditableText), 'webserver');
     await tester.pump();
 
-    expect(handled, isFalse);
-    expect(writtenToServer, isEmpty);
-  }, variant: macOS);
+    expect(text('Webserver listening'), findsOneWidget);
+    expect(text('Compiling server'), findsNothing);
+
+    await tester.enterText(find.byType(EditableText), 'no such thing');
+    await tester.pump();
+    expect(text('Nothing matches'), findsOneWidget);
+  });
+
+  testWidgets('an error shows its stack trace behind a disclosure',
+      (tester) async {
+    await pumpLog(tester);
+    expect(text('GreetingEndpoint.hello'), findsNothing);
+
+    await tester.tap(find.byIcon(LucideIcons.chevronRight).first);
+    await tester.pump();
+
+    expect(text('Null check operator'), findsOneWidget);
+    expect(text('GreetingEndpoint.hello'), findsOneWidget);
+  });
+
+  testWidgets('an app source shows that app’s output', (tester) async {
+    await pumpLog(tester, source: const AppLogSource(sampleAppId));
+
+    expect(text('is being served at http://localhost:49301'), findsOneWidget);
+    expect(text('Compiling server'), findsNothing);
+    // An app's output has no levels to filter.
+    expect(find.text('All levels'), findsNothing);
+  });
+
+  testWidgets('operations in flight are pinned below the log', (tester) async {
+    await pumpLog(tester, log: sampleRunnerLog(launching: true));
+
+    expect(text('Launching Demo app'), findsOneWidget);
+    expect(find.byType(ShadSpinner), findsOneWidget);
+  });
+
+  testWidgets('new lines arrive while the view follows the bottom',
+      (tester) async {
+    final log = await pumpLog(tester);
+
+    log.applyEvent(
+      ServerLogEvent(
+        RunnerLogRecord(
+          time: DateTime.now(),
+          level: RunnerLogLevel.info,
+          message: 'A brand new line',
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(text('A brand new line'), findsOneWidget);
+  });
+
+  group('keyboard', () {
+    /// Presses [key] with ⌘ held, as macOS delivers it. Answers whether
+    /// Flutter reported it handled — which decides whether the menu bar ever
+    /// sees it.
+    Future<bool> pressWithCommand(
+      WidgetTester tester,
+      LogicalKeyboardKey key,
+      String character,
+    ) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft,
+          platform: 'macos');
+      final handled = await tester.sendKeyDownEvent(
+        key,
+        platform: 'macos',
+        character: character,
+      );
+      await tester.sendKeyUpEvent(key, platform: 'macos');
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft,
+          platform: 'macos');
+      await tester.pump();
+      return handled;
+    }
+
+    Future<void> focusLog(WidgetTester tester) async {
+      await tester.tap(text('Webserver listening'));
+      await tester.pump();
+      final focused = FocusManager.instance.primaryFocus?.context;
+      expect(
+        focused?.findAncestorWidgetOfExactType<SelectionArea>(),
+        isNotNull,
+        reason: 'the log should hold focus',
+      );
+    }
+
+    testWidgets('a menu shortcut passes through the focused log',
+        (tester) async {
+      await pumpLog(tester);
+      await focusLog(tester);
+
+      final handled =
+          await pressWithCommand(tester, LogicalKeyboardKey.keyW, 'w');
+
+      expect(handled, isFalse, reason: '⌘W belongs to the menu bar');
+    }, variant: macOS);
+
+    testWidgets('typing is not swallowed by the log', (tester) async {
+      await pumpLog(tester);
+      await focusLog(tester);
+
+      final handled = await tester.sendKeyEvent(
+        LogicalKeyboardKey.keyX,
+        platform: 'macos',
+      );
+
+      expect(handled, isFalse);
+    }, variant: macOS);
+
+    testWidgets('select all and copy work', (tester) async {
+      await pumpLog(tester);
+      await focusLog(tester);
+
+      expect(
+        await pressWithCommand(tester, LogicalKeyboardKey.keyA, 'a'),
+        isTrue,
+      );
+      expect(
+        await pressWithCommand(tester, LogicalKeyboardKey.keyC, 'c'),
+        isTrue,
+      );
+      expect(copied.single, contains('Webserver listening'));
+    }, variant: macOS);
+  });
 }

@@ -4,11 +4,11 @@ import 'package:flutter/foundation.dart';
 import 'package:webview_cef/webview_cef.dart';
 
 import '../agent/agent_controller.dart';
-import '../mcp/mcp_controller.dart';
 import '../process/serverpod_process.dart';
 
-/// Stops everything a live session owns: the Serverpod server, the CEF
-/// preview, the OpenCode agent and the Serverpod MCP bridge.
+/// Stops everything a live session owns: the Serverpod runner App Studio
+/// started (one it only attached to is detached from), the CEF preview and the
+/// OpenCode agent.
 ///
 /// Two callers, and they must not drift apart:
 ///
@@ -24,7 +24,6 @@ import '../process/serverpod_process.dart';
 Future<void> teardownSession({
   required ServerpodProcessController process,
   required AgentController agent,
-  required McpController mcp,
   Duration timeout = const Duration(seconds: 15),
 }) async {
   Future<void> guarded(String what, Future<void> Function() action) async {
@@ -54,15 +53,14 @@ Future<void> teardownSession({
   }
 
   await Future.wait([
+    // Awaited, and it matters more than it used to: the runner is detached, so
+    // nothing takes it down with us. One left running would hold the project
+    // until the user found it with `serverpod runner stop`.
     guarded('server stop', process.stop),
     // `stop`, not `dispose`. `dispose()` is synchronous and could only fire the
     // teardown and return, so every quit left an orphaned `opencode serve`
     // reparented to launchd — 17 of them on the machine where this was found.
     guarded('agent stop', agent.stop),
-    // Awaited rather than left to the controller's own listener: the bridge
-    // is a child process, and Sparkle relaunching over one that is still
-    // shutting down is exactly the stray process this exists to prevent.
-    guarded('mcp stop', mcp.stop),
   ]).timeout(
     timeout,
     onTimeout: () {

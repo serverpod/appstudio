@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 
-import '../mcp/hot_restart_view.dart';
 import '../process/full_restart_view.dart';
+import '../runner/runner_actions_view.dart';
 import '../session/external_editors_view.dart';
 import '../theme/app_theme.dart';
 import 'full_restart_button.dart';
-import 'hot_restart_button.dart';
+import 'hot_reload_buttons.dart';
 import 'open_in_editor_buttons.dart';
 import 'publish_to_cloud_button.dart';
 import 'toolchain/tools_view.dart';
@@ -23,7 +23,7 @@ class StudioToolbar extends StatelessWidget {
     required this.projectPath,
     required this.tools,
     required this.process,
-    required this.mcp,
+    required this.actions,
     required this.editors,
     required this.onToggleLeftPanel,
     required this.onManageTools,
@@ -34,7 +34,7 @@ class StudioToolbar extends StatelessWidget {
   final String? projectPath;
   final ToolsView tools;
   final FullRestartView process;
-  final HotRestartView mcp;
+  final RunnerActionsView actions;
   final ExternalEditorsView editors;
   final VoidCallback? onToggleLeftPanel;
   final VoidCallback onManageTools;
@@ -90,7 +90,9 @@ class StudioToolbar extends StatelessWidget {
           OpenInEditorButtons(editors: editors),
           const PublishToCloudButton(),
           const SizedBox(width: 8),
-          HotRestartButton(mcp: mcp),
+          HotReloadButton(actions: actions),
+          const SizedBox(width: 8),
+          HotRestartButton(actions: actions),
           const SizedBox(width: 8),
           FullRestartButton(process: process),
         ],

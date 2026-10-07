@@ -7,10 +7,10 @@ import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 
 import '../analytics/app_analytics.dart';
+import '../runner/runner_protocol.dart' show kHeadlessWebDevice;
 import '../session/project_settings.dart';
 import '../toolchain/tool_status.dart';
 import '../toolchain/toolchain_controller.dart';
-import 'dev_session_cleanup.dart';
 import 'ide_integration.dart';
 
 // `IdeIntegration` moved out to keep it clear of `dart:io`, which
@@ -256,8 +256,10 @@ class ProjectCreator {
     return code;
   }
 
-  /// `serverpod start` must launch the companion Flutter app as a web server
-  /// on [kPreviewPort] — that is the URL the preview pane loads.
+  /// The runner must launch the companion Flutter app headless, as a plain
+  /// web server: its default device also opens the system browser. The port is
+  /// left to Flutter — the runner publishes the URL, and the preview loads
+  /// whatever it says.
   Future<void> _configureFlutterAppForPreview({
     required String projectPath,
     required String name,
@@ -266,8 +268,7 @@ class ProjectCreator {
     if (!await pubspec.exists()) {
       throw ProjectCreationException(
         'Project created, but ${name}_server/pubspec.yaml was not found. '
-        'The preview may not load until the Flutter app runs on port '
-        '$kPreviewPort.',
+        'The app may open in a browser as well as in the preview.',
         createdPath: projectPath,
       );
     }
@@ -277,7 +278,7 @@ class ProjectCreator {
       throw ProjectCreationException(
         'Project created, but the flutter_apps section of '
         '${name}_server/pubspec.yaml could not be updated. Set '
-        '“device: web-server” and “web-port: $kPreviewPort” manually.',
+        '“device: $kHeadlessWebDevice” on the app manually.',
         createdPath: projectPath,
       );
     }
@@ -322,11 +323,15 @@ String? _lastStatusLine(String chunk) {
   return null;
 }
 
-/// Adds `device: web-server` and `web-port: <port>` to the first entry under
-/// `flutter_apps:` in a Serverpod server pubspec.
+/// Sets `device: web-server` on the first entry under `flutter_apps:` in a
+/// Serverpod server pubspec.
+///
+/// Nothing else is touched. A `web-port` that is already there stays — the
+/// runner publishes whichever port the app ends up on, so App Studio no longer
+/// needs one, but a user who pinned one meant it.
 ///
 /// Returns the updated document, or null when the block is not found.
-String? patchFlutterAppForPreview(String pubspec, {int port = kPreviewPort}) {
+String? patchFlutterAppForPreview(String pubspec) {
   final lines = pubspec.split('\n');
 
   final headerIndex = lines.indexWhere(
@@ -350,7 +355,6 @@ String? patchFlutterAppForPreview(String pubspec, {int port = kPreviewPort}) {
   var lastPropertyIndex = entryIndex;
   var propertyIndent = entryIndent + 2;
   var deviceIndex = -1;
-  var portIndex = -1;
   for (var i = entryIndex + 1; i < lines.length; i++) {
     if (_isSkippable(lines[i])) continue;
     final indent = _indentOf(lines[i]);
@@ -359,21 +363,13 @@ String? patchFlutterAppForPreview(String pubspec, {int port = kPreviewPort}) {
     lastPropertyIndex = i;
     final key = lines[i].trim().split(':').first.trim();
     if (key == 'device') deviceIndex = i;
-    if (key == 'web-port') portIndex = i;
   }
 
-  final pad = ' ' * propertyIndent;
-  final deviceLine = '${pad}device: web-server';
-  final portLine = '${pad}web-port: $port';
-  if (deviceIndex >= 0) lines[deviceIndex] = deviceLine;
-  if (portIndex >= 0) lines[portIndex] = portLine;
-
-  final additions = [
-    if (deviceIndex < 0) deviceLine,
-    if (portIndex < 0) portLine,
-  ];
-  if (additions.isNotEmpty) {
-    lines.insertAll(lastPropertyIndex + 1, additions);
+  final deviceLine = '${' ' * propertyIndent}device: $kHeadlessWebDevice';
+  if (deviceIndex >= 0) {
+    lines[deviceIndex] = deviceLine;
+  } else {
+    lines.insert(lastPropertyIndex + 1, deviceLine);
   }
   return lines.join('\n');
 }

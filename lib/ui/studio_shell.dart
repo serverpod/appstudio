@@ -6,13 +6,11 @@ import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 
 import '../agent/agent_controller.dart';
-import '../mcp/mcp_controller.dart';
 import '../preview/preview_mode_controller.dart';
 import '../preview/preview_phase.dart';
 import '../process/serverpod_process.dart';
 import '../session/external_editors_view.dart';
 import '../session/project_session.dart';
-import '../terminal/studio_terminal.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
 import '../toolchain/toolchain_controller.dart';
@@ -21,17 +19,16 @@ import 'preview_pane.dart';
 import 'settings/settings_dialog.dart';
 import 'start_page.dart';
 import 'studio_toolbar.dart';
-import 'terminal_pane.dart';
+import 'left_pane.dart';
+import 'server_log/server_log_view.dart';
 
 class StudioShell extends StatefulWidget {
   const StudioShell({
     super.key,
     required this.toolchains,
     required this.session,
-    required this.terminal,
     required this.process,
     required this.agent,
-    required this.mcp,
     required this.editors,
     required this.themeController,
     required this.previewMode,
@@ -39,10 +36,8 @@ class StudioShell extends StatefulWidget {
 
   final ToolchainController toolchains;
   final ProjectSession session;
-  final StudioTerminal terminal;
   final ServerpodProcessController process;
   final AgentController agent;
-  final McpController mcp;
   final ExternalEditorsView editors;
   final ThemeController themeController;
   final PreviewModeController previewMode;
@@ -129,7 +124,6 @@ class _StudioShellState extends State<StudioShell> {
         if (widget.previewMode.compactWindow) {
           return PreviewPane(
             key: _previewKey,
-            previewUrl: ProjectSession.previewUri,
             process: widget.process,
             mode: widget.previewMode,
           );
@@ -146,7 +140,7 @@ class _StudioShellState extends State<StudioShell> {
                 tools: widget.toolchains,
                 onManageTools: _openManageTools,
                 process: widget.process,
-                mcp: widget.mcp,
+                actions: widget.process,
                 editors: widget.editors,
                 onToggleLeftPanel: () {
                   setState(() {
@@ -170,10 +164,8 @@ class _StudioShellState extends State<StudioShell> {
                     );
                   });
                 },
-                terminal: widget.terminal,
                 agent: widget.agent,
                 previewKey: _previewKey,
-                previewUrl: ProjectSession.previewUri,
                 process: widget.process,
                 previewMode: widget.previewMode,
                 gradientAnimating: widget.process.phase.showsLoadingOverlay,
@@ -191,10 +183,8 @@ class _Workspace extends StatelessWidget {
     required this.splitRatio,
     required this.leftPanelVisible,
     required this.onSplitChanged,
-    required this.terminal,
     required this.agent,
     required this.previewKey,
-    required this.previewUrl,
     required this.process,
     required this.previewMode,
     required this.gradientAnimating,
@@ -203,10 +193,8 @@ class _Workspace extends StatelessWidget {
   final double splitRatio;
   final bool leftPanelVisible;
   final ValueChanged<double> onSplitChanged;
-  final StudioTerminal terminal;
   final AgentController agent;
   final GlobalKey<PreviewPaneState> previewKey;
-  final Uri previewUrl;
   final ServerpodProcessController process;
   final PreviewModeController previewMode;
   final bool gradientAnimating;
@@ -223,7 +211,7 @@ class _Workspace extends StatelessWidget {
         // cannot promise — it thins out with the window. The max ratio still
         // caps it, and wins when the window is too narrow for both.
         final maxLeft = total * kWorkspaceMaxSplitRatio;
-        final minLeft = math.min(terminalPaneMinWidth(), maxLeft);
+        final minLeft = math.min(serverLogMinWidth(), maxLeft);
         final left = leftPanelVisible
             ? clampDouble(total * splitRatio, minLeft, maxLeft)
             : 0.0;
@@ -236,8 +224,7 @@ class _Workspace extends StatelessWidget {
                 if (leftPanelVisible)
                   SizedBox(
                     width: left,
-                    child: TerminalPane(
-                      studioTerminal: terminal,
+                    child: LeftPane(
                       agent: agent,
                       process: process,
                     ),
@@ -245,7 +232,6 @@ class _Workspace extends StatelessWidget {
                 Expanded(
                   child: PreviewPane(
                     key: previewKey,
-                    previewUrl: previewUrl,
                     process: process,
                     mode: previewMode,
                     gradientAnimating: gradientAnimating,

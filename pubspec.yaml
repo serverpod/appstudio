@@ -9,8 +9,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  xterm: ^4.0.0
-  kyroon_pty: ^1.0.4
   webview_cef:
     path: packages/webview_cef
   file_selector: ^1.0.3
@@ -25,11 +23,10 @@ dependencies:
   mesh_gradient: ^1.3.8
   shimmer: ^3.0.0
   shad: ^0.99.3
-  # MCP client for `serverpod mcp-server`. Same package the bridge is built on,
-  # so the two ends of the protocol cannot drift.
-  dart_mcp: ^0.5.2
-  # Direct, so `lib/mcp/serverpod_mcp_bridge.dart` can be annotated without
-  # importing flutter/foundation — it must stay runnable under a plain Dart VM.
+  # The runner's attach protocol (`lib/runner/`). The same package the runner
+  # serves it with, so the framing and error shapes cannot drift.
+  json_rpc_2: ^4.0.0
+  stream_channel: ^2.1.2
   meta: ^1.16.0
 
 dev_dependencies:

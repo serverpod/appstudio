@@ -2,7 +2,6 @@ import 'package:appstudio/agent/agent_controller.dart';
 import 'package:appstudio/agent/agent_transcript.dart';
 import 'package:appstudio/process/serverpod_process.dart';
 import 'package:appstudio/session/project_session.dart';
-import 'package:appstudio/terminal/studio_terminal.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -23,7 +22,6 @@ void main() {
     final process = ServerpodProcessController(
       toolchains: toolchains,
       session: session,
-      terminal: StudioTerminal(),
     );
     controller = AgentController(
       toolchains: toolchains,

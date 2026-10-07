@@ -6,7 +6,6 @@ import 'package:shad/shad.dart';
 
 import 'agent/agent_controller.dart';
 import 'analytics/app_analytics.dart';
-import 'mcp/mcp_controller.dart';
 import 'platform/compact_window.dart';
 import 'preview/compact_dialog_yield.dart';
 import 'preview/preview_mode_controller.dart';
@@ -14,7 +13,6 @@ import 'process/dev_session_cleanup.dart';
 import 'process/serverpod_process.dart';
 import 'session/external_editors.dart';
 import 'session/project_session.dart';
-import 'terminal/studio_terminal.dart';
 import 'theme/app_theme.dart';
 import 'theme/theme_controller.dart';
 import 'toolchain/toolchain_controller.dart';
@@ -41,18 +39,11 @@ Future<void> main() async {
   final toolchains = await ToolchainController.create();
   final session = ProjectSession();
   await session.loadRecents();
-  final terminal = StudioTerminal();
   final process = ServerpodProcessController(
     toolchains: toolchains,
     session: session,
-    terminal: terminal,
   );
   final agent = AgentController(
-    toolchains: toolchains,
-    session: session,
-    process: process,
-  );
-  final mcp = McpController(
     toolchains: toolchains,
     session: session,
     process: process,
@@ -65,7 +56,6 @@ Future<void> main() async {
   final updates = await UpdateController.create(
     process: process,
     agent: agent,
-    mcp: mcp,
   );
 
   // Installed before the first event so nothing fires into the no-op default.
@@ -91,10 +81,8 @@ Future<void> main() async {
       themeController: themeController,
       toolchains: toolchains,
       session: session,
-      terminal: terminal,
-      process: process,
+        process: process,
       agent: agent,
-      mcp: mcp,
       editors: editors,
       updates: updates,
       previewMode: previewMode,
@@ -108,10 +96,8 @@ class AppStudioApp extends StatefulWidget {
     required this.themeController,
     required this.toolchains,
     required this.session,
-    required this.terminal,
     required this.process,
     required this.agent,
-    required this.mcp,
     required this.editors,
     required this.updates,
     required this.previewMode,
@@ -120,10 +106,8 @@ class AppStudioApp extends StatefulWidget {
   final ThemeController themeController;
   final ToolchainController toolchains;
   final ProjectSession session;
-  final StudioTerminal terminal;
   final ServerpodProcessController process;
   final AgentController agent;
-  final McpController mcp;
   final ExternalEditorsController editors;
   final UpdateController updates;
   final PreviewModeController previewMode;
@@ -146,10 +130,11 @@ class _AppStudioAppState extends State<AppStudioApp> {
   /// Lets the teardown run *before* macOS terminates us.
   ///
   /// This is the only place a quit can be awaited. `dispose()` is synchronous,
-  /// and on ⌘Q the isolate is killed at the OS's convenience — measured: the
-  /// server and the MCP bridge died with us, but `opencode serve` is an ordinary
-  /// child process and survived every single quit, reparented to launchd. The
-  /// pid-file reclaim in `main()` is the backstop; this is the fix.
+  /// and on ⌘Q the isolate is killed at the OS's convenience. `opencode serve`
+  /// is an ordinary child process and survived every single quit, reparented
+  /// to launchd — and the Serverpod runner is detached by design, so nothing
+  /// at all takes it down with us. The reclaim in `main()` is the backstop;
+  /// this is the fix.
   AppLifecycleListener? _lifecycle;
   bool _exiting = false;
 
@@ -212,7 +197,6 @@ class _AppStudioAppState extends State<AppStudioApp> {
       await teardownSession(
         process: widget.process,
         agent: widget.agent,
-        mcp: widget.mcp,
         timeout: const Duration(seconds: 6),
       );
     } catch (e) {
@@ -356,7 +340,6 @@ class _AppStudioAppState extends State<AppStudioApp> {
       toolchains: widget.toolchains,
       process: widget.process,
       agent: widget.agent,
-      mcp: widget.mcp,
     );
     final removable = await widget.toolchains.removableTools();
     if (!mounted || !navigatorContext.mounted) return;
@@ -406,17 +389,14 @@ class _AppStudioAppState extends State<AppStudioApp> {
         teardownSession(
           process: widget.process,
           agent: widget.agent,
-          mcp: widget.mcp,
-        ),
+          ),
       );
     }
     widget.updates.dispose();
-    widget.mcp.dispose();
     // `teardownSession` stops the agent; this releases the notifier. It used to
     // do both, which is why the stop could not be awaited.
     widget.agent.dispose();
     widget.process.dispose();
-    widget.terminal.dispose();
     widget.session.dispose();
     widget.themeController.dispose();
     widget.previewMode.dispose();
@@ -463,11 +443,9 @@ class _AppStudioAppState extends State<AppStudioApp> {
             null => StudioShell(
               toolchains: widget.toolchains,
               session: widget.session,
-              terminal: widget.terminal,
               process: widget.process,
               agent: widget.agent,
-              mcp: widget.mcp,
-              editors: widget.editors,
+                    editors: widget.editors,
               themeController: widget.themeController,
               previewMode: widget.previewMode,
             ),

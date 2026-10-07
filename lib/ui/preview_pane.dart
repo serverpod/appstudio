@@ -19,24 +19,24 @@ import 'preview_header_bars.dart';
 
 /// The project the shared CEF profile last served.
 ///
-/// Every project serves from the same `http://localhost:9998` origin, and the
-/// profile behind it (HTTP cache, localStorage, service workers, cookies) is
-/// global to the CEF request context — it survives the per-project webview, so
-/// without a clear the next project's first load can be answered out of the
-/// previous project's state. Module-level because the pane's State unmounts
-/// when a project closes; the profile does not.
+/// The profile behind the preview (HTTP cache, localStorage, service workers,
+/// cookies) is global to the CEF request context — it survives the per-project
+/// webview. Each run of the app is served on whatever free port `flutter run
+/// -d web-server` picked, so two projects usually get different origins, but
+/// ports are reused and nothing guarantees it; without a clear, the next
+/// project's first load could be answered out of the previous project's
+/// state. Module-level because the pane's State unmounts when a project
+/// closes; the profile does not.
 String? _cefProfileProjectPath;
 
 class PreviewPane extends StatefulWidget {
   const PreviewPane({
     super.key,
-    required this.previewUrl,
     required this.process,
     required this.mode,
     this.gradientAnimating = false,
   });
 
-  final Uri previewUrl;
   final ServerpodProcessController process;
   final PreviewModeController mode;
   final bool gradientAnimating;
@@ -52,6 +52,10 @@ class PreviewPaneState extends State<PreviewPane> {
   String? _error;
   int _lastReloadToken = 0;
   Brightness? _appliedBrightness;
+
+  /// The URL the current webview was created for. The runner publishes the
+  /// app's URL, and an app relaunched by it can come back on another port.
+  Uri? _loadedUrl;
 
   late PreviewViewMode _lastViewMode;
   late Brightness _lastModeBrightness;
@@ -130,6 +134,14 @@ class PreviewPaneState extends State<PreviewPane> {
 
     if (!shouldLoad && _controller != null) {
       _tearDownWebView();
+      return;
+    }
+    if (shouldLoad &&
+        _controller != null &&
+        !_initializing &&
+        widget.process.previewUrl != _loadedUrl) {
+      _tearDownWebView();
+      unawaited(_ensureWebView());
       return;
     }
     if (shouldLoad && _controller == null && !_initializing) {
@@ -223,7 +235,9 @@ class PreviewPaneState extends State<PreviewPane> {
       );
       _controller = controller;
       controller.addListener(_onWebViewReadyChanged);
-      await controller.initialize(widget.previewUrl.toString());
+      final url = widget.process.previewUrl!;
+      _loadedUrl = url;
+      await controller.initialize(url.toString());
       _appliedBrightness = widget.mode.previewBrightness;
       _lastReloadToken = widget.process.previewReloadToken;
       final projectPath = widget.process.session.projectPath;
@@ -234,7 +248,7 @@ class PreviewPaneState extends State<PreviewPane> {
         // The profile still holds the previous project's state for this same
         // origin. Clear it, and only then mark the profile as ours — a failed
         // clear lands in the catch below and stays due on the next attempt.
-        await controller.clearBrowsingData(widget.previewUrl.origin);
+        await controller.clearBrowsingData(url.origin);
         _cefProfileProjectPath = projectPath;
         // The initial navigation above may already have been answered out of
         // the old state; reload() re-fetches past every cache and keeps the
@@ -274,6 +288,7 @@ class PreviewPaneState extends State<PreviewPane> {
     _error = null;
     _lastReloadToken = 0;
     _appliedBrightness = null;
+    _loadedUrl = null;
     unawaited(_disposeController().then((_) {
       if (mounted) setState(() {});
     }));
@@ -282,10 +297,6 @@ class PreviewPaneState extends State<PreviewPane> {
   void _onWebViewReadyChanged() {
     final controller = _controller;
     if (controller == null || !controller.value) return;
-    if (!widget.process.hasAttachedFlutter) {
-      if (mounted) setState(() {});
-      return;
-    }
     unawaited(_revealWhenAppReady(controller));
   }
 

@@ -12,26 +12,11 @@ void main() {
     }
   });
 
-  test('every long-lived child kind has its own pid file', () {
-    // One file per kind. A shared file would mean registering the agent
-    // silently discarded the server's pid, and the next launch would reclaim
-    // only whichever wrote last.
-    final files = DevProcessKind.values.map((k) => k.pidFile).toSet();
-
-    expect(files, hasLength(DevProcessKind.values.length));
-    // The serverpod PTY's filename predates the others and is load-bearing:
-    // an orphan registered by an older build must still be reclaimable.
-    expect(DevProcessKind.server.pidFile, endsWith('appstudio-server.pid'));
-  });
-
-  test('the agent and the bridge are registered, not just the server', () {
-    // This is the regression: only the PTY used to register, so a hot restart
-    // or a hard quit orphaned `opencode serve` and `serverpod mcp-server` with
-    // nothing on disk for the next launch to find.
-    expect(
-      DevProcessKind.values.map((k) => k.id),
-      containsAll(<String>['server', 'agent', 'mcp']),
-    );
+  test('the agent is registered, and the runner is not', () {
+    // The Serverpod runner is detached by design and is stopped through its
+    // socket from an ownership record, not by a pid file and a group kill.
+    expect(DevProcessKind.values.map((k) => k.id), ['agent']);
+    expect(DevProcessKind.agent.pidFile, endsWith('appstudio-agent.pid'));
   });
 
   test('register writes the pid and clear removes the file', () async {
@@ -43,20 +28,6 @@ void main() {
 
     await clearDevSessionPid(DevProcessKind.agent);
     expect(await file.exists(), isFalse);
-  });
-
-  test('registering one kind leaves the others alone', () async {
-    await registerDevSessionPid(DevProcessKind.server, 111);
-    await registerDevSessionPid(DevProcessKind.agent, 222);
-
-    expect(
-      (await File(DevProcessKind.server.pidFile).readAsString()).trim(),
-      '111',
-    );
-    expect(
-      (await File(DevProcessKind.agent.pidFile).readAsString()).trim(),
-      '222',
-    );
   });
 
   test('a nonsense pid is not written', () async {

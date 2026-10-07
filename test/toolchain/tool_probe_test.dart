@@ -123,12 +123,15 @@ void main() {
         );
 
     test('accepts a Serverpod CLI inside the range', () {
-      expect(run('4.0.3').fitness, ToolFitness.satisfied);
+      expect(run('4.1.0').fitness, ToolFitness.satisfied);
+      // The runner protocol App Studio speaks first shipped in this beta.
+      expect(run('4.1.0-beta.1').fitness, ToolFitness.satisfied);
     });
 
     test('rejects one outside it', () {
-      expect(run('3.4.1').fitness, ToolFitness.wrongVersion);
-      expect(run('4.1.0').fitness, ToolFitness.wrongVersion);
+      // 4.0 has no runner to attach to.
+      expect(run('4.0.3').fitness, ToolFitness.wrongVersion);
+      expect(run('4.2.0').fitness, ToolFitness.wrongVersion);
     });
 
     test('unparseable version output is unusable', () {
@@ -242,7 +245,7 @@ void main() {
     ToolProbe probe({
       InstallRecord record = InstallRecord.empty,
       bool clt = true,
-      String serverpodVersion = '4.0.3',
+      String serverpodVersion = '4.1.0',
     }) =>
         ToolProbe(
           paths: paths,
