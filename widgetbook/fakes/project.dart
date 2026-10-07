@@ -1,5 +1,5 @@
 /// Fakes for the views an open project's chrome reads: the start page's
-/// recents, the Create Project form, and the toolbar's buttons.
+/// recents, the New Project form, and the toolbar's buttons.
 library;
 
 import 'dart:async';

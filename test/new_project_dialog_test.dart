@@ -96,7 +96,7 @@ void main() {
   testWidgets('a route refusing to pop still yields to popUntil', (
     tester,
   ) async {
-    // `_clearPushedRoutes` in main.dart leans on this. The Create Project
+    // `_clearPushedRoutes` in main.dart leans on this. The New Project
     // screen refuses to pop while the CLI is running, and a swap of the root
     // screen — uninstalling, most of all — has to clear it regardless.
     await tester.pumpWidget(

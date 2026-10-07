@@ -76,7 +76,7 @@ void main() {
     await pump(tester, await sessionWith([]));
 
     expect(find.text('RECENT PROJECTS'), findsNothing);
-    expect(find.text('Create Project'), findsOneWidget);
+    expect(find.text('New Project'), findsOneWidget);
     expect(find.text('Open Project'), findsOneWidget);
   });
 }

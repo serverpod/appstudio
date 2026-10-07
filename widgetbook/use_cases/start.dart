@@ -16,7 +16,7 @@ Widget _startPage(FakeRecentProjects session) => screen(
       ),
     );
 
-/// The Create Project screen in one state. With [createOnOpen] it presses
+/// The New Project screen in one state. With [createOnOpen] it presses
 /// Create itself, so the progress and failure states need no clicking.
 Widget _createProject(
   NewProjectView actions, {
@@ -68,7 +68,7 @@ final startFolder = WidgetbookFolder(
       ],
     ),
     WidgetbookComponent(
-      name: 'Create Project',
+      name: 'New Project',
       useCases: [
         WidgetbookUseCase(
           name: 'Empty',

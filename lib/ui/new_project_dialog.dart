@@ -19,7 +19,7 @@ import '../widgets/dialog_body.dart';
 
 const _kDialogWidth = 460.0;
 
-/// Pushes the Create Project screen. Completes when it is left, whether the
+/// Pushes the New Project screen. Completes when it is left, whether the
 /// project was created or cancelled.
 ///
 /// A route rather than a dialog: creating a project is the whole task for as
@@ -86,7 +86,7 @@ class SessionNewProjectView implements NewProjectView {
   void openProject(String path) => session.openPath(path);
 }
 
-/// The Create Project form on the shared landing backdrop.
+/// The New Project form on the shared landing backdrop.
 ///
 /// It uses [LandingScaffold] so arriving here from the start page reads as the
 /// same app rather than a new one.
@@ -295,7 +295,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
       // `alert` is the variant without a close X — Cancel is the way out, and
       // mid-run there is none, since the CLI keeps writing files either way.
       child: ShadDialog.alert(
-        title: const Text('Create Project'),
+        title: const Text('New Project'),
         actions: _buildActions(),
         child: DialogBody(
           child: SizedBox(

@@ -1,6 +1,6 @@
 import 'ide_integration.dart';
 
-/// Everything the Create Project form does outside itself: pick a folder, run
+/// Everything the New Project form does outside itself: pick a folder, run
 /// `serverpod create`, and hand the result to the session.
 ///
 /// `showNewProjectScreen` supplies the real one, built on `ProjectCreator` and

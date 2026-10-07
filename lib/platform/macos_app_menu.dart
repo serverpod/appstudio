@@ -296,7 +296,10 @@ class MacAppMenu {
         LogicalKeyboardKey.keyN,
         meta: true,
       ),
-      enabled: false,
+      // Like Open: everything but first-run setup, which has no Flutter SDK to
+      // build a new project with. It used to be added disabled and never
+      // enabled, so it was greyed out for good.
+      enabled: canOpenProjects(),
     );
 
     await MacMenuBar.addMenuItem(
@@ -611,7 +614,7 @@ class MacAppMenu {
   void _onItemSelected(String itemId) {
     switch (itemId) {
       case _newProjectId:
-        onNewProject();
+        if (canOpenProjects()) unawaited(_newProject());
       case _checkUpdatesId:
         onCheckForUpdates();
       case _uninstallId:
@@ -667,6 +670,21 @@ class MacAppMenu {
     }
   }
 
+  /// File → New Project: closes the open project the way Close does, then
+  /// opens the New Project screen over the start page.
+  ///
+  /// The screen is opened a frame later on purpose. `main.dart` clears every
+  /// pushed route a frame after a project closes — the start page replaces
+  /// the shell underneath whatever is open — so a screen pushed straight away
+  /// would be popped along with them.
+  Future<void> _newProject() async {
+    if (session.hasProject) {
+      await _closeProject();
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    onNewProject();
+  }
+
   Future<void> _closeProject() async {
     if (!session.hasProject) return;
     if (process.canStop) {
@@ -683,6 +701,7 @@ class MacAppMenu {
     if (!_installed) return;
     final canOpen = canOpenProjects();
     unawaited(MacMenuBar.setMenuItemEnabled(_openId, canOpen));
+    unawaited(MacMenuBar.setMenuItemEnabled(_newProjectId, canOpen));
     unawaited(MacMenuBar.setSettingsEnabled(canOpen));
     unawaited(MacMenuBar.setMenuItemEnabled(_closeId, session.hasProject));
     unawaited(

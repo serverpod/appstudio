@@ -129,7 +129,7 @@ class _Hero extends StatelessWidget {
             _PrimaryAction(
               onPressed: onNewProject,
               icon: LucideIcons.plus,
-              label: 'Create Project',
+              label: 'New Project',
             ),
             const SizedBox(width: 16),
             _PrimaryAction(

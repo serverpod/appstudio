@@ -27,11 +27,13 @@ void main() {
   late ServerpodProcessController process;
   late MacAppMenu menu;
   var migrations = 0;
+  var newProjects = 0;
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     calls = [];
     migrations = 0;
+    newProjects = 0;
     // Tests run as Android, where the plugin picks its no-op implementation.
     MacMenuBarPlatform.instance = MethodChannelMacMenuBar();
     messenger.setMockMethodCallHandler(channel, (call) async {
@@ -55,7 +57,7 @@ void main() {
         process: process,
       ),
       themeController: ThemeController(),
-      onNewProject: () {},
+      onNewProject: () => newProjects++,
       onCheckForUpdates: () {},
       onUninstall: () {},
       canCheckForUpdates: () => false,
@@ -114,6 +116,15 @@ void main() {
     expect(describe('server_migrate'), '[command] m');
     expect(describe('logs_toggle'), '[command] l');
     expect(added('server_migrate')['title'], 'Create and Apply Migrations');
+  });
+
+  test('New Project is live, and opens the New Project screen', () async {
+    // It used to be added disabled and never enabled.
+    expect(added('file_new_project')['enabled'], isTrue);
+
+    await click('file_new_project');
+
+    expect(newProjects, 1);
   });
 
   test('Create and Apply Migrations is routed to its command', () async {

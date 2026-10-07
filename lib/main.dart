@@ -337,7 +337,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
   ///
   /// `home` is the *first* route, so swapping it happens underneath anything
   /// pushed on top: the new screen is there, and invisible. That is how
-  /// uninstalling with the Create Project screen open left the user filling in
+  /// uninstalling with the New Project screen open left the user filling in
   /// a form for an app that had just deleted itself.
   ///
   /// Called from the three transitions that replace the screen rather than
@@ -345,7 +345,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
   /// not a side effect of painting.
   ///
   /// `Navigator.pop` does not consult `PopScope`, which is what makes this
-  /// work on the Create Project screen mid-run — a screen the *user* may not
+  /// work on the New Project screen mid-run — a screen the *user* may not
   /// dismiss is still cleared by the app.
   void _clearPushedRoutes() =>
       _navigatorKey.currentState?.popUntil((route) => route.isFirst);

@@ -1444,7 +1444,7 @@ make widgetbook    # every screen and dialog, in every state, light and dark
   the canvas; as a dialog's backdrop it ignores the pointer.
 - **The widgets take narrow interfaces so they can be faked**, the pattern
   `ToolsView` started: `RecentProjectsView` (start page), `NewProjectView`
-  (Create Project — the folder picker, `serverpod create`, opening the result),
+  (New Project — the folder picker, `serverpod create`, opening the result),
   `FullRestartView`, `HotRestartView`, `ExternalEditorsView`,
   `ProjectReadyView`, `ProvidersView`. The real controllers implement them
   directly. Anything that was private only for tidiness and is worth reviewing
@@ -1468,7 +1468,7 @@ make widgetbook    # every screen and dialog, in every state, light and dark
 - **`teardownSession` takes every controller that owns a child process, and the parameters are required on purpose.** It is the one function both the quit path and Sparkle's `prepareForRelaunch` call, so anything optional there is a stray process waiting to happen — a runner of ours left up when Sparkle swaps the bundle.
 - `ServerpodProcessController` owns the runner's lifecycle and the attach, and signals when the preview is ready to load.
 - The menu bar lives above `ShadApp`, so menu-triggered dialogs use the `navigatorKey` context from `main.dart`.
-- **Swapping `home` does not clear what is pushed over it — call `_clearPushedRoutes()`.** `home` is the *first* route, so a screen swap happens underneath any open route and is simply invisible: uninstalling with the Create Project screen up left the user filling in a form for an app that had just deleted itself. The menu bar stays live behind every dialog and every full-screen route, so this is reachable from all three transitions that replace the screen, and all three call it — uninstall, the toolchain flip that swaps setup for the shell, and a project opening (⌘O and Open Recent work while Create Project is up, and the project would otherwise load behind it). `Navigator.pop` ignores `PopScope`, which is what lets this clear a screen the *user* may not dismiss; `test/new_project_dialog_test.dart` pins that.
+- **Swapping `home` does not clear what is pushed over it — call `_clearPushedRoutes()`.** `home` is the *first* route, so a screen swap happens underneath any open route and is simply invisible: uninstalling with the New Project screen up left the user filling in a form for an app that had just deleted itself. The menu bar stays live behind every dialog and every full-screen route, so this is reachable from all three transitions that replace the screen, and all three call it — uninstall, the toolchain flip that swaps setup for the shell, and a project opening (⌘O and Open Recent work while New Project is up, and the project would otherwise load behind it). `Navigator.pop` ignores `PopScope`, which is what lets this clear a screen the *user* may not dismiss; `test/new_project_dialog_test.dart` pins that.
 - **The toolchain caller defers to a post-frame callback and the other two do not.** `ToolchainSetupDialog` closes itself on the same `ToolchainController` notification and is a later listener, so popping synchronously there would land first and leave its own `Navigator.pop` to hit `home`, emptying the navigator.
 - **A key Flutter reports as handled never reaches the menu bar**, so a focused widget that swallows keys takes every menu shortcut with it. The old xterm server log did exactly that — ⌘W arrived at the server as a `w`. The log is a `SelectionArea` over a list now (`ui/server_log/server_log_view.dart`), which answers ⌘C and ⌘A and lets everything else through; the search field is an ordinary text field. `test/server_log_view_test.dart` pins ⌘W and plain typing passing through, and copy working.
 - **`MacAppMenu.install()` calls `MacMenuBar.reset()` first, and must keep doing so.** A hot restart replaces the Dart isolate but not the engine, its plugins or the native `NSMenu`, so without it every menu is added again on each restart — and `_recentItemIds` comes back empty, so Open Recent duplicates too. `reset()` removes exactly the items this plugin added: those are the ones carrying a String `representedObject`, which is also how the plugin finds items by id, so stock MainMenu.xib entries cannot be stripped.
@@ -1628,6 +1628,10 @@ that could not work — there is no Flutter SDK to build with yet.
 
 ## New projects
 
+- **File → New Project with a project open closes it first** (as Close does),
+  then opens the screen — a frame later, because `_onSessionChanged` clears
+  pushed routes a frame after a project closes and would pop it. The item is
+  enabled whenever Open is; it used to be added disabled and never enabled.
 - **New Project** (start page + File menu) opens `ui/new_project_dialog.dart`: project name + location + external AI editors, then `ProjectCreator` (`process/project_creator.dart`) runs the bundled `serverpod create <name> --ide … --no-interactive` in that location.
 - **It is a screen, not a dialog over one.** `showNewProjectScreen` pushes a route whose `NewProjectScreen` draws the form on `LandingScaffold` — the same backdrop and fixed dark theme the start page uses, so arriving here does not read as a different app. There is no barrier, so nothing to blur and nothing to click through: a stray click beside a form holding a typed name used to throw it away. Cancel pops back to wherever it was opened from, which is the start page in the common case and the shell when it came from the File menu.
 - The form itself is still a `ShadDialog.alert` (`NewProjectDialog`), which is the variant with no close X — Cancel is the way out, and mid-run there is none. It is centred *outside* its `SingleChildScrollView`: a scroll view sized to its viewport pins a short child to the top.
@@ -1797,7 +1801,8 @@ switch is the Theme addon in the right-hand panel.
   another App Studio session started), opening a project starts a Serverpod
   runner or attaches to the user's own, the setup screen installs the Command Line Tools and
   Flutter and edits `~/.zprofile`, and Uninstall deletes tools. Do not press
-  Install, Uninstall or Create Project in the real app without asking.
+  Install, Uninstall or the New Project form's Create in the real app without
+  asking.
 - **Quit is `exit(0)` everywhere**, Widgetbook included — pressing it ends the
   session you are driving.
 
