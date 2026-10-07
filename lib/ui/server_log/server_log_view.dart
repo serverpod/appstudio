@@ -11,8 +11,11 @@ import 'log_view_controller.dart';
 /// [serverLogMinWidth] follows a change here automatically.
 const kServerLogFontSize = 11.5;
 
-/// How wide a log line is allowed to get before the panel stops shrinking.
-const _kMinLogColumns = 80;
+/// How many characters of message the panel keeps visible before it stops
+/// shrinking. Long lines wrap below that, which a log tolerates better than a
+/// preview squeezed to make room for it. 29 makes the whole panel half what an
+/// 80-column minimum did (~355 px instead of ~710).
+const _kMinLogColumns = 29;
 
 const _kRowPadding = EdgeInsets.symmetric(horizontal: 12, vertical: 1.5);
 
@@ -49,8 +52,8 @@ double get _gap => _charWidth();
 /// Where a message starts: after the level, the time and a gap after each.
 double get _messageIndent => _levelWidth + _gap + _timeWidth + _gap;
 
-/// Minimum width for the panel that keeps an 80-column message visible, the
-/// level and time columns and padding included.
+/// Minimum width for the panel: [_kMinLogColumns] of message, the level and
+/// time columns and padding included.
 double serverLogMinWidth() =>
     _kMinLogColumns * _charWidth() + _messageIndent + _kRowPadding.horizontal;
 

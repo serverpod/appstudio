@@ -285,6 +285,35 @@ the log pane carries no actions.
   `main.dart` runs them with the navigator's — the menu bar sits above
   `ShadApp`.
 
+### The window minimum, and the toolbar that folds to fit it
+
+- **The log panel's minimum is half what it was**: 29 columns of message
+  (`_kMinLogColumns`) plus the level and time columns, ~355 px instead of the
+  ~710 an 80-column line took. Longer lines wrap.
+- **The window's minimum width fell by the same amount**, 1024 → 670
+  (`MainFlutterWindow.swift`; `kMinAppWindowSize` in `widgetbook/host.dart`
+  must match it — the catalog test builds the window there).
+- **The toolbar folds only when it has to — measured, not at a breakpoint.**
+  The editor buttons and Publish to Cloud sit in a `FirstThatFits`
+  (`widgets/first_that_fits.dart`): their full form is laid out at its natural
+  width and used if it fits in what is left after the status's minimum
+  (`StudioToolbar.minStatusWidth`, 180) and the two restart buttons; otherwise
+  the compact form — one "Open in…" menu and a Publish icon. A fixed 960 px
+  breakpoint folded them in windows with plenty of room, since the right width
+  depends on which editors the project has.
+- `FirstThatFits` paints, hit-tests and exposes to semantics only the chosen
+  child, and its element reports only that one as on stage, so `find` and the
+  inspector see one toolbar, not both versions.
+- **The compact window's minimum width is 320** (`kCompactMinWindowWidth`),
+  set by the ~222 px control bar under the frame: at 240 the bar overflowed and
+  the portrait frame was a 160 px sliver, and 300 still overflowed while
+  resizing in the app. `test/preview/compact_control_bar_test.dart` measures
+  the bar against it, but the test passes at 300 — the app needs the extra.
+- The minimum-size catalog test builds the window as a project opens — log
+  hidden (`StudioWindowMock(showLog: false)`). With the log shown, the test
+  font (every glyph a full em) doubles the measured log minimum and would
+  report overflows no real window has.
+
 ### The server status replaced the project name and path
 
 The toolbar starts with `ServerStatusIndicator`: a green dot (running), a red
@@ -317,7 +346,11 @@ toggle that used to lead the bar is Logs → Show/Hide Logs.
 
 ### The Logs menu, and `LogViewController`
 
-Right of Server: **Show/Hide Logs**, one checked item per log (Server, then each
+- **A project opens with the log hidden** (`LogViewController.projectOpened`,
+  from `main.dart`'s session listener, on every open and switch). The preview
+  is what a user opened the project for; the log is Logs → Show Logs away.
+
+Right of Server: **Show/Hide Logs** (⌘L), one checked item per log (Server, then each
 Flutter app by name), and a **Log Level** submenu (Debug, Info, Warning, Error).
 
 - The panel's visibility, selected tab and level live in `LogViewController`
@@ -1396,7 +1429,7 @@ make widgetbook    # every screen and dialog, in every state, light and dark
   surfaces as a cascade of `Duplicate GlobalKey` assertions.
 - **Screens and dialogs are drawn at a real window size and scaled down**
   (`AppWindow`, `kAppWindowSize` 1280×800), with `MediaQuery` saying so.
-  Widgetbook's canvas is narrower than App Studio's 1024×720 minimum, so laid
+  Widgetbook's canvas is narrower than App Studio's 670×720 minimum, so laid
   out at canvas size the toolbar overflowed, and shad — which switches dialogs
   to a phone layout below a 640-wide *screen* — centred dialog text and
   stacked the buttons. Neither ever happens in the app. The catalog

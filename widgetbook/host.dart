@@ -142,12 +142,12 @@ class _InstantRoute extends PageRoute<void> {
 }
 
 /// The window size full-window screens are drawn at: a common laptop window,
-/// comfortably above App Studio's 1024×720 minimum (`MainFlutterWindow`).
+/// comfortably above App Studio's 670×720 minimum (`MainFlutterWindow`).
 const kAppWindowSize = Size(1280, 800);
 
 /// The smallest window App Studio allows — `test/widgetbook` builds the studio
 /// window at this size to catch overflows a real user could hit.
-const kMinAppWindowSize = Size(1024, 720);
+const kMinAppWindowSize = Size(670, 720);
 
 /// A full-window screen, drawn at a real window size and scaled down to fit
 /// the canvas.

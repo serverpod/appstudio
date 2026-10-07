@@ -44,6 +44,7 @@ class StudioWindowMock extends StatelessWidget {
     this.actions,
     this.logTab = LeftPaneTab.server,
     this.status,
+    this.showLog = true,
   });
 
   final PreviewPhase phase;
@@ -62,22 +63,31 @@ class StudioWindowMock extends StatelessWidget {
   /// Defaults to what a runner would say at [phase].
   final ServerStatus? status;
 
-  ServerStatus get _status => status ?? switch (phase) {
+  /// The app opens a project with the log hidden; the use cases show it
+  /// anyway, since reviewing it is half the point of them.
+  final bool showLog;
+
+  ServerStatus get _status =>
+      status ??
+      switch (phase) {
         PreviewPhase.ready => const ServerStatus.running(),
         PreviewPhase.idle => const ServerStatus.stopped('Stopped'),
         PreviewPhase.failed => ServerStatus.stopped(
-            'Build failed',
-            detail: errorMessage,
-          ),
-        PreviewPhase.fetchingDependencies =>
-          const ServerStatus.busy('Fetching packages'),
-        PreviewPhase.startingServerpod =>
-          const ServerStatus.busy('Starting Serverpod'),
-        PreviewPhase.waitingForServer =>
-          const ServerStatus.busy('Compiling server'),
+          'Build failed',
+          detail: errorMessage,
+        ),
+        PreviewPhase.fetchingDependencies => const ServerStatus.busy(
+          'Fetching packages',
+        ),
+        PreviewPhase.startingServerpod => const ServerStatus.busy(
+          'Starting Serverpod',
+        ),
+        PreviewPhase.waitingForServer => const ServerStatus.busy(
+          'Compiling server',
+        ),
         PreviewPhase.loadingApp => const ServerStatus.busy(
-            'Launching Demo app (first run may take 30-60s)',
-          ),
+          'Launching Demo app',
+        ),
         PreviewPhase.connecting => const ServerStatus.busy('Loading the app'),
         PreviewPhase.stopping => const ServerStatus.busy('Stopping the server'),
       };
@@ -85,12 +95,14 @@ class StudioWindowMock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = ShadTheme.of(context).colorScheme;
-    final log = this.log ??
+    final log =
+        this.log ??
         sampleRunnerLog(
           failure: phase.isError,
           launching: phase != PreviewPhase.ready && !phase.isError,
         );
-    final actions = this.actions ??
+    final actions =
+        this.actions ??
         FakeRunnerActions(
           canHotRestart: phase == PreviewPhase.ready,
           canMigrate: phase == PreviewPhase.ready || phase.isError,
@@ -102,7 +114,8 @@ class StudioWindowMock extends StatelessWidget {
           tools: tools ?? FakeToolsView(inventory: completeInventory),
           process: process ?? FakeFullRestart(),
           actions: actions,
-          editors: editors ??
+          editors:
+              editors ??
               FakeExternalEditors(
                 editors: const [cursorEditor, claudeEditor],
                 canOpen: phase == PreviewPhase.ready,
@@ -113,33 +126,38 @@ class StudioWindowMock extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SizedBox(
-                width: 560,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    LeftPaneHeader(
-                      tabs: leftPaneTabs(log),
-                      selected: logTab,
-                      onChanged: (_) {},
-                    ),
-                    Expanded(
-                      child: ServerLogView(
-                        log: log,
-                        view: LogViewController()..tab = logTab,
-                        source: switch (logTab) {
-                          LogTab(:final source) => source,
-                          AgentTab() => const ServerLogSource(),
-                        },
+              if (showLog) ...[
+                SizedBox(
+                  // About the panel's real minimum (`serverLogMinWidth`), which
+                  // cannot be used here: the test font makes every glyph a full
+                  // em, and the measured width doubles with it.
+                  width: 380,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      LeftPaneHeader(
+                        tabs: leftPaneTabs(log),
+                        selected: logTab,
+                        onChanged: (_) {},
                       ),
-                    ),
-                  ],
+                      Expanded(
+                        child: ServerLogView(
+                          log: log,
+                          view: LogViewController()..tab = logTab,
+                          source: switch (logTab) {
+                            LogTab(:final source) => source,
+                            AgentTab() => const ServerLogSource(),
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              SizedBox(
-                width: kDividerWidth,
-                child: ColoredBox(color: scheme.border),
-              ),
+                SizedBox(
+                  width: kDividerWidth,
+                  child: ColoredBox(color: scheme.border),
+                ),
+              ],
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,

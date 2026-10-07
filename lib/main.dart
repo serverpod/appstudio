@@ -258,7 +258,11 @@ class _AppStudioAppState extends State<AppStudioApp> {
     final path = widget.session.projectPath;
     if (path == _noticedProjectPath) return;
     _noticedProjectPath = path;
-    if (path != null) appAnalytics.projectOpened();
+    if (path != null) {
+      appAnalytics.projectOpened();
+      // Every project opens to its preview; the log is Logs → Show Logs away.
+      widget.logView.projectOpened();
+    }
     // A compact window must not outlive the preview it was framing: closing or
     // switching projects goes back to the full window before anything else. A
     // no-op when not minimized.

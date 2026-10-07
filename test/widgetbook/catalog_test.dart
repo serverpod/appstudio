@@ -51,7 +51,12 @@ void main() {
     await tester.pumpWidget(
       const UseCaseHost(
         brightness: Brightness.light,
-        child: AppWindow(size: kMinAppWindowSize, child: StudioWindowMock()),
+        // As a project opens: log hidden. The narrow toolbar is what this
+        // catches — the log has its own minimum width in the app.
+        child: AppWindow(
+          size: kMinAppWindowSize,
+          child: StudioWindowMock(showLog: false),
+        ),
       ),
     );
     await tester.pump(const Duration(milliseconds: 500));

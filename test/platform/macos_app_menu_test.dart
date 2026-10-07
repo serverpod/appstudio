@@ -112,6 +112,7 @@ void main() {
     expect(describe('server_hot_restart'), '[command] r');
     expect(describe('server_full_restart'), '[command, shift] r');
     expect(describe('server_migrate'), '[command] m');
+    expect(describe('logs_toggle'), '[command] l');
     expect(added('server_migrate')['title'], 'Create and Apply Migrations');
   });
 
@@ -155,7 +156,8 @@ void main() {
   });
 
   test('Show/Hide Logs needs a project to show the logs of', () async {
+    expect(logView.visible, isFalse, reason: 'the panel starts hidden');
     await click('logs_toggle');
-    expect(logView.visible, isTrue);
+    expect(logView.visible, isFalse);
   });
 }

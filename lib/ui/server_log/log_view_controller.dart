@@ -42,7 +42,9 @@ final class LogTab extends LeftPaneTab {
 class LogViewController extends ChangeNotifier {
   LogViewController();
 
-  bool _visible = true;
+  /// Hidden until asked for: a project opens to its preview, and the log is
+  /// one menu item away (Logs → Show Logs).
+  bool _visible = false;
   LeftPaneTab _tab =
       kOpenCodeAgentEnabled ? LeftPaneTab.agent : LeftPaneTab.server;
   LogLevelFilter _level = LogLevelFilter.debug;
@@ -78,6 +80,10 @@ class LogViewController extends ChangeNotifier {
     _visible = true;
     notifyListeners();
   }
+
+  /// A project was opened: the panel starts hidden again, whatever the last
+  /// project left it as. The level and tab are kept — they are preferences.
+  void projectOpened() => visible = false;
 
   set level(LogLevelFilter value) {
     if (value == _level) return;

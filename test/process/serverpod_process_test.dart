@@ -514,5 +514,21 @@ void main() {
       expect(status.message, 'Build failed');
       expect(status.detail, contains('failed to build'));
     });
+
+    test('the launch operation loses its first-run aside', () async {
+      final runner = await projectWithRunner(stage: 'starting');
+      await open(runner);
+      runner.emit({
+        'event': 'operationStarted',
+        'id': 'launch',
+        'label': 'Launching Demo app (first run may take 30-60s)',
+        'startedAt': DateTime.now()
+            .subtract(const Duration(seconds: 2))
+            .toIso8601String(),
+      });
+      await until(() => process.log.activeOperations.isNotEmpty);
+
+      expect(process.serverStatus().message, 'Launching Demo app');
+    });
   });
 }

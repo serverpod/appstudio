@@ -6,6 +6,7 @@ import '../runner/runner_actions_view.dart';
 import '../runner/server_status.dart';
 import '../session/external_editors_view.dart';
 import '../theme/app_theme.dart';
+import '../widgets/first_that_fits.dart';
 import 'full_restart_button.dart';
 import 'hot_restart_button.dart';
 import 'open_in_editor_buttons.dart';
@@ -40,39 +41,80 @@ class StudioToolbar extends StatelessWidget {
   final ExternalEditorsView editors;
   final VoidCallback onManageTools;
 
+  /// The width the status line keeps however narrow the window gets — enough
+  /// for "Launching Demo app" beside its mark. Everything else gives way first.
+  static const minStatusWidth = 180.0;
+
+  static const _padding = 10.0;
+
+  /// The two restart buttons and the gaps before them, which never fold.
+  static const _restartWidth = 8 + kToolbarIconButtonSize + 8 +
+      kToolbarIconButtonSize;
+
   @override
   Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
-    final scheme = theme.colorScheme;
+    final scheme = ShadTheme.of(context).colorScheme;
 
     return Container(
       height: 48,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
+      padding: const EdgeInsets.symmetric(horizontal: _padding),
       decoration: BoxDecoration(
         color: scheme.background,
         border: Border(bottom: paneBorderSide(scheme.border)),
       ),
-      child: Row(
-        children: [
-          const SizedBox(width: 4),
-          Expanded(
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: ServerStatusIndicator(status: status),
-            ),
-          ),
-          const SizedBox(width: 12),
-          ToolchainWarningBadge(tools: tools, onTap: onManageTools),
-          OpenInEditorButtons(editors: editors),
-          const PublishToCloudButton(),
-          const SizedBox(width: 8),
-          HotRestartButton(actions: actions),
-          const SizedBox(width: 8),
-          FullRestartButton(process: process),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // What the folding group may take: the bar, less the status's
+          // minimum and the restart buttons. The group then decides for itself
+          // whether its full form fits in that — measured, not guessed.
+          final groupWidth = (constraints.maxWidth -
+                  4 -
+                  minStatusWidth -
+                  12 -
+                  _restartWidth)
+              .clamp(0.0, double.infinity);
+
+          return Row(
+            children: [
+              const SizedBox(width: 4),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: ServerStatusIndicator(status: status),
+                ),
+              ),
+              const SizedBox(width: 12),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: groupWidth),
+                // The editor buttons and Publish to Cloud, in full while they
+                // fit beside the status; otherwise one "Open in…" menu and an
+                // icon.
+                child: FirstThatFits(
+                  children: [
+                    _group(compact: false),
+                    _group(compact: true),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              HotRestartButton(actions: actions),
+              const SizedBox(width: 8),
+              FullRestartButton(process: process),
+            ],
+          );
+        },
       ),
     );
   }
+
+  Widget _group({required bool compact}) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ToolchainWarningBadge(tools: tools, onTap: onManageTools),
+          OpenInEditorButtons(editors: editors, compact: compact),
+          PublishToCloudButton(compact: compact),
+        ],
+      );
 }
 
 /// Destructive toolbar badge for a required tool that could not be resolved,

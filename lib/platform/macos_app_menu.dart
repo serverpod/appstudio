@@ -489,6 +489,7 @@ class MacAppMenu {
       title: 'Hide Logs',
       index: 0,
       systemImage: 'sidebar.left',
+      shortcut: const SingleActivator(LogicalKeyboardKey.keyL, meta: true),
       enabled: false,
     );
 

@@ -14,10 +14,25 @@ import '../widgets/dialog_body.dart';
 /// Outline with a label, at the same height as the icon buttons beside it so
 /// the toolbar's right-hand cluster sits on one line.
 class PublishToCloudButton extends StatelessWidget {
-  const PublishToCloudButton({super.key});
+  const PublishToCloudButton({super.key, this.compact = false});
+
+  /// Icon only, with the label in a tooltip — for a narrow window.
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
+    if (compact) {
+      return ShadTooltip(
+        builder: (context) => const Text('Publish to Cloud'),
+        child: ShadIconButton.outline(
+          semanticLabel: 'Publish to Cloud',
+          width: kToolbarIconButtonSize,
+          height: kToolbarIconButtonSize,
+          onPressed: () => unawaited(showPublishToCloudDialog(context)),
+          icon: const Icon(LucideIcons.cloudUpload, size: 16),
+        ),
+      );
+    }
     return ShadButton.outline(
       height: kToolbarIconButtonSize,
       size: ShadButtonSize.sm,

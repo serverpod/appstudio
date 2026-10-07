@@ -198,8 +198,16 @@ class ServerpodProcessController extends ChangeNotifier
   /// A runner label as a status line, without the trailing dots the CLI adds
   /// for a terminal (`Launching Flutter app...`) — the spinner beside it
   /// already says it is in progress.
-  static String _sentence(String label) =>
-      label.replaceAll(RegExp(r'[.…\s]+$'), '');
+  ///
+  /// The launch operation's aside is dropped too: the CLI names it
+  /// `Launching <app> (first run may take 30-60s)`, which crowds a one-line
+  /// status. Only that exact text, so nothing else the CLI adds in brackets is
+  /// lost; the server log keeps the label whole.
+  static String _sentence(String label) => label
+      .replaceAll(_firstRunAside, '')
+      .replaceAll(RegExp(r'[.…\s]+$'), '');
+
+  static const _firstRunAside = ' (first run may take 30-60s)';
 
   /// Whether the attached runner is one App Studio started, and so stops.
   bool get ownsRunner => _owned;

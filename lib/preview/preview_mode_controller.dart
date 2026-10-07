@@ -18,7 +18,14 @@ const kCompactBarGap = 10.0;
 const kCompactBarHeight = 44.0;
 
 /// Smallest window width a compact resize may reach.
-const kCompactMinWindowWidth = 240.0;
+///
+/// Set by the control bar under the frame, which is a fixed row of controls
+/// (~222 px) and has to fit with room to spare — at 240 it overflowed, and the
+/// portrait frame was a 160 px sliver. 300 still overflowed while resizing in
+/// the app, so 320, which keeps the frame at least 240 px wide.
+/// `test/preview/compact_control_bar_test.dart` measures the bar against this,
+/// but in a test window; the app needed more.
+const kCompactMinWindowWidth = 320.0;
 
 /// The window geometry for a phone view mode's compact window.
 CompactWindowGeometry compactWindowGeometry(PreviewViewMode mode) {
