@@ -4,3 +4,6 @@
 /// `unsupported`, so previews of the tools UI show real artifact sizes
 /// instead of "not available for this Mac".
 String currentPlatformKey() => 'macos-arm64';
+
+/// The CPU half of [currentPlatformKey].
+String currentArch() => 'arm64';

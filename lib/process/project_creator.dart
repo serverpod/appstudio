@@ -12,6 +12,7 @@ import '../session/project_settings.dart';
 import '../toolchain/tool_status.dart';
 import '../toolchain/toolchain_controller.dart';
 import 'ide_integration.dart';
+import 'tool_command.dart';
 
 // `IdeIntegration` moved out to keep it clear of `dart:io`, which
 // `ProjectSettings` needs it to be. Re-exported so the New Project dialog and
@@ -224,14 +225,15 @@ class ProjectCreator {
 
     final Process process;
     try {
+      final command = resolveToolCommand(serverpod, [
+        'create',
+        name,
+        for (final ide in configuredIdes(ides)) ...['--ide', ide.option],
+        '--no-interactive',
+      ]);
       process = await Process.start(
-        serverpod,
-        [
-          'create',
-          name,
-          for (final ide in configuredIdes(ides)) ...['--ide', ide.option],
-          '--no-interactive',
-        ],
+        command.executable,
+        command.arguments,
         workingDirectory: workingDirectory,
         environment: toolchain.processEnvironment(),
       );

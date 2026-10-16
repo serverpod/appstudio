@@ -212,7 +212,8 @@ void main() {
     expect(result.failures, contains('deleting the App Studio support folder'));
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('theme_mode'), isNull);
-  });
+    // `chmod` makes the delete fail; Windows needs an ACL for that.
+  }, testOn: 'mac-os || linux');
 
   test('leaves the Dart package cache alone while Flutter stays', () async {
     final cache = Directory(p.join(tmp.path, '.pub-cache', 'hosted'));
@@ -226,12 +227,13 @@ void main() {
   test('clears the Dart package cache along with Flutter', () async {
     final zprofile = p.join(tmp.path, '.zprofile');
     await seedOwnedFlutter(zprofile);
-    final cache = Directory(p.join(tmp.path, '.pub-cache', 'hosted'));
+    // `~/.pub-cache` on macOS, `AppData\Local\Pub\Cache` on Windows.
+    final cache = Directory(p.join(paths.defaultPubCache, 'hosted'));
     await cache.create(recursive: true);
 
     final result = await run(tools: {ToolId.flutter});
 
     expect(result.failures, isEmpty, reason: result.failures.join(', '));
-    expect(await Directory(p.join(tmp.path, '.pub-cache')).exists(), isFalse);
+    expect(await Directory(paths.defaultPubCache).exists(), isFalse);
   });
 }

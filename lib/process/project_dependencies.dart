@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import '../runner/runner_log.dart';
 import '../toolchain/tool_status.dart';
 import '../toolchain/toolchain.dart';
+import 'tool_command.dart';
 
 final _flutterSdkDep = RegExp(r'sdk:\s*flutter');
 
@@ -53,9 +54,10 @@ Future<void> resolveProjectDependencies(
     }
     final label = p.basename(pkg);
     log.addLocal('${useFlutter ? 'flutter' : 'dart'} pub get ($label)');
+    final command = resolveToolCommand(exe, const ['pub', 'get']);
     final process = await Process.start(
-      exe,
-      const ['pub', 'get'],
+      command.executable,
+      command.arguments,
       workingDirectory: pkg,
       environment: env,
     );

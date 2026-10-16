@@ -1,3 +1,4 @@
+@TestOn('mac-os || linux')
 @Tags(['tool'])
 library;
 

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:appstudio/platform/host_platform.dart';
 import 'package:appstudio/toolchain/install_record.dart';
 import 'package:appstudio/toolchain/shell_profile.dart';
 import 'package:appstudio/toolchain/tool_probe.dart';
@@ -234,8 +235,9 @@ void main() {
     }
 
     Future<void> fakeFlutter(String root, String version) async {
-      await touch(p.join(root, 'bin', 'flutter'));
-      await touch(p.join(root, 'bin', 'cache', 'dart-sdk', 'bin', 'dart'));
+      await touch(p.join(root, 'bin', paths.host.flutterLauncherName));
+      await touch(p.join(
+          root, 'bin', 'cache', 'dart-sdk', 'bin', paths.host.dartExecutableName));
       await touch(
         p.join(root, 'bin', 'cache', 'flutter.version.json'),
         jsonEncode({'frameworkVersion': version, 'channel': 'stable'}),
@@ -258,7 +260,7 @@ void main() {
               return ProcessResult(0, clt ? 0 : 2, clt ? '$developerDir\n' : '',
                   '');
             }
-            if (p.basename(executable) == 'serverpod') {
+            if (p.basenameWithoutExtension(executable) == 'serverpod') {
               return ProcessResult(
                   0, 0, 'Serverpod version: $serverpodVersion', '');
             }
@@ -283,7 +285,7 @@ void main() {
     test('finds what App Studio installed and says so', () async {
       await touch(p.join(developerDir, 'usr', 'bin', 'git'));
       await fakeFlutter(paths.flutterInstallDir, '3.47.5');
-      final serverpod = p.join(paths.dartInstallBinDir, 'serverpod');
+      final serverpod = p.join(paths.dartInstallBinDir, paths.host.installedExecutableName('serverpod'));
       await touch(serverpod);
       final record = InstallRecord.empty
           .withTool(RecordedInstall(
@@ -325,7 +327,7 @@ void main() {
     });
 
     test('an old Serverpod CLI is reinstalled', () async {
-      await touch(p.join(paths.dartInstallBinDir, 'serverpod'));
+      await touch(p.join(paths.dartInstallBinDir, paths.host.installedExecutableName('serverpod')));
 
       final inventory = await probe(serverpodVersion: '3.4.1').inventory();
 
@@ -335,7 +337,7 @@ void main() {
     test('an earlier build\'s private toolchain is found', () async {
       await touch(p.join(paths.legacyToolchainRoot, 'flutter', 'marker'));
       expect((await probe().inventory()).legacyInstallFound, isTrue);
-    });
+    }, skip: Platform.isWindows ? 'no Windows build shipped a toolchain' : false);
 
     test('so is only its PATH block', () async {
       await touch(
@@ -343,7 +345,7 @@ void main() {
         '# mine\n\n$kLegacyShellBlockStart\n# x\n$kLegacyShellBlockEnd\n',
       );
       expect((await probe().inventory()).legacyInstallFound, isTrue);
-    });
+    }, skip: Platform.isWindows ? 'no Windows build shipped a toolchain' : false);
   });
 
   group('whichOnPath', () {
@@ -375,12 +377,59 @@ void main() {
       expect(await whichOnPath('serverpod', null), isNull);
       expect(await whichOnPath('serverpod', ''), isNull);
     });
-  });
+  }, skip: Platform.isWindows ? 'POSIX execute bits and : separators' : false);
+
+  group('whichOnPath on Windows', () {
+    Future<Directory> dirContaining(List<String> names) async {
+      final dir = await Directory.systemTemp.createTemp('appstudio_which');
+      addTearDown(() => dir.delete(recursive: true));
+      for (final name in names) {
+        await File(p.join(dir.path, name)).writeAsString('');
+      }
+      return dir;
+    }
+
+    test('finds the PATHEXT name, never the bare shell script', () async {
+      // A Flutter SDK's bin holds both `flutter` (for Git Bash) and
+      // `flutter.bat`; only the second can be started.
+      final dir = await dirContaining(['flutter', 'flutter.bat']);
+      expect(
+        await whichOnPath('flutter', dir.path, pathExt: '.EXE;.BAT'),
+        p.join(dir.path, 'flutter.bat'),
+      );
+    });
+
+    test('splits PATH on ; so drive letters survive', () async {
+      final first = await dirContaining([]);
+      final second = await dirContaining(['serverpod.bat']);
+      expect(
+        await whichOnPath('serverpod', '${first.path};${second.path}'),
+        p.join(second.path, 'serverpod.bat'),
+      );
+    });
+  }, skip: Platform.isWindows ? false : 'Windows PATHEXT and ; separators');
 
   test('pathContainsDir matches whole entries only', () {
     const path = '/usr/bin:/Users/a/develop/flutter/bin/:/bin';
-    expect(pathContainsDir(path, '/Users/a/develop/flutter/bin'), isTrue);
-    expect(pathContainsDir(path, '/Users/a/develop/flutter'), isFalse);
-    expect(pathContainsDir(null, '/bin'), isFalse);
+    const mac = HostPlatform.macos;
+    expect(
+      pathContainsDir(path, '/Users/a/develop/flutter/bin', host: mac),
+      isTrue,
+    );
+    expect(
+      pathContainsDir(path, '/Users/a/develop/flutter', host: mac),
+      isFalse,
+    );
+    expect(pathContainsDir(null, '/bin', host: mac), isFalse);
+  });
+
+  test('pathContainsDir on Windows splits on ; and ignores case', () {
+    const path = r'C:\Windows;C:\Users\a\develop\flutter\bin\;D:\x';
+    const windows = HostPlatform.windows;
+    expect(
+      pathContainsDir(path, r'c:\users\A\develop\flutter\bin', host: windows),
+      isTrue,
+    );
+    expect(pathContainsDir(path, r'C:\Users', host: windows), isFalse);
   });
 }

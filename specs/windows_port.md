@@ -453,6 +453,32 @@ Work was done on the branch `spike/windows-phase0`. Nothing is committed.
 - Unit tests run against `FakeHost(windows)` **on the macOS host**, so this
   phase is fully testable before a Windows runner exists.
 
+#### As built (2026-10-16)
+
+- `lib/platform/host_platform.dart` (pure) + `host.dart` (`currentHost`,
+  which carries `package:path`'s own context so `currentHost.path.join` is
+  `p.join` on the machine itself). `ToolchainPaths`, `Toolchain`, the probe,
+  runner discovery, `prettyPath`, the home directory, recents and the
+  platform key all go through it; macOS answers are unchanged and pinned by
+  tests that pass `HostPlatform.macos` explicitly.
+- `process/tool_command.dart`: `resolveToolCommand` skips a `dart install`
+  launcher for the `.exe` it names and refuses unsafe arguments to any other
+  batch file (0.5). Used for `serverpod runner start`, `serverpod create`,
+  `pub get`, the probe's `--version` and `opencode serve`.
+- `process/process_killer.dart`: the macOS signal logic moved verbatim. **On
+  Windows it ends only the process (`TerminateProcess`)** — the `taskkill
+  /T` tree walk first written here is gone (see the afunix risk below), and
+  ending the tree moves to Phase 2, as a Job Object the children start in.
+- Tests: `process` tag for anything that starts real processes or opens
+  AF_UNIX sockets (fake runners); `@TestOn('mac-os || linux')` for POSIX-only
+  files; `macOSOnlyForNow` skips three tests of behaviour a later phase
+  ports. On the Windows dev laptop: `flutter test -x process -j 1` — 587
+  pass, 17 skipped, 0 fail (81 failed before). Fake runner pids are
+  impossible pids (`FakeRunner.fakePid`).
+- `.gitattributes` pins LF everywhere (CRLF for `.bat`/`.cmd`).
+- **CI moved forward into this phase** (section 6), because the `process`
+  tests now only run there.
+
 ### Phase 2 — Windows runner, CEF, boots to the start page (L)
 
 - `flutter create --platforms=windows --org dev.serverpod .`; commit
@@ -642,9 +668,14 @@ does for a `MissingPluginException`.
   against a fake registry, editor strategy, menu commands).
 - **Windows-host tests** (`@TestOn('windows')`): `ProcessKiller` against a
   real child tree, `.bat` launching with awkward paths, AF_UNIX `FakeRunner`.
-- **CI matrix:** `macos-latest` (existing behaviour, required) +
-  `windows-latest` (`flutter test`, `flutter build windows`), both required
-  once Phase 2 lands.
+- **CI matrix, from Phase 1:** `macos-latest` (existing behaviour, the
+  "macOS unchanged" gate) + `windows-latest`, each running `flutter analyze`
+  and the whole `flutter test` suite, `process` tests included —
+  `.github/workflows/ci.yml`. `flutter build windows` joins once Phase 2
+  makes the Windows build part of the product.
+- **Where tests run:** pure logic everywhere; `process`-tagged tests (real
+  child processes, AF_UNIX fake runners) in CI and the clean-room VM only,
+  never on the Windows dev laptop (afunix risk, section 7).
 - **macOS smoke checklist** for any PR touching shared code: launch from
   Finder, first-run setup screen state, open a project, attach to a runner
   started in a terminal, Hot/Full Restart, preview reload, Open in Cursor/VS
@@ -661,6 +692,7 @@ does for a `MissingPluginException`.
 
 | Risk | Impact | Mitigation |
 |---|---|---|
+| **Windows `afunix.sys` bug (0xD1 bugcheck)**: a process exiting while holding an AF_UNIX socket can blue-screen Windows (afunix.sys 10.0.26100.8972, still present on 26300.9711). Seen 3× on the dev laptop with test processes; App Studio, the runner and CLI clients all hold AF_UNIX connections | OS crash for users, not just the app | Reported (`specs/windows_afunix_bsod_report.md`). Close runner connections gracefully before any exit; never kill a process that holds one; process tests in CI/VM only; re-check each Windows CU |
 | Developer Mode can't be enabled (non-admin account, Group Policy on managed PCs) | Setup blocks; deep projects can't attach | Guidance + Check again (4.8). Projects with short paths still work, so the blocking rule can be relaxed later if that proves too strict |
 | Database for Serverpod dev on Windows needs Docker Desktop (WSL2, admin, licence) | Biggest first-run friction | Phase 0.2 decides; possibly a setup check + guidance rather than an install |
 | `.bat` argument injection / quoting | Broken starts, security | `ProcessLauncher` with strict quoting; tests with hostile names |

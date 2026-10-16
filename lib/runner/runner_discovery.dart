@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../platform/host.dart';
 import 'runner_protocol.dart';
 
 /// Finding the runner that serves a project: its server package, the manifest
@@ -27,8 +28,10 @@ String runnerLogPath(String serverDir) =>
 
 const _tuiSocketName = 'tui.sock';
 
-/// `sockaddr_un.sun_path` on macOS, NUL included.
-const _maxUnixSocketPathBytes = 104;
+/// `sockaddr_un.sun_path`, NUL included: 104 bytes on macOS, 108 on Linux and
+/// Windows (whose AF_UNIX copies Linux's), as `serverpod_shared` reckons it.
+int maxUnixSocketPathBytes([HostPlatform? host]) =>
+    (host ?? currentHost).isMacOS ? 104 : 108;
 
 /// What a runner publishes about itself in `runner.json`.
 ///
@@ -179,36 +182,53 @@ Future<bool> isServerDirectory(String dir) async {
 }
 
 /// The per-user registry of runner links, as the CLI computes it.
-String runnerRegistryDir({Map<String, String>? environment}) {
+String runnerRegistryDir({
+  Map<String, String>? environment,
+  HostPlatform? host,
+}) {
   final env = environment ?? Platform.environment;
   final override = env['SERVERPOD_RUNNER_REGISTRY_DIR'];
   if (override != null && override.isNotEmpty) return override;
-  return p.join(env['HOME'] ?? '', '.serverpod', 'runners');
+  final resolvedHost = host ?? currentHost;
+  return resolvedHost.path
+      .join(resolvedHost.homeFrom(env) ?? '', '.serverpod', 'runners');
 }
 
 /// The path by which App Studio reaches the attach socket of the runner
 /// serving [serverDir].
 ///
 /// Prefers the package path; a deep project's is longer than a Unix socket
-/// address allows (104 bytes on macOS), and then the runner's registry link
-/// under `~/.serverpod/runners/<projectId>` is the way in — the CLI's own
-/// clients make exactly this choice. Null when neither fits.
+/// address allows (104 bytes on macOS, 108 elsewhere), and then the runner's
+/// registry link under `~/.serverpod/runners/<projectId>` is the way in — the
+/// CLI's own clients make exactly this choice. Null when neither fits.
+///
+/// On Windows that link is a symbolic link, which only Developer Mode lets
+/// the CLI create.
 String? runnerSocketPath(
   String serverDir, {
   required String projectId,
   Map<String, String>? environment,
+  HostPlatform? host,
 }) {
+  final resolvedHost = host ?? currentHost;
+  final path = resolvedHost.path;
+  final limit = maxUnixSocketPathBytes(resolvedHost);
   final candidates = [
-    p.join(runnerToolDir(p.canonicalize(serverDir)), _tuiSocketName),
+    path.join(
+      path.canonicalize(serverDir),
+      '.dart_tool',
+      'serverpod',
+      _tuiSocketName,
+    ),
     if (projectId.isNotEmpty)
-      p.join(
-        runnerRegistryDir(environment: environment),
+      path.join(
+        runnerRegistryDir(environment: environment, host: resolvedHost),
         projectId,
         _tuiSocketName,
       ),
   ];
   for (final candidate in candidates) {
-    if (utf8.encode(candidate).length + 1 <= _maxUnixSocketPathBytes) {
+    if (utf8.encode(candidate).length + 1 <= limit) {
       return candidate;
     }
   }
@@ -279,7 +299,7 @@ Future<RunnerResolution> resolveRunner(
   if (path == null) {
     throw RunnerDiscoveryException(
       'The runner socket for $serverDir is out of reach: no path to it fits '
-      'the $_maxUnixSocketPathBytes-byte limit of a Unix socket address.',
+      'the ${maxUnixSocketPathBytes()}-byte limit of a Unix socket address.',
     );
   }
   if (!await _isListening(path, probeTimeout)) {

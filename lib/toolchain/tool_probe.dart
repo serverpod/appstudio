@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../platform/host.dart';
+import '../process/tool_command.dart';
 import 'install_record.dart';
 import 'login_shell_path.dart';
 import 'shell_profile.dart';
@@ -225,6 +227,9 @@ class ToolProbe {
   final ToolManifest manifest;
   final InstallRecord record;
 
+  HostPlatform get _host => paths.host;
+  p.Context get _path => _host.path;
+
   /// Where `PATH`, `FLUTTER_ROOT` and `PUB_CACHE` are read from. Injected in
   /// tests, which would otherwise find whatever the machine running them has.
   final Map<String, String> _env;
@@ -237,10 +242,11 @@ class ToolProbe {
     String executable,
     List<String> arguments, {
     Map<String, String>? environment,
-  }) {
+  }) async {
+    final command = resolveToolCommand(executable, arguments);
     return Process.run(
-      executable,
-      arguments,
+      command.executable,
+      command.arguments,
       environment: environment,
       includeParentEnvironment: false,
       runInShell: false,
@@ -347,10 +353,11 @@ class ToolProbe {
   }
 
   Future<ToolCandidate> _flutterAt(String root, ToolSpec spec) async {
-    final flutterExe = p.join(root, 'bin', 'flutter');
-    final dartExe = p.join(root, 'bin', 'cache', 'dart-sdk', 'bin', 'dart');
+    final flutterExe = _path.join(root, 'bin', _host.flutterLauncherName);
+    final dartExe = _path.join(
+        root, 'bin', 'cache', 'dart-sdk', 'bin', _host.dartExecutableName);
     final versionFile =
-        File(p.join(root, 'bin', 'cache', 'flutter.version.json'));
+        File(_path.join(root, 'bin', 'cache', 'flutter.version.json'));
 
     FlutterInfo? info;
     if (await versionFile.exists()) {
@@ -390,22 +397,26 @@ class ToolProbe {
     final roots = <String>[];
     void add(String? path) {
       if (path == null || path.isEmpty) return;
-      final normalized = p.normalize(path);
-      if (!roots.contains(normalized)) roots.add(normalized);
+      final normalized = _path.normalize(path);
+      if (!roots.any((r) => _host.pathEquals(r, normalized))) {
+        roots.add(normalized);
+      }
     }
 
     add(_env['FLUTTER_ROOT']);
     final onPath = await _which('flutter');
     if (onPath != null) {
       // <root>/bin/flutter → <root>
-      add(p.dirname(p.dirname(await _resolveSymlink(onPath))));
+      add(_path.dirname(_path.dirname(await _resolveSymlink(onPath))));
     }
     add(record[ToolId.flutter]?.path);
     add(paths.flutterInstallDir);
     final home = paths.home;
-    add(p.join(home, 'development', 'flutter'));
-    add(p.join(home, 'flutter'));
-    add(p.join(home, 'fvm', 'default'));
+    add(_path.join(home, 'development', 'flutter'));
+    add(_path.join(home, 'flutter'));
+    add(_path.join(home, 'fvm', 'default'));
+    // Flutter's Windows instructions used to extract here.
+    if (_host.isWindows) add(r'C:srclutter');
     return roots;
   }
 
@@ -420,14 +431,29 @@ class ToolProbe {
 
     // A `pub global activate`d launcher is a shell script that calls bare
     // `dart`.
-    final env = <String, String>{
-      'PATH': [
-        if (dartExecutable != null) p.dirname(dartExecutable),
-        '/usr/bin',
-        '/bin',
-      ].join(':'),
-      'HOME': paths.home,
-    };
+    final env = _host.isWindows
+        ? <String, String>{
+            ..._host.essentialEnvironment(_env),
+            'PATH': [
+              if (dartExecutable != null) _path.dirname(dartExecutable),
+              if (_env['SystemRoot'] case final root?) ...[
+                _path.join(root, 'System32'),
+                root,
+              ],
+            ].join(';'),
+            // The scratch home stands in for the user's, as HOME does below.
+            'USERPROFILE': paths.home,
+            'LOCALAPPDATA': _path.join(paths.home, 'AppData', 'Local'),
+            'APPDATA': _path.join(paths.home, 'AppData', 'Roaming'),
+          }
+        : <String, String>{
+            'PATH': [
+              if (dartExecutable != null) p.dirname(dartExecutable),
+              '/usr/bin',
+              '/bin',
+            ].join(':'),
+            'HOME': paths.home,
+          };
 
     for (final path in await _serverpodPaths()) {
       final detected = parseServerpodVersion(
@@ -441,7 +467,7 @@ class ToolProbe {
           source: _sourceFor(ToolId.serverpodCli, path),
           fitness: verdict.fitness,
           reason: verdict.reason,
-          root: p.dirname(p.dirname(path)),
+          root: _path.dirname(_path.dirname(path)),
           executable: path,
           detectedVersion: detected,
         ),
@@ -458,14 +484,14 @@ class ToolProbe {
 
   Future<List<String>> _serverpodPaths() async {
     final found = <String>[];
-    final pubCache = _env['PUB_CACHE'] ??
-        p.join(paths.home, '.pub-cache');
+    final pubCache = _env['PUB_CACHE'] ?? paths.defaultPubCache;
+    final launcher = _host.installedExecutableName('serverpod');
     for (final candidate in [
       // Where `dart install serverpod_cli` puts it — what App Studio installs,
       // and the documented way. The ~/.pub-cache/bin copy is the one that goes
       // stale.
-      p.join(paths.dartInstallBinDir, 'serverpod'),
-      p.join(pubCache, 'bin', 'serverpod'),
+      _path.join(paths.dartInstallBinDir, launcher),
+      _path.join(pubCache, 'bin', launcher),
       await _which('serverpod'),
     ]) {
       if (candidate == null || found.contains(candidate)) continue;
@@ -513,9 +539,11 @@ class ToolProbe {
   /// It is deliberately a *fallback*: the shell costs ~80 ms, and on a launch
   /// that already inherited a usable `PATH` it never runs at all.
   Future<String?> _which(String command) async {
-    final inherited = await whichOnPath(command, _env['PATH']);
+    final inherited = await whichOnPath(command, _env['PATH'],
+        host: _host, pathExt: _env['PATHEXT']);
     if (inherited != null) return inherited;
-    return whichOnPath(command, await _resolveLoginShellPath());
+    return whichOnPath(command, await _resolveLoginShellPath(),
+        host: _host, pathExt: _env['PATHEXT']);
   }
 
   /// Memoises the *future*, not the value it settles to: two probes reach
@@ -542,33 +570,46 @@ class ToolProbe {
   }
 }
 
-/// First executable named [command] in the colon-separated [searchPath], or
+/// First executable named [command] in the [searchPath] (`PATH`'s value), or
 /// null when there is none.
 ///
 /// Scanned here rather than shelled out to `/usr/bin/which`: every probe
 /// subprocess runs with `includeParentEnvironment: false`, and `which` with no
 /// `PATH` can only ever fail.
-Future<String?> whichOnPath(String command, String? searchPath) async {
+///
+/// On Windows the entries are `;`-separated, a command is found by the names
+/// `PATHEXT` ([pathExt]) gives it — `flutter` is `flutter.bat` — and there are
+/// no execute bits to check.
+Future<String?> whichOnPath(
+  String command,
+  String? searchPath, {
+  HostPlatform? host,
+  String? pathExt,
+}) async {
   if (searchPath == null || searchPath.isEmpty) return null;
+  final resolvedHost = host ?? currentHost;
+  final names = resolvedHost.executableNames(command, pathExt: pathExt);
   // 0o111 — `which` skips a match it could not execute, and so do we.
   const executableBits = 0x49;
-  for (final dir in searchPath.split(':')) {
+  for (final dir in searchPath.split(resolvedHost.pathListSeparator)) {
     if (dir.isEmpty) continue;
-    final candidate = p.join(dir, command);
-    // Follows symlinks: `dart install` and Homebrew both link into their bin.
-    final stat = await FileStat.stat(candidate);
-    if (stat.type != FileSystemEntityType.file) continue;
-    if (stat.mode & executableBits == 0) continue;
-    return candidate;
+    for (final name in names) {
+      final candidate = resolvedHost.path.join(dir, name);
+      // Follows symlinks: `dart install` and Homebrew both link into their bin.
+      final stat = await FileStat.stat(candidate);
+      if (stat.type != FileSystemEntityType.file) continue;
+      if (!resolvedHost.isWindows && stat.mode & executableBits == 0) continue;
+      return candidate;
+    }
   }
   return null;
 }
 
 /// Whether [dir] is one of the entries of [searchPath].
-bool pathContainsDir(String? searchPath, String dir) {
+bool pathContainsDir(String? searchPath, String dir, {HostPlatform? host}) {
   if (searchPath == null) return false;
-  final wanted = p.normalize(dir);
+  final resolvedHost = host ?? currentHost;
   return searchPath
-      .split(':')
-      .any((entry) => entry.isNotEmpty && p.normalize(entry) == wanted);
+      .split(resolvedHost.pathListSeparator)
+      .any((entry) => entry.isNotEmpty && resolvedHost.pathEquals(entry, dir));
 }

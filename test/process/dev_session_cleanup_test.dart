@@ -1,3 +1,8 @@
+// Signals real POSIX child processes (`/bin/sleep`, process groups).
+@TestOn('mac-os || linux')
+@Tags(['process'])
+library;
+
 import 'dart:io';
 
 import 'package:appstudio/process/dev_session_cleanup.dart';

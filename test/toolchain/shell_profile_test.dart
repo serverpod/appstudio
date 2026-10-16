@@ -1,3 +1,7 @@
+// zsh/bash profiles. Windows writes PATH to the registry (Phase 3).
+@TestOn('mac-os || linux')
+library;
+
 import 'dart:io';
 
 import 'package:appstudio/toolchain/shell_profile.dart';

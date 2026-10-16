@@ -1,7 +1,6 @@
 import 'dart:io';
 
-import 'package:path/path.dart' as p;
-
+import '../platform/host.dart';
 import 'install_record.dart';
 import 'tool_probe.dart';
 import 'tool_status.dart';
@@ -14,9 +13,14 @@ import 'toolchain_paths.dart';
 /// Every executable getter is nullable — a bare command name would only defer
 /// the failure to `Process.start`, where it surfaces as an unexplainable crash.
 class Toolchain {
-  const Toolchain(this.inventory);
+  const Toolchain(this.inventory, {this._host});
 
   final ToolchainInventory inventory;
+
+  final HostPlatform? _host;
+
+  /// The machine the tools are on.
+  HostPlatform get host => _host ?? currentHost;
 
   ToolCandidate? resolvedTool(ToolId id) => inventory[id]?.resolved;
 
@@ -58,7 +62,7 @@ class Toolchain {
     final dirs = <String>[];
     void add(String? executable) {
       if (executable == null) return;
-      final dir = p.dirname(executable);
+      final dir = host.path.dirname(executable);
       if (!dirs.contains(dir)) dirs.add(dir);
     }
 
@@ -67,21 +71,30 @@ class Toolchain {
     return dirs;
   }
 
-  Map<String, String> processEnvironment() {
-    final env = Map<String, String>.from(Platform.environment);
+  /// The environment of every process App Studio spawns: [parent] (this
+  /// process's own, by default) with the resolved tools first on `PATH`.
+  ///
+  /// On Windows the copy keeps the parent's case-insensitive keys, so the
+  /// `Path` the system set is the one rewritten here rather than shadowed by a
+  /// second `PATH`.
+  Map<String, String> processEnvironment({Map<String, String>? parent}) {
+    final env = host.copyEnvironment(parent ?? Platform.environment);
 
     final pathParts = <String>[
       ...binPathPrefix,
-      if (env['PATH'] case final existing?) ...existing.split(':'),
+      if (env['PATH'] case final existing?)
+        ...existing.split(host.pathListSeparator),
     ];
-    env['PATH'] = pathParts.where((e) => e.isNotEmpty).join(':');
+    env['PATH'] = pathParts
+        .where((e) => e.isNotEmpty)
+        .join(host.pathListSeparator);
 
     final root = flutterRoot;
     if (root != null) {
       env['FLUTTER_ROOT'] = root;
       // serverpod_cli (AOT) resolves the SDK via DART_SDK or by probing `dart`
       // on PATH. Pin explicitly so compile/run never pick another copy.
-      final dartSdk = p.join(root, 'bin', 'cache', 'dart-sdk');
+      final dartSdk = host.path.join(root, 'bin', 'cache', 'dart-sdk');
       if (Directory(dartSdk).existsSync()) {
         env['DART_SDK'] = dartSdk;
       }
@@ -115,6 +128,9 @@ class Toolchain {
           record ?? await InstallRecord.load(resolvedPaths.installRecordFile),
       sandbox: sandbox,
     );
-    return Toolchain(await probe.inventory(deep: deep));
+    return Toolchain(
+      await probe.inventory(deep: deep),
+      host: resolvedPaths.host,
+    );
   }
 }

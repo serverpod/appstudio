@@ -1,3 +1,9 @@
+// Starts real processes or opens AF_UNIX sockets: run in CI, not on the
+// Windows dev laptop, where a process exiting with an AF_UNIX socket open has
+// blue-screened Windows (afunix.sys). `flutter test -x process` skips it.
+@Tags(['process'])
+library;
+
 import 'dart:async';
 import 'dart:io';
 
@@ -32,7 +38,7 @@ void main() {
     required String serverDir,
   }) async {
     launches++;
-    final runner = await FakeRunner.start(serverDir, pid: 5000 + launches);
+    final runner = await FakeRunner.start(serverDir, pid: FakeRunner.fakePid(launches));
     runners.add(runner);
     return RunnerLaunch(
       output: Stream.fromIterable([

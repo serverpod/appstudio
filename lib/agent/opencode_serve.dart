@@ -2,7 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../platform/host.dart';
 import '../process/dev_session_cleanup.dart';
+import '../process/process_killer.dart';
+import '../process/tool_command.dart';
 import '../toolchain/tool_probe.dart';
 import '../toolchain/toolchain_controller.dart';
 
@@ -70,15 +73,16 @@ class OpenCodeServe {
 
     final Process process;
     try {
+      final command = resolveToolCommand(opencode, [
+        'serve',
+        '--hostname',
+        '127.0.0.1',
+        '--port',
+        '$port',
+      ]);
       process = await Process.start(
-        opencode,
-        [
-          'serve',
-          '--hostname',
-          '127.0.0.1',
-          '--port',
-          '$port',
-        ],
+        command.executable,
+        command.arguments,
         workingDirectory: projectPath,
         environment: env,
         runInShell: false,
@@ -177,7 +181,20 @@ class OpenCodeServe {
 
   /// SIGTERM, wait, then SIGKILL — and wait again, so this returns only once the
   /// process is really reaped rather than once a signal has been sent.
+  ///
+  /// On Windows there are no signals to send and `kill` would end `opencode`
+  /// alone, leaving the language servers it started; the tree goes instead.
   static Future<void> _reap(Process process) async {
+    if (currentHost.isWindows) {
+      await const ProcessKiller().stopTree(
+        process.pid,
+        grace: const Duration(seconds: 3),
+      );
+      try {
+        await process.exitCode.timeout(const Duration(seconds: 2));
+      } catch (_) {}
+      return;
+    }
     try {
       process.kill(ProcessSignal.sigterm);
       await process.exitCode.timeout(const Duration(seconds: 3));

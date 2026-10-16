@@ -5,6 +5,8 @@ import 'package:appstudio/session/project_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/host_skips.dart';
+
 /// A session with no project on disk — `openPath` validates against a real
 /// Serverpod package, which these tests have no use for.
 class _FakeSession extends ProjectSession {
@@ -253,7 +255,7 @@ void main() {
         '/p',
       ],
     ]);
-  });
+  }, skip: macOSOnlyForNow); // Windows: Phase 5 (editor launching)
 
   test('falls back to opening the folder as a document with no CLI', () async {
     // A layout change inside a future Cursor must downgrade the button to the

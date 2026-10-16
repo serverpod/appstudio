@@ -19,7 +19,9 @@ import '../session/project_session.dart';
 import '../toolchain/tool_status.dart';
 import '../toolchain/toolchain.dart';
 import '../toolchain/toolchain_controller.dart';
+import 'process_killer.dart';
 import 'project_dependencies.dart';
+import 'tool_command.dart';
 
 enum ProcessState { idle, starting, running, stopping }
 
@@ -753,13 +755,12 @@ class ServerpodProcessController extends ChangeNotifier
   }
 
   /// The runner by signal, for when its socket cannot ask it. It handles
-  /// SIGTERM as a graceful shutdown.
+  /// SIGTERM as a graceful shutdown; Windows has no such request, and there
+  /// its process tree is ended instead.
   void _signalRunner() {
     final pid = _pid;
     if (pid == null || pid <= 0) return;
-    try {
-      Process.killPid(pid, ProcessSignal.sigterm);
-    } catch (_) {}
+    unawaited(const ProcessKiller().requestStop(pid));
   }
 
   void _resetRunner() {
@@ -919,9 +920,13 @@ Future<RunnerLaunch> launchRunnerProcess({
   if (serverpod == null) {
     throw Exception(toolchain.unavailableReason(ToolId.serverpodCli));
   }
-  final process = await Process.start(
+  final command = resolveToolCommand(
     serverpod,
     ['runner', 'start', '--directory', serverDir],
+  );
+  final process = await Process.start(
+    command.executable,
+    command.arguments,
     workingDirectory: serverDir,
     environment: {
       ...toolchain.processEnvironment(),

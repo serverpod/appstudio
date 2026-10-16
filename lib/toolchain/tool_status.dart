@@ -241,9 +241,10 @@ class ToolchainInventory {
 
 /// Whether [root] is an SDK managed by FVM (`~/fvm/…`, a project's `.fvm/`) or
 /// Puro (`~/.puro/…`). Both resolve their `flutter` symlinks into their own
-/// directories, so the path says which one it is.
+/// directories, so the path says which one it is. Windows paths are split on
+/// either separator.
 bool isVersionManagedFlutter(String? root) {
   if (root == null) return false;
-  final segments = root.split('/');
+  final segments = root.split(RegExp(r'[/\\]'));
   return segments.any((s) => s == 'fvm' || s == '.fvm' || s == '.puro');
 }

@@ -1,0 +1,9 @@
+# LF in the repository and in every checkout, whatever the machine's
+# core.autocrlf. Without this a Windows checkout rewrites files the macOS build
+# generates (GeneratedPluginRegistrant.swift) and every edited file shows up
+# with mixed line endings.
+* text=auto eol=lf
+
+# cmd.exe reads batch files line by line and needs CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf

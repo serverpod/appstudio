@@ -1,3 +1,8 @@
+// Runs fake POSIX shells; Windows has no login shell to capture.
+@TestOn('mac-os || linux')
+@Tags(['process'])
+library;
+
 import 'dart:io';
 
 import 'package:appstudio/toolchain/login_shell_path.dart';

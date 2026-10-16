@@ -6,3 +6,8 @@ tags:
   # Pixel snapshots. Fonts differ between machines and CI images, so these are
   # expected to be generated and compared on macOS with the bundled test font.
   golden:
+  # Tests that start real processes or open AF_UNIX sockets (fake runners).
+  # They run in CI. On the Windows dev laptop, skip them with
+  # `flutter test -x process`: a process exiting while it holds an AF_UNIX
+  # socket blue-screened Windows there (afunix.sys 10.0.26100.8972, 0xD1).
+  process:

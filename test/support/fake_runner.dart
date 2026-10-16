@@ -14,9 +14,13 @@ class FakeRunner {
   FakeRunner._(this.serverDir, this.pid, this._server);
 
   /// Creates a project under a short temp root — a Unix socket address has
-  /// to fit 104 bytes, and the system temp dir alone uses half of that.
+  /// to fit 104 bytes, and the macOS system temp dir alone uses half of that.
+  /// Windows has no `/tmp`; its temp dir (`%LOCALAPPDATA%\Temp`) is short
+  /// enough for the 108 bytes AF_UNIX allows there.
   static Future<Directory> createProject({String name = 'demo'}) async {
-    final root = await Directory('/tmp').createTemp('asr');
+    final base =
+        Platform.isWindows ? Directory.systemTemp : Directory('/tmp');
+    final root = await base.createTemp('asr');
     final serverDir = Directory(p.join(root.path, '${name}_server'));
     await serverDir.create(recursive: true);
     await File(p.join(serverDir.path, 'pubspec.yaml')).writeAsString(
@@ -30,12 +34,18 @@ class FakeRunner {
   static String serverDirOf(Directory projectRoot, {String name = 'demo'}) =>
       p.join(projectRoot.path, '${name}_server');
 
+  /// A pid no real process can have, for fakes: above macOS's highest
+  /// (99999) and odd, which Windows never hands out (its pids are multiples
+  /// of 4). App Studio signals a runner's pid when it cannot reach its
+  /// socket, and a fake that borrowed a real pid would have it killed.
+  static int fakePid(int n) => 1000001 + 2 * n;
+
   /// Starts serving for [serverDir] at [stage], with [snapshot] merged over a
-  /// minimal one.
+  /// minimal one. [pid] must come from [fakePid] or be otherwise impossible.
   static Future<FakeRunner> start(
     String serverDir, {
     String stage = 'running',
-    int pid = 424242,
+    int pid = 1424243,
     Map<String, Object?> snapshot = const {},
     int protocolVersion = 1,
   }) async {

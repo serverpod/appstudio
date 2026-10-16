@@ -1,3 +1,5 @@
 import 'dart:io';
 
-String? homeDirectory() => Platform.environment['HOME'];
+import '../platform/host.dart';
+
+String? homeDirectory() => currentHost.homeFrom(Platform.environment);

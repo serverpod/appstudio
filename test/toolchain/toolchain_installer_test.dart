@@ -1,3 +1,9 @@
+// The installer is macOS-only until Phase 3 of the Windows port; these run
+// sh scripts, `zip` and `chmod`.
+@TestOn('mac-os || linux')
+@Tags(['process'])
+library;
+
 import 'dart:io';
 
 import 'package:appstudio/toolchain/install_plan.dart';

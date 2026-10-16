@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../platform/host.dart';
+import '../util/home_dir.dart';
 import 'recent_projects_view.dart';
 
 class ProjectSession extends ChangeNotifier implements RecentProjectsView {
@@ -42,7 +44,7 @@ class ProjectSession extends ChangeNotifier implements RecentProjectsView {
     for (final candidate in [
       _newProjectDirectory,
       if (_recents.isNotEmpty) p.dirname(_recents.first),
-      Platform.environment['HOME'],
+      homeDirectory(),
     ]) {
       if (candidate == null || candidate.isEmpty) continue;
       if (Directory(candidate).existsSync()) return candidate;
@@ -97,7 +99,7 @@ class ProjectSession extends ChangeNotifier implements RecentProjectsView {
   }
 
   Future<void> _remember(String path) async {
-    final next = [path, ..._recents.where((e) => e != path)];
+    final next = [path, ..._recents.where((e) => !_samePath(e, path))];
     if (next.length > _maxRecents) {
       next.removeRange(_maxRecents, next.length);
     }
@@ -105,6 +107,12 @@ class ProjectSession extends ChangeNotifier implements RecentProjectsView {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_recentsKey, _recents);
   }
+
+  /// Windows paths name one folder whatever their case, so a project opened
+  /// as `c:\work\app` must not sit in Open Recent beside `C:\Work\app`.
+  static bool _samePath(String a, String b) => currentHost.isWindows
+      ? a.toLowerCase() == b.toLowerCase()
+      : a == b;
 
   Future<String?> _findServerpodRoot(String path) async {
     if (await _isServerpodPackage(path)) return path;

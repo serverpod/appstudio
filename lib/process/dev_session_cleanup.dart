@@ -1,9 +1,9 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../runner/runner_ownership.dart';
+import 'process_killer.dart';
 
 /// A long-lived child process whose pid is written to disk so the *next* launch
 /// can reclaim it.
@@ -27,8 +27,7 @@ enum DevProcessKind {
   /// Deliberately in the system temp dir: it must survive an isolate restart
   /// but not a reboot, and a stale file is harmless — the pid simply will not
   /// be alive.
-  String get pidFile =>
-      p.join(Directory.systemTemp.path, 'appstudio-$id.pid');
+  String get pidFile => p.join(Directory.systemTemp.path, 'appstudio-$id.pid');
 }
 
 /// Clears orphaned child processes left by a hot restart, a crash or a hard
@@ -77,49 +76,4 @@ Future<void> _killRegisteredSessionPid(DevProcessKind kind) async {
   } catch (_) {}
 }
 
-Future<void> _killProcessTree(int pid) async {
-  _signal(pid, ProcessSignal.sigterm);
-
-  await Future<void>.delayed(const Duration(milliseconds: 250));
-
-  if (!await _isProcessAlive(pid)) return;
-
-  _signal(pid, ProcessSignal.sigkill);
-
-  if (kDebugMode) {
-    await Future<void>.delayed(const Duration(milliseconds: 100));
-  }
-}
-
-/// Signals the process *group* led by [pid] if there is one, and the single
-/// process otherwise.
-///
-/// The fallback has to be driven by the return value, not by an exception.
-/// `Process.killPid` reports failure with `false` — it does not throw — so a
-/// `try`/`catch` around the group kill never fires and the single-process
-/// fallback never runs. That matters because only a child that called `setsid`
-/// leads its own group: a PTY child does, so `-pid` reaches its whole
-/// tree, but a plain `Process.start` child like `opencode serve` inherits
-/// our group and leads nothing, so `-pid` matches nothing at all. Silently. That
-/// is exactly how orphaned agents survived every reclaim on launch.
-void _signal(int pid, ProcessSignal signal) {
-  if (Platform.isMacOS || Platform.isLinux) {
-    var delivered = false;
-    try {
-      delivered = Process.killPid(-pid, signal);
-    } catch (_) {}
-    if (delivered) return;
-  }
-  try {
-    Process.killPid(pid, signal);
-  } catch (_) {}
-}
-
-Future<bool> _isProcessAlive(int pid) async {
-  try {
-    final result = await Process.run('kill', ['-0', '$pid']);
-    return result.exitCode == 0;
-  } catch (_) {
-    return false;
-  }
-}
+Future<void> _killProcessTree(int pid) => const ProcessKiller().stopTree(pid);

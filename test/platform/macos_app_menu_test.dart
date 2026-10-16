@@ -1,3 +1,7 @@
+// MacAppMenu installs itself only on a macOS host.
+@TestOn('mac-os')
+library;
+
 import 'package:appstudio/agent/agent_controller.dart';
 import 'package:appstudio/platform/macos_app_menu.dart';
 import 'package:appstudio/process/serverpod_process.dart';

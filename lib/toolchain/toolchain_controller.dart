@@ -192,7 +192,7 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
         final release = await fetchFlutterRelease(
           client,
           accepts: status.spec.accepts,
-          arch: currentPlatformKey() == 'macos-arm64' ? 'arm64' : 'x64',
+          arch: currentArch(),
         );
         // An update runs `flutter upgrade`, which picks its own release; the
         // feed only says what that will be.
@@ -360,7 +360,10 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
             'No Serverpod version was chosen.',
           );
         }
-        final executable = p.join(paths.dartInstallBinDir, 'serverpod');
+        final executable = paths.host.path.join(
+          paths.dartInstallBinDir,
+          paths.host.installedExecutableName('serverpod'),
+        );
         final existedBefore = await File(executable).exists();
         final previous = _record[ToolId.serverpodCli];
         final installed = await installer.installServerpod(
@@ -479,7 +482,7 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
     final dart = _current.dartExecutable;
     if (dart == null) {
       try {
-        final cache = Directory(p.join(paths.home, '.pub-cache'));
+        final cache = Directory(paths.defaultPubCache);
         if (await cache.exists()) await cache.delete(recursive: true);
         return null;
       } catch (e) {

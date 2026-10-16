@@ -10,6 +10,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shad/shad.dart';
 
+import '../support/host_skips.dart';
+
 /// A [ToolsView] whose preflight is answered by the test, one call at a time.
 ///
 /// The real one goes to the network, and the whole point of the screen is what
@@ -226,7 +228,7 @@ void main() {
     await settleDialog(tester);
 
     expect(find.byType(ManualUpdateDialog), findsNothing);
-  });
+  }, skip: macOSOnlyForNow); // Windows: Phase 3 (flutter.bat update command)
 
   test('the update command switches channel only when it has to', () {
     const candidate = ToolCandidate(

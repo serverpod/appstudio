@@ -7,6 +7,8 @@ import 'package:appstudio/widgets/command_block.dart';
 import 'package:appstudio/widgets/settings_table.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import '../support/host_skips.dart';
 import 'package:shad/shad.dart';
 
 void main() {
@@ -82,7 +84,7 @@ void main() {
     );
     // Not also the generic "missing" banner — the specific one says it all.
     expect(find.textContaining('is missing'), findsNothing);
-  });
+  }, skip: macOSOnlyForNow); // Windows: Phase 3 (flutter.bat update command)
 
   testWidgets('a shell App Studio cannot edit gets the lines to add by hand',
       (tester) async {

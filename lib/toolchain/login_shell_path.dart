@@ -25,6 +25,8 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../platform/host.dart';
+
 /// Wraps the value so rc noise — banners, version-manager chatter, a
 /// `compinit` warning — cannot be mistaken for the answer.
 const _marker = '__APP_STUDIO_PATH__';
@@ -39,10 +41,15 @@ typedef LoginShellPathReader = Future<String?> Function();
 ///
 /// Never throws: a shell that is missing, wedged or hostile must degrade to
 /// "no extra PATH", not take the probe down with it.
+///
+/// Windows has no login shell, and a GUI app there inherits Explorer's
+/// environment rather than launchd's, so there is nothing to ask: null.
 Future<String?> captureLoginShellPath({
   String? shellOverride,
   Duration timeout = _defaultTimeout,
+  HostPlatform? host,
 }) async {
+  if ((host ?? currentHost).isWindows) return null;
   final shell = shellOverride ?? Platform.environment['SHELL'] ?? '/bin/zsh';
 
   final Process process;

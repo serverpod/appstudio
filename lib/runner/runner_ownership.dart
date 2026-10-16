@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 
+import '../process/process_killer.dart';
 import 'runner_client.dart';
 import 'runner_discovery.dart';
 
@@ -95,7 +96,7 @@ Future<void> reclaimOwnedRunner({
         }
       case NoRunner(staleManifest: final manifest?)
           when manifest.pid == owned.pid && !manifest.isFinished:
-        Process.killPid(owned.pid, ProcessSignal.sigterm);
+        await const ProcessKiller().requestStop(owned.pid);
       case _:
         break;
     }
