@@ -1,0 +1,69 @@
+# Analyze and test on macOS and Windows.
+#
+# macOS is the gate that the Windows port changes nothing for macOS users:
+# the whole existing suite, including the `tool` tests for the release
+# scripts. Windows runs the same suite, including the `process` tests (real
+# child processes and AF_UNIX fake runners) that are not run on the Windows
+# dev laptop — see the `process` tag in dart_test.yaml and the afunix.sys risk
+# in specs/windows_port.md. On a hosted runner, a crash there only costs a VM.
+name: CI
+
+on:
+  push:
+    branches: [main, 'windows/**', 'spike/**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: true
+
+      - name: Versions
+        run: flutter --version
+
+      - name: Dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      # One test file at a time on Windows: the same way the suite is run on
+      # the dev laptop, and the AF_UNIX tests do not race each other.
+      - name: Test (macOS)
+        if: runner.os == 'macOS'
+        run: flutter test
+
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        run: flutter test -j 1
+
+      # Which afunix.sys this runner had, next to the result, for the crash
+      # tracked in specs/windows_afunix_bsod_report.md.
+      - name: Windows build and afunix.sys
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $cv = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+          "Windows $($cv.ProductName) build $($cv.CurrentBuild).$($cv.UBR)"
+          (Get-Item "$env:SystemRoot\System32\drivers\afunix.sys").VersionInfo.FileVersion
