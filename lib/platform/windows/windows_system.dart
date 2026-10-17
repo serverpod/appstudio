@@ -114,6 +114,17 @@ bool developerModeEnabled(WindowsSystem windows) =>
         RegistryRoot.localMachine, kAppModelUnlockKey, kDeveloperModeValue) ==
     1;
 
+/// Win32 long paths: `LongPathsEnabled` = 1 lifts the 260-character MAX_PATH
+/// limit for programs that opt in, which Git, Dart and Flutter do.
+const kFileSystemKey = r'SYSTEM\CurrentControlSet\Control\FileSystem';
+const kLongPathsValue = 'LongPathsEnabled';
+
+/// Whether long paths are on. Off is the Windows default, and deep pub cache,
+/// build and CEF trees can then fail in ways that look unrelated.
+bool longPathsEnabled(WindowsSystem windows) =>
+    windows.readDword(RegistryRoot.localMachine, kFileSystemKey, kLongPathsValue) ==
+    1;
+
 /// Whether Group Policy has switched Developer Mode off, in which case only
 /// the policy's administrator can turn it on.
 bool developerModeLockedByPolicy(WindowsSystem windows) =>

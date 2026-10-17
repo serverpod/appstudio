@@ -11,7 +11,7 @@ import '../../widgets/determinate_progress.dart';
 import '../../widgets/error_banner.dart';
 import '../../widgets/settings_table.dart';
 import 'toolchain_notices.dart';
-import 'toolchain_setup_dialog.dart' show installCaption;
+import 'toolchain_setup_dialog.dart' show installCaption, kLongPathsWarning;
 import 'tools_view.dart';
 
 /// Which tools are in play, which version, and who installed them.
@@ -102,6 +102,10 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
                 if (inventory[id] case final status?) _rowFor(theme, status),
             ],
           ),
+          if (inventory.longPathsDisabled) ...[
+            const ShadGap(3),
+            Text(kLongPathsWarning, style: theme.textTheme.muted),
+          ],
           for (final status in manual) ...[
             const ShadGap(3),
             ErrorBanner(message: manualUpdateMessage(status)),

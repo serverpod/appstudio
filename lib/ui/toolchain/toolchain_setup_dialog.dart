@@ -14,6 +14,13 @@ import 'tools_view.dart';
 import '../../widgets/app_dialog.dart';
 import '../../widgets/dialog_body.dart';
 
+/// Windows, when long paths are off. A warning, not a step: App Studio does not
+/// change machine settings it does not need, and most projects never hit it.
+const kLongPathsWarning =
+    'Long paths are turned off on this PC, so builds in deeply nested folders '
+    'can fail. To turn them on, go to Settings → System → For developers → '
+    'Enable long paths.';
+
 /// Raises the install plan. Completes when the toolchain is in place — the
 /// dialog closes itself — or never, if the user quits from it.
 ///
@@ -203,6 +210,10 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
               if (inventory[id] case final status?) _row(theme, status),
           ],
         ),
+        if (inventory.longPathsDisabled) ...[
+          const SizedBox(height: 12),
+          Text(kLongPathsWarning, style: theme.textTheme.muted),
+        ],
       ],
     );
   }

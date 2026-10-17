@@ -197,6 +197,7 @@ class ToolchainInventory {
     required this.manifest,
     required this.tools,
     this.legacyInstallFound = false,
+    this.longPathsDisabled = false,
   });
 
   final ToolManifest manifest;
@@ -206,6 +207,10 @@ class ToolchainInventory {
   /// or the `PATH` block it wrote. Setup removes both before installing the
   /// new way.
   final bool legacyInstallFound;
+
+  /// Windows: long paths are off. A warning only — App Studio does not change
+  /// the setting, and setup does not wait on it.
+  final bool longPathsDisabled;
 
   ToolStatus? operator [](ToolId id) => tools[id];
 

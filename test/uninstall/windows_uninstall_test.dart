@@ -76,13 +76,13 @@ void main() {
 
   ToolchainInstaller installer({
     FakeWindowsSystem? windows,
-    Future<ProcessResult> Function(String, List<String>)? runUninstaller,
+    Future<ProcessResult> Function(String, List<String>)? runProcess,
   }) =>
       ToolchainInstaller(
         paths: paths,
         windows: windows ?? FakeWindowsSystem(),
         pollInterval: const Duration(milliseconds: 10),
-        runUninstaller: runUninstaller,
+        runProcess: runProcess,
       );
 
   group('Git for Windows', () {
@@ -90,7 +90,7 @@ void main() {
       final git = await seedGit();
       final uninstaller = gitUninstaller();
 
-      await installer(runUninstaller: uninstaller.run).uninstallGit(git);
+      await installer(runProcess: uninstaller.run).uninstallGit(git);
 
       expect(uninstaller.runs, [
         [
@@ -109,7 +109,7 @@ void main() {
       final uninstaller = gitUninstaller(exitCode: 1, removes: false);
 
       await expectLater(
-        installer(runUninstaller: uninstaller.run).uninstallGit(git),
+        installer(runProcess: uninstaller.run).uninstallGit(git),
         throwsA(isA<ToolInstallException>()),
       );
       expect(await File(p.join(git.path!, 'cmd', 'git.exe')).exists(), isTrue);
@@ -120,7 +120,7 @@ void main() {
       final uninstaller = gitUninstaller();
 
       await expectLater(
-        installer(runUninstaller: uninstaller.run).uninstallGit(git),
+        installer(runProcess: uninstaller.run).uninstallGit(git),
         throwsA(isA<ToolInstallException>().having(
             (e) => e.message, 'message', contains('Installed apps'))),
       );
@@ -129,7 +129,7 @@ void main() {
 
     test('already gone is done', () async {
       final uninstaller = gitUninstaller();
-      await installer(runUninstaller: uninstaller.run).uninstallGit(
+      await installer(runProcess: uninstaller.run).uninstallGit(
         RecordedInstall(
           id: ToolId.git,
           path: p.join(tmp.path, 'nowhere'),
@@ -255,7 +255,7 @@ void main() {
         record: record,
         installer: installer(
           windows: windows,
-          runUninstaller: gitUninstaller().run,
+          runProcess: gitUninstaller().run,
         ),
         probeSandbox: ProbeSandbox.empty,
       );

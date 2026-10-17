@@ -70,9 +70,9 @@ class ToolchainInstaller {
     this.pollInterval = const Duration(seconds: 3),
     @visibleForTesting
     Future<ProcessResult> Function(String executable, List<String> arguments)?
-        runUninstaller,
+        runProcess,
   })  : _http = httpClient ?? http.Client(),
-        _runUninstaller = runUninstaller ?? Process.run,
+        _runProcess = runProcess ?? Process.run,
         _loginShellPath = loginShellPath ?? captureLoginShellPath,
         profile = profile ??
             ShellProfile.resolve(home: paths.home, host: paths.host),
@@ -85,7 +85,7 @@ class ToolchainInstaller {
   final http.Client _http;
   final LoginShellPathReader _loginShellPath;
   final Future<ProcessResult> Function(String executable, List<String> args)
-      _runUninstaller;
+      _runProcess;
 
   /// The registry and the UAC prompt, on Windows.
   final WindowsSystem windows;
@@ -250,12 +250,31 @@ class ToolchainInstaller {
         detail: _tail('${result.stdout}\n${result.stderr}'),
       );
     }
+    await _enableGitLongPaths(git.path);
     return RecordedInstall(
       id: ToolId.git,
       path: root,
       version: '${release.version}',
       installedAt: DateTime.now(),
     );
+  }
+
+  /// `core.longpaths true`, so Git can check out the deep trees Flutter and
+  /// pub produce, but only when the user has not set it either way. Best
+  /// effort: Git works without it for almost every project.
+  Future<void> _enableGitLongPaths(String git) async {
+    try {
+      final current = await _runProcess(
+        git,
+        const ['config', '--global', '--get', 'core.longpaths'],
+      );
+      // Exit 1 is "not set"; anything set, true or false, is the user's.
+      if (current.exitCode != 1) return;
+      await _runProcess(
+        git,
+        const ['config', '--global', 'core.longpaths', 'true'],
+      );
+    } catch (_) {}
   }
 
   /// How long Git's uninstaller gets to finish.
@@ -279,7 +298,7 @@ class ToolchainInstaller {
         'Remove it from Settings → Apps → Installed apps.',
       );
     }
-    final result = await _runUninstaller(uninstaller.path, const [
+    final result = await _runProcess(uninstaller.path, const [
       '/VERYSILENT',
       '/NORESTART',
       '/SUPPRESSMSGBOXES',

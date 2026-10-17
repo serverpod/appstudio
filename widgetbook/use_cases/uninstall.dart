@@ -32,6 +32,15 @@ final uninstallFolder = WidgetbookFolder(
               _confirm(const [ToolId.serverpodCli, ToolId.flutter]),
         ),
         WidgetbookUseCase(
+          name: 'Windows: App Studio installed everything',
+          builder: (_) => _confirm(const [
+            ToolId.serverpodCli,
+            ToolId.flutter,
+            ToolId.git,
+            ToolId.developerMode,
+          ]),
+        ),
+        WidgetbookUseCase(
           name: 'App Studio installed no tools',
           builder: (_) => _confirm(const []),
         ),

@@ -63,14 +63,17 @@ ToolCandidate _tooOld(ToolId id, String version, {String root = '/usr/local'}) =
 ToolchainInventory _inventory(
   Map<ToolId, (List<ToolCandidate>, ToolAction)> byTool, {
   bool legacy = false,
+  ToolManifest? manifest,
+  bool longPathsDisabled = false,
 }) =>
     ToolchainInventory(
-      manifest: previewManifest,
+      manifest: manifest ?? previewManifest,
       legacyInstallFound: legacy,
+      longPathsDisabled: longPathsDisabled,
       tools: {
         for (final entry in byTool.entries)
           entry.key: ToolStatus(
-            spec: previewManifest[entry.key]!,
+            spec: (manifest ?? previewManifest)[entry.key]!,
             candidates: entry.value.$1,
             action: entry.value.$2,
           ),
@@ -166,6 +169,88 @@ final previewPlan = InstallPlan({
     version: ToolVersion.tryParse('4.0.3'),
   ),
 });
+
+// -- Windows ------------------------------------------------------------------
+
+/// The Windows tool set: Developer Mode and Git for Windows instead of Apple's
+/// command line tools.
+final windowsPreviewManifest = ToolManifest(
+  tools: {
+    ToolId.developerMode: _spec(ToolId.developerMode, '*'),
+    ToolId.git: _spec(ToolId.git, '>=2.40.0'),
+    ToolId.flutter: _spec(ToolId.flutter, '>=3.47.0'),
+    ToolId.serverpodCli: _spec(ToolId.serverpodCli, '>=4.0.0 <4.1.0'),
+  },
+);
+
+/// A fresh Windows PC: Developer Mode off, nothing installed, and long paths
+/// off, as Windows ships.
+final windowsEmptyInventory = _inventory(
+  {
+    for (final id in windowsPreviewManifest.tools.keys)
+      id: (const <ToolCandidate>[], ToolAction.install),
+  },
+  manifest: windowsPreviewManifest,
+  longPathsDisabled: true,
+);
+
+/// Developer Mode already on and the user's own Git, so only Flutter and the
+/// Serverpod CLI are App Studio's to install.
+final windowsMixedInventory = _inventory(
+  {
+    ToolId.developerMode: (
+      [_found(ToolId.developerMode, ToolSource.host, null)],
+      ToolAction.none,
+    ),
+    ToolId.git: (
+      [_found(ToolId.git, ToolSource.host, '2.51.0')],
+      ToolAction.none,
+    ),
+    ToolId.flutter: (const <ToolCandidate>[], ToolAction.install),
+    ToolId.serverpodCli: (const <ToolCandidate>[], ToolAction.install),
+  },
+  manifest: windowsPreviewManifest,
+);
+
+/// What preflight finds for [windowsEmptyInventory].
+final windowsPreviewPlan = InstallPlan({
+  ToolId.developerMode: const PlannedTool(id: ToolId.developerMode),
+  ToolId.git: PlannedTool(
+    id: ToolId.git,
+    version: ToolVersion.tryParse('2.51.0'),
+    gitRelease: GitRelease(
+      version: ToolVersion.tryParse('2.51.0')!,
+      installerUrl: Uri.parse('https://example.invalid/Git-64-bit.exe'),
+      sha256: 'b' * 64,
+      downloadBytes: 68 * 1000 * 1000,
+    ),
+  ),
+  ...previewPlan.tools,
+}..remove(ToolId.commandLineTools));
+
+/// Windows' UAC prompt is up for Developer Mode.
+final waitingForApprovalProgress = InstallProgress(
+  startedAt: DateTime.utc(2026, 1, 1, 12),
+  now: DateTime.utc(2026, 1, 1, 12, 0, 20),
+  tools: const [
+    ToolProgress(id: ToolId.developerMode, phase: ToolPhase.waitingForApproval),
+    ToolProgress(id: ToolId.git, phase: ToolPhase.queued),
+    ToolProgress(id: ToolId.flutter, phase: ToolPhase.queued),
+    ToolProgress(id: ToolId.serverpodCli, phase: ToolPhase.queued),
+  ],
+);
+
+/// Git for Windows' installer running silently.
+final installingGitProgress = InstallProgress(
+  startedAt: DateTime.utc(2026, 1, 1, 12),
+  now: DateTime.utc(2026, 1, 1, 12, 1, 30),
+  tools: const [
+    ToolProgress(id: ToolId.developerMode, phase: ToolPhase.done),
+    ToolProgress(id: ToolId.git, phase: ToolPhase.installing),
+    ToolProgress(id: ToolId.flutter, phase: ToolPhase.queued),
+    ToolProgress(id: ToolId.serverpodCli, phase: ToolPhase.queued),
+  ],
+);
 
 /// A download in flight, so the progress view can be seen without waiting for
 /// a real 2 GB transfer. Fixed times so the remaining-time text is identical

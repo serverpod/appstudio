@@ -146,6 +146,20 @@ final firstRunFolder = WidgetbookFolder(
               installError: 'Serverpod could not be installed.',
             ),
           ),
+          (
+            'Windows, nothing installed',
+            FakeToolsView(
+              inventory: windowsEmptyInventory,
+              plan: windowsPreviewPlan,
+            ),
+          ),
+          (
+            'Windows, Developer Mode and Git already there',
+            FakeToolsView(
+              inventory: windowsMixedInventory,
+              plan: windowsPreviewPlan,
+            ),
+          ),
         ])
           WidgetbookUseCase(
             name: name,
@@ -162,13 +176,17 @@ final firstRunFolder = WidgetbookFolder(
           ('Setting up Flutter', settingUpFlutterProgress),
           ('Installing Serverpod', installingServerpodProgress),
           ('Finishing up', finishingProgress),
+          ('Windows: approve Developer Mode', waitingForApprovalProgress),
+          ('Windows: installing Git', installingGitProgress),
         ])
           WidgetbookUseCase(
             name: name,
             builder: (_) => _onLanding(
               ToolchainSetupDialog(
                 toolchains: FakeToolsView(
-                  inventory: emptyInventory,
+                  inventory: name.startsWith('Windows')
+                      ? windowsEmptyInventory
+                      : emptyInventory,
                   progress: progress,
                   isInstalling: true,
                   isBusy: true,

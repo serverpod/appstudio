@@ -294,6 +294,7 @@ class ToolProbe {
       manifest: manifest,
       tools: tools,
       legacyInstallFound: await _legacyInstallFound(),
+      longPathsDisabled: _host.isWindows && !longPathsEnabled(_windows),
     );
   }
 

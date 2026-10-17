@@ -132,6 +132,38 @@ void main() {
     });
   });
 
+  group('long paths', () {
+    final longPaths = FakeWindowsSystem.keyFor(
+        RegistryRoot.localMachine, kFileSystemKey, kLongPathsValue);
+
+    Future<ToolchainInventory> probe(FakeWindowsSystem system) async {
+      final manifest =
+          ToolManifest.tryParse(await loadTestManifestSource(), host: windows)!;
+      return ToolProbe(
+        paths: ToolchainPaths.forHome(r'C:\Users\alex', host: windows),
+        manifest: manifest,
+        record: InstallRecord.empty,
+        sandbox: ProbeSandbox(
+          runner: (executable, arguments, {environment}) async =>
+              ProcessResult(0, 1, '', ''),
+          loginShellPath: () async => null,
+          environment: const {'PATH': ''},
+          windows: system,
+        ),
+      ).inventory();
+    }
+
+    test('off, the Windows default, is a warning', () async {
+      final inventory = await probe(FakeWindowsSystem());
+      expect(inventory.longPathsDisabled, isTrue);
+    });
+
+    test('on is nothing to say', () async {
+      final inventory = await probe(FakeWindowsSystem(values: {longPaths: 1}));
+      expect(inventory.longPathsDisabled, isFalse);
+    });
+  });
+
   group('the user Path', () {
     ToolchainInstaller installer(FakeWindowsSystem system) =>
         ToolchainInstaller(
