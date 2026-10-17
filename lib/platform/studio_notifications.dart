@@ -2,23 +2,24 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
-/// Thin bridge to macOS UserNotifications (main app only).
+/// Thin bridge to macOS UserNotifications (main app only), and to toast
+/// notifications on Windows (`windows/runner/toast_notifications.cpp`).
 ///
-/// Permission is requested lazily on first [show] — not at launch — so CEF's
-/// Helper (Alerts) is not needed for App Studio's own alerts.
+/// On macOS, permission is requested lazily on first [show] — not at launch —
+/// so CEF's Helper (Alerts) is not needed for App Studio's own alerts.
 class StudioNotifications {
   StudioNotifications._();
 
   static const _channel = MethodChannel('dev.serverpod.appstudio/notifications');
 
-  /// Posts a notification. On macOS, skipped when the app is frontmost unless
-  /// [force] is true. No-ops on other platforms.
+  /// Posts a notification, skipped when the app is frontmost unless [force]
+  /// is true. No-ops on other platforms.
   static Future<void> show({
     required String title,
     required String body,
     bool force = false,
   }) async {
-    if (!Platform.isMacOS) return;
+    if (!Platform.isMacOS && !Platform.isWindows) return;
     try {
       await _channel.invokeMethod<void>('show', {
         'title': title,

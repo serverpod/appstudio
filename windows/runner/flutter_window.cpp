@@ -7,6 +7,7 @@
 #include <string>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "toast_notifications.h"
 #include "winsparkle_updater.h"
 
 namespace {
@@ -47,6 +48,8 @@ bool FlutterWindow::OnCreate() {
 
   updater_ = std::make_unique<WinSparkleUpdater>(
       flutter_controller_->engine()->messenger(), GetHandle());
+  notifications_ = std::make_unique<ToastNotifications>(
+      flutter_controller_->engine()->messenger(), GetHandle());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
@@ -66,6 +69,7 @@ void FlutterWindow::OnDestroy() {
   // Before the engine whose messenger it uses.
   lifecycle_channel_ = nullptr;
   updater_ = nullptr;
+  notifications_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
