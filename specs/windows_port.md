@@ -656,6 +656,75 @@ Work was done on the branch `spike/windows-phase0`. Nothing is committed.
   `version.g.dart`) on Windows; analytics id `%USERPROFILE%\.serverpod\uuid`
   (matches the CLIs' `LocalStorageManager.homeDirectory`).
 
+#### As built (2026-10-17)
+
+- **Menu:** `lib/platform/windows_app_menu.dart` (`WindowsAppMenuBar`) is a
+  shad menu strip above the app, mounted through `ShadApp.builder` on
+  Windows only.
+  - Menus: File (New, Open, Open Recent, Close, Settings, Exit) · View
+    (Appearance) · Server · Logs · Help (updates, Uninstall).
+  - Shortcuts: a `HardwareKeyboard` handler, with Ctrl but not Alt (AltGr
+    is Ctrl+Alt).
+  - **Deviation from 4.5:** there is no `AppCommands` extraction. The strip
+    repeats `MacAppMenu`'s enable rules command for command, so the macOS
+    menu code is untouched.
+- **Shortcut hints:** `shortcutHint()` (`lib/platform/shortcut_hint.dart`)
+  gives `Ctrl+Shift+R` on Windows and `⇧⌘R` on macOS.
+- **Fonts:**
+  - UI text uses shad's bundled Inter on Windows. Segoe UI Variable was
+    not adopted: Inter keeps the macOS metrics, and the weight-axis
+    correction is set to 1 on Windows.
+  - Monospace: `kMonoFont` (renamed from `kMacMonoFont`) is Cascadia Mono
+    on Windows and Menlo on macOS.
+- **`openUrl`:** `ShellExecuteW` "open" through `Win32System.shellOpen`,
+  with no `url_launcher`.
+- **External editors (4.7):**
+  - Cursor and VS Code run as `<exe> resources\app\out\cli.js <folder>`
+    with `ELECTRON_RUN_AS_NODE=1`, which is what their `bin\*.cmd` does.
+    The exe is real, so the folder is passed as one argument with no
+    cmd.exe parsing.
+  - Search order: `%LOCALAPPDATA%\Programs` first, then `%ProgramFiles%`
+    (VS Code only).
+  - No `cli.js` means no button. Unlike macOS there is no `open -a` to
+    fall back to.
+  - Claude, Codex and OpenCode open by deep link through `ShellExecute`.
+    The link is offered only when `AssocQueryStringW` finds a handler for
+    the scheme, which covers Store apps too. Antigravity gets no button.
+  - **Still to verify:** that Cursor's CLI reaches its Agents Window on
+    Windows.
+- **Preview keys (W4):**
+  - The runner now calls `routeKeyForCEF` after `TranslateMessage` and
+    skips `DispatchMessage` for keys that belong to the page alone.
+  - While the preview has Flutter focus:
+    - Ctrl+X/C/V/A/Z/Y and Ctrl+Shift+Z become frame editing commands, as
+      on macOS.
+    - Ctrl on another character key stays the app's shortcut.
+    - Modifiers and IME keys go to both the page and Flutter.
+    - Alt+F4 stays with the window.
+    - Everything else, including AltGr characters, goes to the page alone.
+  - A key up always follows its key down.
+  - Keys typed while the preview is not focused no longer reach the page.
+  - **Verified** with a throwaway spike that posted keys to its own window.
+    a, Ctrl+A, Ctrl+Left and AltGr+2 reached the page once each and
+    Flutter not at all. Ctrl+R reached Flutter only. A key typed into a
+    Flutter field reached that field only.
+- **Version:** the runner answers `updates.getState` with `configured:
+  false` and the `currentVersion`/`currentBuild` CMake compiles in from
+  pubspec (`0.2.3+22` → `0.2.3`, `22`). The version label and analytics
+  get it, and WinSparkle extends the same channel in Phase 8. The analytics
+  id already resolves to `%USERPROFILE%\.serverpod\uuid` through
+  `homeDirectory()` (Phase 1).
+- **Deferred:**
+  - Notifications move to Phase 8. Toasts need the AppUserModelID that
+    the installer's Start-menu shortcut provides, and
+    `StudioNotifications` already does nothing off macOS.
+  - Widgetbook Windows use cases (the menu strip, the setup rows for
+    Developer Mode and Git) are not done.
+- **Still to check in the VM:** the version line in the log
+  (`UpdateController: … Version 0.2.3 (build 22)`), the editor buttons
+  with real installs, and preview copy and paste against a real Flutter
+  web app.
+
 ### Phase 6 — Uninstall on Windows (M)
 
 Remove `%APPDATA%\App Studio`, `%LOCALAPPDATA%\App Studio` (CEF),
@@ -681,9 +750,9 @@ underneath.
 ### Phase 8 — Packaging, signing, updates, release tooling (L)
 
 Per D4. The installer is needed for the first public v1 build. WinSparkle can
-follow it (D1). Until then the `updates` channel stays unimplemented and
-Check for Updates is greyed out, which is what `UpdateController` already
-does for a `MissingPluginException`.
+follow it (D1). Until then the runner's `updates` channel answers only
+`getState`, with the version and `configured: false`, so Check for Updates
+is greyed out (Phase 5).
 
 - **Installer:** Inno Setup per-user install to
   `%LOCALAPPDATA%\Programs\App Studio` (no admin), Start-menu shortcut with
