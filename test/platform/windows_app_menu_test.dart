@@ -62,6 +62,7 @@ void main() {
           onNewProject: () => newProjects++,
           onCheckForUpdates: () {},
           onUninstall: () {},
+          onAbout: () {},
           canCheckForUpdates: () => false,
           updatesUnavailableReason: () => null,
           onSetAutomaticUpdates: (_) {},

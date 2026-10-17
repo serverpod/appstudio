@@ -106,6 +106,42 @@ Note anything seen on screen that the report cannot show.
    System → For developers, with *Try again* and *Quit*.
 4. Report: `-Label D-standard-user`.
 
+### Pass E — the installer and the Windows polish (snapshot `pristine`)
+
+Uses the installer instead of the copied folder: `AppStudio-<v>-x64-setup.exe`
+from `tool\windows\build_release.ps1` (or from CI's `windows installer` job).
+
+1. Run the installer. Expect no administrator prompt. Afterwards, App Studio
+   is in the Start menu and under Settings → Apps → Installed apps, and it
+   opens.
+2. **One instance:** start it again from the Start menu. The open window
+   comes to the front; there is no second window.
+3. **Version:** Help → About App Studio shows `Version <v> (build <n>)`, the
+   Windows build number from `windows/release.json`. Help → Check for
+   Updates is greyed out unless the build has a feed.
+4. **Notifications:** with a project running, switch to another app and let
+   the agent finish a task. A toast from App Studio appears.
+5. **Menus:** File, View, Server, Logs and Help work, and so do Ctrl+N,
+   Ctrl+O, Ctrl+W, Ctrl+, , Ctrl+R, Ctrl+Shift+R, Ctrl+M and Ctrl+L.
+6. **Preview keys:** in a text field of the running Flutter web app, type
+   text, then use Ctrl+A, Ctrl+C, Ctrl+V and Ctrl+Z. Typing `r` must not
+   restart anything, and Ctrl+R must hot-restart.
+7. **Open in:** with VS Code or Cursor installed, the toolbar opens the
+   project there. With Claude Desktop installed, its link opens it.
+8. **Compact window:** in a phone view, minimize the preview. The window
+   becomes phone-shaped, borderless and opaque. Drag it by the frame's edge,
+   resize from a corner (the aspect holds), flip the orientation, then
+   expand. The window comes back where and as it was.
+9. **Uninstall:** Help → Uninstall App Studio…, with Git ticked and Developer
+   Mode unticked, then Settings → Apps to remove the app itself. Afterwards,
+   none of these remain:
+   - `%APPDATA%\App Studio`;
+   - `%LOCALAPPDATA%\App Studio`;
+   - `%APPDATA%\Serverpod\App Studio`;
+   - `%LOCALAPPDATA%\Programs\App Studio`;
+   - Git.
+10. Report: `-Label E-installer`.
+
 ## 4. If the VM blue-screens
 
 Revert nothing yet. After it reboots, run the report — it lists the crash

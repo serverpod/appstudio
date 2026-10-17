@@ -37,6 +37,7 @@ class WindowsAppMenuBar extends StatefulWidget {
     required this.onNewProject,
     required this.onCheckForUpdates,
     required this.onUninstall,
+    required this.onAbout,
     required this.canCheckForUpdates,
     required this.updatesUnavailableReason,
     required this.onSetAutomaticUpdates,
@@ -57,6 +58,9 @@ class WindowsAppMenuBar extends StatefulWidget {
   final VoidCallback onNewProject;
   final VoidCallback onCheckForUpdates;
   final VoidCallback onUninstall;
+
+  /// Help → About App Studio: Windows has no system About panel.
+  final VoidCallback onAbout;
   final bool Function() canCheckForUpdates;
   final String? Function() updatesUnavailableReason;
   final ValueChanged<bool> onSetAutomaticUpdates;
@@ -469,6 +473,8 @@ class _WindowsAppMenuBarState extends State<WindowsAppMenuBar> {
       ),
       _divider,
       _item('Uninstall App Studio...', onPressed: widget.onUninstall),
+      _divider,
+      _item('About App Studio', onPressed: widget.onAbout),
     ];
   }
 }

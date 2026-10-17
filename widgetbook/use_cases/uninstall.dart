@@ -1,4 +1,5 @@
 import 'package:appstudio/toolchain/tool_status.dart';
+import 'package:appstudio/ui/about_dialog.dart';
 import 'package:appstudio/ui/uninstall/uninstall_confirm_dialog.dart';
 import 'package:appstudio/ui/uninstall/uninstalled_screen.dart';
 import 'package:appstudio/uninstall/uninstall_result.dart';
@@ -15,6 +16,21 @@ DialogUseCase _confirm(List<ToolId> removable) => DialogUseCase(
 final uninstallFolder = WidgetbookFolder(
   name: 'Uninstall',
   children: [
+    // Beside Uninstall in the Windows Help menu.
+    WidgetbookComponent(
+      name: 'About (Windows)',
+      useCases: [
+        WidgetbookUseCase(
+          name: 'Default',
+          builder: (_) => const DialogUseCase(
+            backdrop: StudioWindowMock(),
+            dialog: AboutAppStudioDialog(
+              versionLabel: 'Version 0.2.3 (build 22)',
+            ),
+          ),
+        ),
+      ],
+    ),
     WidgetbookComponent(
       name: 'Confirm',
       useCases: [

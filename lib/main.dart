@@ -23,6 +23,7 @@ import 'toolchain/toolchain_controller.dart';
 import 'update/session_teardown.dart';
 import 'update/update_controller.dart';
 import 'platform/macos_app_menu.dart';
+import 'ui/about_dialog.dart';
 import 'ui/migration_commands.dart';
 import 'ui/server_log/log_view_controller.dart';
 import 'ui/new_project_dialog.dart';
@@ -239,6 +240,7 @@ class _AppStudioAppState extends State<AppStudioApp> {
         onNewProject: _showNewProjectScreen,
         onCheckForUpdates: () => unawaited(widget.updates.checkForUpdates()),
         onUninstall: _confirmUninstall,
+        onAbout: _showAbout,
         canCheckForUpdates: () => widget.updates.state.canCheck,
         updatesUnavailableReason: () => widget.updates.state.unavailableReason,
         onSetAutomaticUpdates: (enabled) =>
@@ -397,6 +399,16 @@ class _AppStudioAppState extends State<AppStudioApp> {
   /// cleared and the session is stopped, so returning to the normal UI would
   /// only let the user act on things that no longer exist — and re-saving a
   /// preference would undo part of what they just asked for.
+  /// Windows' Help → About App Studio.
+  void _showAbout() {
+    final navigatorContext = _navigatorKey.currentContext;
+    if (!mounted || navigatorContext == null) return;
+    unawaited(showAboutAppStudio(
+      navigatorContext,
+      versionLabel: widget.updates.state.versionLabel,
+    ));
+  }
+
   Future<void> _confirmUninstall() async {
     final navigatorContext = _navigatorKey.currentContext;
     if (!mounted || navigatorContext == null || _uninstalled != null) return;
