@@ -7,9 +7,12 @@ import 'package:appstudio/runner/runner_protocol.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
+import '../support/afunix_guard.dart';
 import '../support/fake_runner.dart';
 
 void main() {
+  settleAfUnixSocketsAfterAll();
+
   late Directory root;
 
   setUp(() async {

@@ -19,11 +19,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../support/afunix_guard.dart';
 import '../support/fake_runner.dart';
 import '../support/toolchain_support.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  settleAfUnixSocketsAfterAll();
 
   late ProjectSession session;
   late ServerpodProcessController process;

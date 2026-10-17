@@ -6,6 +6,7 @@ import 'package:shad/shad.dart';
 
 import 'agent/agent_controller.dart';
 import 'analytics/app_analytics.dart';
+import 'platform/afunix_settle.dart';
 import 'platform/compact_window.dart';
 import 'platform/host.dart';
 import 'platform/window_close.dart';
@@ -219,6 +220,9 @@ class _AppStudioAppState extends State<AppStudioApp> {
     } catch (e) {
       debugPrint('exit teardown failed: $e');
     }
+    // The teardown closed the runner connection; on Windows, let the kernel
+    // finish closing it before the process goes (afunix.sys).
+    await settleAfUnixSockets();
     return AppExitResponse.exit;
   }
 

@@ -52,12 +52,14 @@ jobs:
         if: runner.os == 'macOS'
         run: flutter test
 
-      # Windows runs in pieces. Every full run so far took the machine down
-      # mid-test: the step limit below never fired and the job ran out its
-      # 30 minutes, which a hang inside a test cannot do. The likely cause is
-      # the afunix.sys crash in specs/windows_afunix_bsod_report.md, set off by
-      # a test process exiting with an AF_UNIX socket open. Separate steps name
-      # the file: the one left "in progress" is the one that was running.
+      # Windows runs in pieces. Runs before this change took the machine down
+      # mid-test: the step limit never fired and the job ran out its 30
+      # minutes, which a hang inside a test cannot do. The cause is the
+      # afunix.sys crash in specs/windows_afunix_bsod_report.md, set off by a
+      # test process ending with an AF_UNIX socket still open. The socket test
+      # files now let Windows finish closing sockets before they end
+      # (test/support/afunix_guard.dart). If one still takes the machine
+      # down, its step is the one left "in progress".
       #
       # Reading a job's log needs a GitHub sign-in; its annotations do not, so
       # what matters is reported as annotations.
@@ -80,45 +82,7 @@ jobs:
         timeout-minutes: 5
         run: flutter test test/runner/runner_discovery_test.dart
 
-      # serverpod_process_test is the file that takes the machine down. One
-      # step per group, in file order, to find the first group that does. A
-      # failing step does not stop the next: only a crash should.
-      - name: "Serverpod process 1: with no project"
+      - name: Test (Windows, Serverpod process)
         if: ${{ !cancelled() && runner.os == 'Windows' }}
-        timeout-minutes: 4
-        run: flutter test test/process/serverpod_process_test.dart --name "^with no project "
-
-      - name: "Serverpod process 2: a runner someone else started"
-        if: ${{ !cancelled() && runner.os == 'Windows' }}
-        timeout-minutes: 4
-        run: flutter test test/process/serverpod_process_test.dart --name "^a runner someone else started "
-
-      - name: "Serverpod process 3: a runner App Studio started"
-        if: ${{ !cancelled() && runner.os == 'Windows' }}
-        timeout-minutes: 4
-        run: flutter test test/process/serverpod_process_test.dart --name "^a runner App Studio started "
-
-      - name: "Serverpod process 4: the preview"
-        if: ${{ !cancelled() && runner.os == 'Windows' }}
-        timeout-minutes: 4
-        run: flutter test test/process/serverpod_process_test.dart --name "^the preview "
-
-      - name: "Serverpod process 5: runner stages"
-        if: ${{ !cancelled() && runner.os == 'Windows' }}
-        timeout-minutes: 4
-        run: flutter test test/process/serverpod_process_test.dart --name "^runner stages "
-
-      - name: "Serverpod process 6: actions"
-        if: ${{ !cancelled() && runner.os == 'Windows' }}
-        timeout-minutes: 4
-        run: flutter test test/process/serverpod_process_test.dart --name "^actions "
-
-      - name: "Serverpod process 7: the log"
-        if: ${{ !cancelled() && runner.os == 'Windows' }}
-        timeout-minutes: 4
-        run: flutter test test/process/serverpod_process_test.dart --name "^the log "
-
-      - name: "Serverpod process 8: server status"
-        if: ${{ !cancelled() && runner.os == 'Windows' }}
-        timeout-minutes: 4
-        run: flutter test test/process/serverpod_process_test.dart --name "^server status "
+        timeout-minutes: 5
+        run: flutter test test/process/serverpod_process_test.dart
