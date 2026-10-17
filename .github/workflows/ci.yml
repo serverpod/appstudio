@@ -59,25 +59,34 @@ jobs:
         timeout-minutes: 15
         run: flutter test -x process -j 1
 
-  # The AF_UNIX socket tests on Windows, apart so the rest of CI reports
-  # whatever happens to them.
+      # Which afunix.sys GitHub's Windows image has, for the crash the socket
+      # job below keeps meeting. Here, in a job that finishes: annotations of a
+      # job whose machine went down are never published.
+      - name: Windows build and afunix.sys
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $cv = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+          $afunix = (Get-Item "$env:SystemRoot\System32\drivers\afunix.sys").VersionInfo.FileVersion
+          "::notice title=Windows and afunix.sys::$($cv.ProductName) build $($cv.CurrentBuild).$($cv.UBR), afunix.sys $afunix"
+
+  # The AF_UNIX socket tests on Windows: a canary, not a gate.
   #
-  # Runs here have taken the machine down mid-test: the step limit never
-  # fired and the job ran out its 30 minutes, which a hang inside a test
-  # cannot do. The cause is the afunix.sys crash in
-  # specs/windows_afunix_bsod_report.md. The socket test files let Windows
-  # finish closing sockets before they end (test/support/afunix_guard.dart);
-  # with that, runner discovery passes. serverpod_process_test still crashed
-  # the machine, so it runs one group per step: the step left "in progress"
-  # names the group. A failing step does not skip the next; only a crash
-  # stops the job.
-  #
-  # Reading a job's log needs a GitHub sign-in; its annotations do not, so
-  # what matters is reported as annotations.
+  # They take GitHub's Windows machine down intermittently — the step limit
+  # never fires and the job runs out its time, which a hang inside a test
+  # cannot do. It is the afunix.sys crash in
+  # specs/windows_afunix_bsod_report.md, in plain in-process socket tests:
+  # runner discovery has both passed and crashed with the same code. Letting
+  # Windows finish closing sockets before the test process ends
+  # (test/support/afunix_guard.dart) did not make it go away. So the job is
+  # allowed to fail and is kept short; when it passes, it also tells us the
+  # tests themselves still pass on Windows. serverpod_process_test runs one
+  # group per step: the step left "in progress" names the group.
   windows-sockets:
-    name: windows sockets
+    name: windows sockets (canary)
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -89,13 +98,6 @@ jobs:
 
       - name: Dependencies
         run: flutter pub get
-
-      - name: Windows build and afunix.sys
-        shell: pwsh
-        run: |
-          $cv = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
-          $afunix = (Get-Item "$env:SystemRoot\System32\drivers\afunix.sys").VersionInfo.FileVersion
-          "::notice title=Windows and afunix.sys::$($cv.ProductName) build $($cv.CurrentBuild).$($cv.UBR), afunix.sys $afunix"
 
       - name: Runner discovery
         timeout-minutes: 5
