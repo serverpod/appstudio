@@ -785,6 +785,33 @@ Transparency: `DwmExtendFrameIntoClientArea` + a transparent Flutter
 surface; prototype first, ship only if it looks right with CEF composited
 underneath.
 
+#### As built (2026-10-17)
+
+- `windows/runner/compact_window.cpp` implements the `window` channel.
+  - **Shape:** the window goes borderless but stays sizable (`WS_THICKFRAME`
+    with `WM_NCCALCSIZE` returning 0), with rounded corners on Windows 11.
+  - **Size:** `WM_SIZING` holds the frame's aspect on the content (fixed
+    chrome, as on macOS). An orientation flip carries the frame's scale.
+    The window stays inside the work area and enters at most 80% of its
+    height.
+  - **Exit:** restores the saved placement and styles exactly.
+  - **Move and resize:** `startDrag` and `startResize` post a message that
+    starts Windows' own modal loops (`WM_NCLBUTTONDOWN` with `HTCAPTION` or
+    the corner's `HT*`), after the method call has been answered. The
+    corners' diagonal cursors come from the engine (`MouseRegion`), so
+    `showResizeCursor` is a no-op on Windows.
+- **Not transparent.** Flutter's Windows embedder draws to a swap chain DWM
+  cannot blend per pixel, so the margin around the frame shows the app's
+  background. `CompactWindowChannel.supportsTransparency` keeps `ShadApp`
+  opaque there.
+- The Windows menu strip hides while compact (`stripHidden`), swapped for an
+  empty box so the preview's subtree, and its CEF webview, is not rebuilt.
+  The shortcuts stay live.
+- **Verified** with a spike on the dev laptop: exact aspect at enter, the
+  scale carried over a flip, corner sizing held to the aspect down to the
+  minimum width, and the exact rectangle and style back on exit. **Still to
+  see** in the VM, against a real preview: how the opaque margin looks.
+
 ### Phase 8 — Packaging, signing, updates, release tooling (L)
 
 Per D4. The installer is needed for the first public v1 build. WinSparkle can
@@ -841,6 +868,63 @@ is greyed out (Phase 5).
   `release` command) is possible once Windows is stable. It is a separate
   decision, and nothing in this phase may assume it.
 
+#### As built (2026-10-17)
+
+- **Runner:**
+  - Product metadata: Serverpod, "App Studio".
+  - The App Studio icon, built from the macOS PNGs by
+    `tool/windows/make_icon.dart` (PNG entries in an `.ico`).
+  - One instance at a time: the `Serverpod.AppStudio.Running` mutex; a
+    second launch brings the first window forward.
+  - AppUserModelID `Serverpod.AppStudio`.
+- **Visual C++ runtime:** release builds install it beside the exe through
+  CMake's `InstallRequiredSystemLibraries` (Profile/Release only).
+- **WinSparkle 0.9.4:**
+  - Downloaded and checked against GitHub's digest in
+    `windows/runner/CMakeLists.txt`.
+  - `winsparkle_updater.cpp` answers the same `updates` methods as
+    `SparkleUpdater.swift`. Its shutdown request posts to the window, which
+    calls Dart's `prepareForRelaunch` (the teardown, then the AF_UNIX
+    settle), with a 20 s fallback before `DestroyWindow`.
+  - Configured only in release builds whose `windows/release.json` names
+    `appcastUrl` and `eddsaPublicKey`.
+  - **Differences from macOS:** WinSparkle cannot veto a scheduled check
+    while a session is busy (`setSessionBusy` is accepted and kept), and
+    there is no translocation.
+- **Toasts:** `toast_notifications.cpp` (C++/WinRT, `windowsapp.lib`),
+  skipped while App Studio is in the foreground unless forced.
+  `StudioNotifications` now posts on Windows too.
+- **Installer:** `windows/installer/app_studio.iss`, a per-user install into
+  `%LOCALAPPDATA%\Programs\App Studio` for Windows 10 1809+ x64.
+  - `AppMutex` and `CloseApplications`, and a Start menu entry with the
+    AUMID.
+  - A silent install (an update) relaunches the app.
+  - It never removes user data; Help → Uninstall App Studio does.
+  - Optional Authenticode through `/DSignTool`.
+- **Release scripts** (`tool/windows/`, PowerShell 5.1):
+  - `build_release.ps1`: version from pubspec, build from `release.json`
+    (`-BumpBuild`); checks the bundle, signs optionally, then ISCC and a
+    `.sha256` sidecar into `dist\windows`.
+  - `publish_release.ps1`: the immutable upload, as a preview.
+  - `promote_release.ps1`: verifies the uploaded installer against its
+    sidecar, signs it with `winsparkle-tool`, and puts it at the top of
+    `appcast/windows/appcast.xml`.
+  - `publish_downloads.ps1`: `downloads/windows.json`, latest and preview.
+  - Every script takes `-Bucket` (still to be chosen, Q7), `-PublicBaseUrl`
+    and `-DryRun`. Only the dry-run paths have been exercised.
+- **Uninstall:** removes the preferences folder too:
+  `%APPDATA%\Serverpod\App Studio`, named from `Runner.rc`.
+- **CI:** builds the release and the installer on `windows-latest` (the
+  `windows installer` job).
+- **Q8 resolved:** the executable stays `appstudio.exe`, shown as "App
+  Studio" through its version resource. New projects default to the home
+  folder, as on macOS.
+- **Still needs a person:**
+  - a code-signing credential (Q5);
+  - the release bucket (Q7);
+  - generating and storing the WinSparkle key pair;
+  - a first real install and update in the VM.
+
 ### Phase 9 — Docs (S, continuous)
 
 - `AGENTS.md`: a "Windows" section mirroring the macOS sections that differ
@@ -850,6 +934,13 @@ is greyed out (Phase 5).
 - `pubspec.yaml` description: drop "macOS".
 
 ---
+
+#### As built (2026-10-17)
+
+`AGENTS.md` has a Windows section: dev machine, the afunix rules, the platform
+seam, paths, toolchain, window, CEF and keys, releases, CI. The README covers
+running, testing and releasing on Windows. The `pubspec.yaml` description no
+longer says macOS only.
 
 ## 6. Testing & CI
 
@@ -877,6 +968,22 @@ is greyed out (Phase 5).
   window, Check for Updates greyed in debug.
 - **Windows smoke checklist** (same list, Windows equivalents) from Phase 4
   on.
+- **As run (2026-10-17):** `.github/workflows/ci.yml` has four jobs.
+  - **macOS:** the full suite.
+  - **Windows:** every test not tagged `process` (`-x process -j 1`), plus
+    an annotation naming the image's afunix.sys.
+  - **`windows sockets (canary)`:** the AF_UNIX tests, one step per file or
+    group. It is allowed to fail.
+  - **`windows installer`:** the release build and the installer.
+- **The canary keeps taking GitHub's Windows machine down.** Every full
+  Windows run so far ended with the step limit never firing and the job
+  running out its time, which a hang inside a test cannot do.
+  - It happens in plain in-process socket tests: `runner_discovery_test`
+    has both passed and crashed with the same code.
+  - Letting Windows finish closing sockets before the test process ends
+    (`afunix_guard.dart`, 1 s) did not make it go away.
+  - So the afunix risk is not limited to the dev laptop's build, and it is
+    not limited to killed processes.
 - Widgetbook runs on Windows too (`flutter run -d windows -t
   widgetbook/main.dart`) once Phase 2 lands.
 
@@ -886,7 +993,7 @@ is greyed out (Phase 5).
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| **Windows `afunix.sys` bug (0xD1 bugcheck)**: a process exiting while holding an AF_UNIX socket can blue-screen Windows (afunix.sys 10.0.26100.8972, still present on 26300.9711). Seen 3× on the dev laptop with test processes; App Studio, the runner and CLI clients all hold AF_UNIX connections | OS crash for users, not just the app | Reported (`specs/windows_afunix_bsod_report.md`). Close runner connections gracefully before any exit; never kill a process that holds one; process tests in CI/VM only; re-check each Windows CU |
+| **Windows `afunix.sys` bug (0xD1 bugcheck)**: a process exiting while holding an AF_UNIX socket can blue-screen Windows (afunix.sys 10.0.26100.8972, still present on 26300.9711). Seen 3× on the dev laptop with test processes; App Studio, the runner and CLI clients all hold AF_UNIX connections | OS crash for users, not just the app | Reported (`specs/windows_afunix_bsod_report.md`). Close runner connections gracefully before any exit, then wait 500 ms (`settleAfUnixSockets`); never kill a process that holds one; process tests in CI/VM only; re-check each Windows CU. **CI (2026-10-17):** GitHub's Windows machines go down intermittently in plain in-process socket tests, settle or not, so treat it as reachable by users: the VM's end-to-end pass is the evidence that decides whether Windows can ship on Serverpod's AF_UNIX transport as it is |
 | Developer Mode can't be enabled (non-admin account, Group Policy on managed PCs) | Setup blocks; deep projects can't attach | Guidance + Check again (4.8). Projects with short paths still work, so the blocking rule can be relaxed later if that proves too strict |
 | Database for Serverpod dev on Windows needs Docker Desktop (WSL2, admin, licence) | Biggest first-run friction | Phase 0.2 decides; possibly a setup check + guidance rather than an install |
 | `.bat` argument injection / quoting | Broken starts, security | `ProcessLauncher` with strict quoting; tests with hostile names |

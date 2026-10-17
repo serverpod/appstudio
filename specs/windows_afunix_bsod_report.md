@@ -8,6 +8,25 @@ Evidence lives on the dev laptop: `C:\Users\info\crashdumps\101626-12625-01.dmp`
 and `101626-15296-01.dmp` (copies of `C:\Windows\Minidump`), and the
 `!analyze -v` output in the session scratchpad.
 
+**Update, 2026-10-17: not just this laptop.** GitHub Actions' `windows-latest`
+machines go down the same way in App Studio's AF_UNIX tests.
+
+- **The tests:** plain `dart:io` server and client sockets in one test
+  process; no process is killed.
+- **What happens:** the step's own time limit never fires, and the job runs
+  until GitHub's job limit cancels it. A hang inside a test cannot do that;
+  the machine stopped answering.
+- **Intermittent:** `runner_discovery_test` has both passed and taken the
+  machine down with the same code.
+- **The settle did not help:** waiting a second after the last test, so
+  Windows can finish closing destroyed sockets, did not make it go away.
+- **Evidence:** the `windows sockets (canary)` job in
+  `.github/workflows/ci.yml`. Its runs are public at
+  github.com/serverpod/appstudio/actions; the logs need a sign-in.
+- **Still missing:** the image's afunix.sys version. The main Windows job
+  now reports it as an annotation. Add it to both reports below before
+  filing.
+
 ---
 
 ## 1. Microsoft — Feedback Hub
