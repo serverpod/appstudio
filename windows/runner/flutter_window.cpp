@@ -44,6 +44,35 @@ bool FlutterWindow::OnCreate() {
           "dev.serverpod.appstudio/lifecycle",
           &flutter::StandardMethodCodec::GetInstance());
 
+  updates_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "dev.serverpod.appstudio/updates",
+          &flutter::StandardMethodCodec::GetInstance());
+  updates_channel_->SetMethodCallHandler(
+      [](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+             result) {
+        if (call.method_name() != "getState") {
+          result->NotImplemented();
+          return;
+        }
+        // pubspec's `version`, as CMake passes it: "0.2.3+22" is version
+        // 0.2.3, build 22 — the macOS bundle's two version keys.
+        const std::string full = FLUTTER_VERSION;
+        const size_t plus = full.find('+');
+        flutter::EncodableMap state{
+            {flutter::EncodableValue("configured"),
+             flutter::EncodableValue(false)},
+            {flutter::EncodableValue("currentVersion"),
+             flutter::EncodableValue(full.substr(0, plus))},
+            {flutter::EncodableValue("currentBuild"),
+             flutter::EncodableValue(
+                 plus == std::string::npos ? "" : full.substr(plus + 1))},
+        };
+        result->Success(flutter::EncodableValue(state));
+      });
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
   });
@@ -59,6 +88,7 @@ bool FlutterWindow::OnCreate() {
 void FlutterWindow::OnDestroy() {
   // Before the engine whose messenger it uses.
   lifecycle_channel_ = nullptr;
+  updates_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }

@@ -35,6 +35,12 @@ class FlutterWindow : public Win32Window {
   // when the window is closed (lib/platform/window_close.dart).
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       lifecycle_channel_;
+
+  // dev.serverpod.appstudio/updates: the version this build carries, for the
+  // About line and analytics. No updater yet, so updates read as unavailable
+  // (lib/update/update_controller.dart).
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      updates_channel_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_
