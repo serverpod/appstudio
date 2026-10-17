@@ -46,6 +46,7 @@ class WindowsAppMenuBar extends StatefulWidget {
     required this.onCreateRepairMigration,
     required this.changes,
     required this.child,
+    this.stripHidden,
   });
 
   final ProjectSession session;
@@ -72,6 +73,10 @@ class WindowsAppMenuBar extends StatefulWidget {
 
   /// The app, under the menu strip.
   final Widget child;
+
+  /// True while the strip should not show — the compact preview. The
+  /// shortcuts stay live, as the macOS menu bar's do.
+  final bool Function()? stripHidden;
 
   @override
   State<WindowsAppMenuBar> createState() => _WindowsAppMenuBarState();
@@ -231,28 +236,33 @@ class _WindowsAppMenuBarState extends State<WindowsAppMenuBar> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: scheme.background,
-              border: Border(bottom: BorderSide(color: scheme.border)),
-            ),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: ShadMenubar(
-                border: ShadBorder.none,
-                radius: BorderRadius.zero,
-                backgroundColor: scheme.background,
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                items: [
-                  _menu('File', _fileItems()),
-                  _menu('View', _viewItems()),
-                  _menu('Server', _serverItems()),
-                  _menu('Logs', _logsItems()),
-                  _menu('Help', _helpItems()),
-                ],
+          // Swapped for an empty box rather than removed, so [child] keeps
+          // its place in the tree and nothing under it is rebuilt.
+          if (widget.stripHidden?.call() ?? false)
+            const SizedBox.shrink()
+          else
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: scheme.background,
+                border: Border(bottom: BorderSide(color: scheme.border)),
+              ),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: ShadMenubar(
+                  border: ShadBorder.none,
+                  radius: BorderRadius.zero,
+                  backgroundColor: scheme.background,
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  items: [
+                    _menu('File', _fileItems()),
+                    _menu('View', _viewItems()),
+                    _menu('Server', _serverItems()),
+                    _menu('Logs', _logsItems()),
+                    _menu('Help', _helpItems()),
+                  ],
+                ),
               ),
             ),
-          ),
           Expanded(child: widget.child),
         ],
       ),

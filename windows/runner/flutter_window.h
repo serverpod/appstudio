@@ -8,6 +8,7 @@
 
 #include <memory>
 
+#include "compact_window.h"
 #include "toast_notifications.h"
 #include "win32_window.h"
 #include "winsparkle_updater.h"
@@ -43,6 +44,9 @@ class FlutterWindow : public Win32Window {
 
   // dev.serverpod.appstudio/notifications, as toasts.
   std::unique_ptr<ToastNotifications> notifications_;
+
+  // dev.serverpod.appstudio/window: the compact preview window.
+  std::unique_ptr<CompactWindow> compact_window_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

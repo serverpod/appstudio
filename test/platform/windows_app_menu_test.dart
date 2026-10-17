@@ -45,7 +45,12 @@ void main() {
 
   tearDown(() => process.dispose());
 
-  Future<void> pumpMenu(WidgetTester tester) async {
+  Future<void> pumpMenu(
+    WidgetTester tester, {
+    ChangeNotifier? changes,
+    bool Function()? stripHidden,
+    Widget child = const SizedBox.expand(),
+  }) async {
     await tester.pumpWidget(
       ShadApp(
         home: WindowsAppMenuBar(
@@ -64,8 +69,9 @@ void main() {
           canOpenProjects: () => canOpenProjects,
           onCreateAndApplyMigrations: () => migrations++,
           onCreateRepairMigration: () {},
-          changes: ChangeNotifier(),
-          child: const SizedBox.expand(),
+          changes: changes ?? ChangeNotifier(),
+          stripHidden: stripHidden,
+          child: child,
         ),
       ),
     );
@@ -133,6 +139,37 @@ void main() {
     expect(newProjects, 0);
   });
 
+  testWidgets('the compact preview hides the strip, not the shortcuts',
+      (tester) async {
+    final changes = ChangeNotifier();
+    var hidden = false;
+    final counter = GlobalKey<_CounterState>();
+    await pumpMenu(
+      tester,
+      changes: changes,
+      stripHidden: () => hidden,
+      child: _Counter(key: counter),
+    );
+    counter.currentState!.count = 7;
+
+    hidden = true;
+    changes.notifyListeners();
+    await tester.pump();
+
+    expect(find.text('File'), findsNothing);
+    // The app under the strip was not rebuilt from scratch: the preview's
+    // webview must survive the swap.
+    expect(counter.currentState!.count, 7);
+    await ctrl(tester, LogicalKeyboardKey.keyN);
+    expect(newProjects, 1);
+
+    hidden = false;
+    changes.notifyListeners();
+    await tester.pump();
+    expect(find.text('File'), findsOneWidget);
+    expect(counter.currentState!.count, 7);
+  });
+
   testWidgets('the shortcuts go with the menu', (tester) async {
     await pumpMenu(tester);
     await tester.pumpWidget(const SizedBox());
@@ -141,4 +178,18 @@ void main() {
 
     expect(newProjects, 0);
   });
+}
+
+class _Counter extends StatefulWidget {
+  const _Counter({super.key});
+
+  @override
+  State<_Counter> createState() => _CounterState();
+}
+
+class _CounterState extends State<_Counter> {
+  int count = 0;
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.expand();
 }

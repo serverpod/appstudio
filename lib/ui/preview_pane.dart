@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 import 'package:webview_cef/webview_cef.dart';
@@ -634,12 +635,22 @@ class _CompactWindowHandles extends StatelessWidget {
       right: right,
       width: _cornerSize,
       height: _cornerSize,
-      // The diagonal resize cursor comes from AppKit via the controller — the
-      // macOS engine maps no diagonal SystemMouseCursors (they fall back to
-      // the arrow). `basic` here keeps the framework from re-asserting a grab
-      // cursor while the pointer sits on the corner.
+      // On macOS the diagonal resize cursor comes from AppKit via the
+      // controller — the macOS engine maps no diagonal SystemMouseCursors
+      // (they fall back to the arrow), and `basic` here keeps the framework
+      // from re-asserting a grab cursor while the pointer sits on the corner.
+      // The Windows engine has them, so Windows asks for one directly.
       child: MouseRegion(
-        cursor: SystemMouseCursors.basic,
+        cursor: defaultTargetPlatform == TargetPlatform.windows
+            ? switch (corner) {
+                CompactResizeCorner.topLeft ||
+                CompactResizeCorner.bottomRight =>
+                  SystemMouseCursors.resizeUpLeftDownRight,
+                CompactResizeCorner.topRight ||
+                CompactResizeCorner.bottomLeft =>
+                  SystemMouseCursors.resizeUpRightDownLeft,
+              }
+            : SystemMouseCursors.basic,
         onEnter: (_) => mode.showResizeCursor(corner),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,

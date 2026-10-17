@@ -84,10 +84,17 @@ class CompactWindowChannel implements CompactWindowPlatform {
   static const MethodChannel _channel =
       MethodChannel('dev.serverpod.appstudio/window');
 
-  /// The channel has a native side on macOS only (Windows: a later phase of
-  /// the port, `specs/windows_port.md`).
+  /// The channel has a native side on macOS (`MainFlutterWindow.swift`) and
+  /// Windows (`windows/runner/compact_window.cpp`).
   @override
   bool get supportsCompactWindow =>
+      defaultTargetPlatform == TargetPlatform.macOS ||
+      defaultTargetPlatform == TargetPlatform.windows;
+
+  /// Whether the compact window can be see-through around the phone frame.
+  /// macOS only: Flutter's Windows embedder draws to a surface Windows cannot
+  /// blend per pixel, so there the margin shows the app's background.
+  static bool get supportsTransparency =>
       defaultTargetPlatform == TargetPlatform.macOS;
 
   @override

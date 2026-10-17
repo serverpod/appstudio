@@ -7,6 +7,7 @@
 #include <string>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "compact_window.h"
 #include "toast_notifications.h"
 #include "winsparkle_updater.h"
 
@@ -50,6 +51,8 @@ bool FlutterWindow::OnCreate() {
       flutter_controller_->engine()->messenger(), GetHandle());
   notifications_ = std::make_unique<ToastNotifications>(
       flutter_controller_->engine()->messenger(), GetHandle());
+  compact_window_ = std::make_unique<CompactWindow>(
+      flutter_controller_->engine()->messenger(), GetHandle());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
@@ -70,6 +73,7 @@ void FlutterWindow::OnDestroy() {
   lifecycle_channel_ = nullptr;
   updater_ = nullptr;
   notifications_ = nullptr;
+  compact_window_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -100,6 +104,14 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
 
   if (updater_ && updater_->HandleMessage(message, wparam, lparam)) {
     return 0;
+  }
+
+  // The compact preview's borderless frame, aspect lock and minimum size, ahead
+  // of the full window's own minimum below.
+  LRESULT compact_result = 0;
+  if (compact_window_ && compact_window_->HandleMessage(
+                             message, wparam, lparam, &compact_result)) {
+    return compact_result;
   }
 
   // Give Flutter, including plugins, an opportunity to handle window messages.

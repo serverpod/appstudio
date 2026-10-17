@@ -251,7 +251,13 @@ class _AppStudioAppState extends State<AppStudioApp> {
         onCreateRepairMigration: () => _withNavigatorContext(
           (context) => createRepairMigration(context, widget.process),
         ),
-        changes: Listenable.merge([widget.updates, widget.toolchains]),
+        changes: Listenable.merge([
+          widget.updates,
+          widget.toolchains,
+          widget.previewMode,
+        ]),
+        // The compact preview is the phone frame alone.
+        stripHidden: () => widget.previewMode.compactWindow,
         child: child ?? const SizedBox.shrink(),
       );
 
@@ -486,7 +492,8 @@ class _AppStudioAppState extends State<AppStudioApp> {
           // ShadApp paints an opaque ColoredBox behind every route; in the
           // compact preview the native window is transparent and that box is
           // the one thing left that would hide the desktop behind the frame.
-          backgroundColor: widget.previewMode.compactWindow
+          backgroundColor: widget.previewMode.compactWindow &&
+                  CompactWindowChannel.supportsTransparency
               ? Colors.transparent
               : null,
           // Windows has no menu bar to add to: the menus are a strip in the

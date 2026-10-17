@@ -64,9 +64,10 @@ class PreviewModeController extends ChangeNotifier {
   Brightness get previewBrightness => _previewBrightness;
   bool get minimized => _minimized;
 
-  /// Whether the native window is (or should be) in its compact, transparent
-  /// form. Minimized desktop keeps the normal window, and so does every view
-  /// on a platform without a compact window (Windows, for now).
+  /// Whether the native window is (or should be) in its compact form —
+  /// borderless and phone-shaped, transparent around the frame on macOS.
+  /// Minimized desktop keeps the normal window, and so does every view on a
+  /// platform without a compact window.
   bool get compactWindow =>
       _window.supportsCompactWindow &&
       _minimized &&
