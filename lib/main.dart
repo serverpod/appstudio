@@ -199,6 +199,11 @@ class _AppStudioAppState extends State<AppStudioApp> {
     _noticedProjectPath = widget.session.projectPath;
     widget.session.addListener(_onSessionChanged);
     _lifecycle = AppLifecycleListener(onExitRequested: _onExitRequested);
+    // Windows signing out or shutting down: the same teardown, without the
+    // close that would normally ask for it.
+    onWindowsEndSession = () async {
+      await _onExitRequested();
+    };
     unawaited(_macMenu!.install());
     // Clear anything a crashed install left behind. Fire and forget, so it
     // never delays launch; ToolchainSetupScreen drives the install itself.

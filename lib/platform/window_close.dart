@@ -10,6 +10,11 @@ const kWindowLifecycleChannel = 'dev.serverpod.appstudio/lifecycle';
 
 bool _exiting = false;
 
+/// Runs the exit teardown when Windows signs out or shuts down, which sends
+/// no close: the runner calls `endSession` and waits for it (up to 5 s) before
+/// Windows ends the process. Set by the app once its controllers exist.
+Future<void> Function()? onWindowsEndSession;
+
 /// Answers the Windows runner's `requestExit` with a cancelable exit, so the
 /// same `onExitRequested` teardown macOS runs on ⌘Q runs here too.
 ///
@@ -21,6 +26,11 @@ bool _exiting = false;
 void installWindowCloseHandler() {
   const MethodChannel(kWindowLifecycleChannel).setMethodCallHandler(
     (call) async {
+      if (call.method == 'endSession') {
+        debugPrint('Windows is ending the session: running the exit teardown.');
+        await onWindowsEndSession?.call();
+        return null;
+      }
       if (call.method != 'requestExit') {
         throw MissingPluginException('No handler for ${call.method}');
       }

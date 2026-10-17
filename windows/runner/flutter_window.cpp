@@ -3,6 +3,7 @@
 #include <flutter/method_result_functions.h>
 #include <flutter/standard_method_codec.h>
 
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -81,6 +82,34 @@ void FlutterWindow::OnDestroy() {
   Win32Window::OnDestroy();
 }
 
+void FlutterWindow::RunEndSessionTeardown(HWND hwnd) {
+  // Windows lists App Studio on its sign-out screen with this reason while
+  // the teardown runs.
+  ::ShutdownBlockReasonCreate(hwnd, L"Stopping the Serverpod server…");
+  // Shared, not on this frame: the reply can come after the timeout.
+  auto done_flag = std::make_shared<bool>(false);
+  auto finish = [done_flag]() { *done_flag = true; };
+  const bool& done = *done_flag;
+  lifecycle_channel_->InvokeMethod(
+      "endSession", nullptr,
+      std::make_unique<flutter::MethodResultFunctions<flutter::EncodableValue>>(
+          [finish](const flutter::EncodableValue*) { finish(); },
+          [finish](const std::string&, const std::string&,
+                   const flutter::EncodableValue*) { finish(); },
+          [finish]() { finish(); }));
+  // Dart, the engine's tasks and CEF all run off this thread's messages.
+  const ULONGLONG deadline = ::GetTickCount64() + 5000;
+  while (!done && ::GetTickCount64() < deadline) {
+    ::MsgWaitForMultipleObjects(0, nullptr, FALSE, 50, QS_ALLINPUT);
+    MSG msg;
+    while (!done && ::PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+      ::TranslateMessage(&msg);
+      ::DispatchMessage(&msg);
+    }
+  }
+  ::ShutdownBlockReasonDestroy(hwnd);
+}
+
 LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
@@ -99,6 +128,20 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
             [close_anyway](const std::string&, const std::string&,
                            const flutter::EncodableValue*) { close_anyway(); },
             close_anyway));
+    return 0;
+  }
+
+  // Signing out or shutting down: Windows sends no WM_CLOSE, and ends the
+  // process soon after WM_ENDSESSION returns. Without the exit teardown the
+  // runner would be left running and App Studio would die still connected to
+  // it, which is what can stop Windows in afunix.sys. So Dart gets to run the
+  // teardown here, with the message loop pumped while it does, for as long
+  // as Windows reasonably allows.
+  if (message == WM_QUERYENDSESSION) {
+    return TRUE;
+  }
+  if (message == WM_ENDSESSION && wparam == TRUE && lifecycle_channel_) {
+    RunEndSessionTeardown(hwnd);
     return 0;
   }
 

@@ -28,6 +28,10 @@ class FlutterWindow : public Win32Window {
                          LPARAM const lparam) noexcept override;
 
  private:
+  // Asks Dart to run the exit teardown when Windows signs out or shuts down,
+  // and waits for it (up to 5 s) with the message loop running.
+  void RunEndSessionTeardown(HWND hwnd);
+
   // The project to run.
   flutter::DartProject project_;
 

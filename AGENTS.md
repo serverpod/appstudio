@@ -1904,6 +1904,10 @@ Windows needs Developer Mode, then Git for Windows, Flutter and Serverpod
 - **Closing the window:** the runner sends `requestExit` over
   `dev.serverpod.appstudio/lifecycle` (`flutter_window.cpp`). Dart runs the
   same exit teardown as macOS (`window_close.dart`).
+- **Sign-out and shutdown:** Windows sends no close then. On
+  `WM_ENDSESSION`, the runner calls `endSession` and pumps messages until the
+  same teardown finishes, for up to 5 s, with a shutdown-block reason on
+  Windows' sign-out screen.
 - **One instance at a time:** a named mutex, `Serverpod.AppStudio.Running`,
   which the installer also waits on. The AppUserModelID is
   `Serverpod.AppStudio`.
