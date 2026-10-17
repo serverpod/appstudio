@@ -37,6 +37,24 @@ void main() {
     expect(window.calls, ['enterCompact', 'exitCompact']);
   });
 
+  test('without a compact window, a minimized phone view is desktop-minimized',
+      () {
+    // Windows, until the compact window is ported: the shell's chrome goes,
+    // the window stays, and nothing is asked of a native side that is not
+    // there.
+    final plain = FakeCompactWindow(supportsCompactWindow: false);
+    final mode = PreviewModeController(window: plain);
+
+    mode.minimize();
+    expect(mode.minimized, isTrue);
+    expect(mode.compactWindow, isFalse);
+
+    mode.setViewMode(PreviewViewMode.phoneLandscape);
+    mode.expand();
+    expect(mode.minimized, isFalse);
+    expect(plain.calls, isEmpty);
+  });
+
   test('expand when not minimized touches nothing', () {
     controller.expand();
 

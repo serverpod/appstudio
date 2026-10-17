@@ -23,6 +23,10 @@ FLUTTER_PLUGIN_EXPORT int initCEFProcesses(HINSTANCE hInstance);
 
 FLUTTER_PLUGIN_EXPORT void handleWndProcForCEF(HWND hwnd, unsigned int message, unsigned __int64 wParam, __int64 lParam);
 
+// Where CEF keeps its user data, including the process singleton lock. Call
+// from wWinMain, after initCEFProcesses and before the Flutter window exists.
+FLUTTER_PLUGIN_EXPORT void setCEFRootCachePath(const wchar_t* path);
+
 #if defined(__cplusplus)
 }  // extern "C"
 #endif

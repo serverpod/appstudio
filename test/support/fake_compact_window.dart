@@ -2,6 +2,11 @@ import 'package:appstudio/platform/compact_window.dart';
 
 /// Records compact-window calls instead of touching a native window.
 class FakeCompactWindow implements CompactWindowPlatform {
+  FakeCompactWindow({this.supportsCompactWindow = true});
+
+  @override
+  final bool supportsCompactWindow;
+
   final calls = <String>[];
   CompactWindowGeometry? lastGeometry;
 

@@ -88,7 +88,11 @@ target_compile_definitions(${PLUGIN_NAME} PRIVATE NOMINMAX)
 # Zero-copy GPU rendering: bridge CEF's OnAcceleratedPaint D3D11 shared texture
 # straight to a Flutter GPU surface texture (no CPU swizzle / upload). Turn OFF
 # to fall back to the software pixel-buffer path.
-option(WEBVIEW_CEF_GPU_TEXTURE "Use the zero-copy GPU texture rendering path" ON)
+# OFF by default: with Flutter 3.47's Impeller (OpenGL ES) renderer on
+# Windows, every OnAcceleratedPaint frame fails in the engine with "Could not
+# create external texture" and the webview stays blank. The software path was
+# verified working (App Studio Phase 0, specs/windows_port.md).
+option(WEBVIEW_CEF_GPU_TEXTURE "Use the zero-copy GPU texture rendering path" OFF)
 if(WEBVIEW_CEF_GPU_TEXTURE)
   target_compile_definitions(${PLUGIN_NAME} PRIVATE WEBVIEW_CEF_GPU_TEXTURE)
 endif()

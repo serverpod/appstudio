@@ -6,6 +6,7 @@
 
 #include <math.h>
 #include <memory>
+#include <chrono>
 #include <thread>
 #include <iostream>
 #include <unordered_map>
@@ -40,6 +41,12 @@ namespace webview_cef {
 
 	void setMacRootCachePath(const std::string& rootCachePath) {
 		g_macRootCachePath = rootCachePath;
+	}
+#else
+	std::wstring g_rootCachePath;
+
+	void setRootCachePath(const std::wstring& rootCachePath) {
+		g_rootCachePath = rootCachePath;
 	}
 #endif
 
@@ -284,7 +291,14 @@ namespace webview_cef {
 			// the host shuts CEF down first and the webviews dispose after.
 			// CEF cannot be re-initialized in the same process either, so
 			// "init" is equally dead.
+#ifdef OS_MAC
 			result(0, nullptr);
+#else
+			// Windows maps 0 to NotImplemented, which Dart raises as a
+			// MissingPluginException on every quit; a null success is the
+			// same answer macOS gives for 0.
+			result(1, nullptr);
+#endif
 			return;
 		}
 		if (name.compare("init") == 0){
@@ -310,12 +324,20 @@ namespace webview_cef {
 				m_handler->CloseAllBrowsers(true);
 				m_renderers.clear();
 				uninitCallback();
+#ifdef OS_MAC
 				// The close is asynchronous and nothing else drives CEF here
 				// (external_message_pump), so give it a bounded chance to land
 				// before the shutdown.
 				for (int i = 0; i < 10; i++) {
 					CefDoMessageLoopWork();
 				}
+#else
+				// Windows runs CEF on its own thread
+				// (multi_threaded_message_loop), where CefDoMessageLoopWork()
+				// must not be called; that thread lands the close by itself.
+				// Give it the same bounded chance.
+				std::this_thread::sleep_for(std::chrono::milliseconds(200));
+#endif
 				stopCEF();
 			}
 			result(1, nullptr);
@@ -767,6 +789,11 @@ namespace webview_cef {
 #else
 		//cef message run in another thread on windows/linux
 		cefs.multi_threaded_message_loop = true;
+		// See setRootCachePath: without it every CEF app on the machine that
+		// also left it unset shares one directory and its singleton lock.
+		if (!g_rootCachePath.empty()) {
+			CefString(&cefs.root_cache_path) = g_rootCachePath;
+		}
 #endif
 		isCefInitialized = CefInitialize(mainArgs, cefs, app.get(), nullptr);
 	}

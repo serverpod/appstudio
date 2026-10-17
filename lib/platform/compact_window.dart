@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 /// Corner of the compact preview window being resized, in UI (top-left origin)
@@ -49,6 +50,11 @@ class CompactWindowGeometry {
 /// can be tested without a platform, the same narrow split `ToolsView` and
 /// `FullRestartView` use.
 abstract class CompactWindowPlatform {
+  /// Whether this platform has a compact window at all. Only macOS does so
+  /// far; elsewhere minimizing a phone view behaves as minimizing the
+  /// desktop view does — the window stays, the shell's chrome goes.
+  bool get supportsCompactWindow;
+
   /// Strips the window to a borderless, transparent one sized to [geometry].
   Future<void> enterCompact(CompactWindowGeometry geometry);
 
@@ -77,6 +83,12 @@ abstract class CompactWindowPlatform {
 class CompactWindowChannel implements CompactWindowPlatform {
   static const MethodChannel _channel =
       MethodChannel('dev.serverpod.appstudio/window');
+
+  /// The channel has a native side on macOS only (Windows: a later phase of
+  /// the port, `specs/windows_port.md`).
+  @override
+  bool get supportsCompactWindow =>
+      defaultTargetPlatform == TargetPlatform.macOS;
 
   @override
   Future<void> enterCompact(CompactWindowGeometry geometry) =>

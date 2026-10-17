@@ -65,9 +65,12 @@ class PreviewModeController extends ChangeNotifier {
   bool get minimized => _minimized;
 
   /// Whether the native window is (or should be) in its compact, transparent
-  /// form. Minimized desktop keeps the normal window.
+  /// form. Minimized desktop keeps the normal window, and so does every view
+  /// on a platform without a compact window (Windows, for now).
   bool get compactWindow =>
-      _minimized && _viewMode.displayMode == PreviewDisplayMode.phone;
+      _window.supportsCompactWindow &&
+      _minimized &&
+      _viewMode.displayMode == PreviewDisplayMode.phone;
 
   void setViewMode(PreviewViewMode mode) {
     if (_viewMode == mode) return;

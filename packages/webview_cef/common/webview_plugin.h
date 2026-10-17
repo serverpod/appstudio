@@ -83,6 +83,12 @@ namespace webview_cef {
     // shared by every CEF app on the machine. Set independently of the paths
     // above: it applies in single-process mode too. Must precede startCEF().
     void setMacRootCachePath(const std::string& rootCachePath);
+#else
+    // The same, for Windows and Linux: the host picks a directory of its own
+    // (App Studio: %LOCALAPPDATA%\App Studio\CEF) so it does not share CEF's
+    // default user-data directory, and its singleton lock, with other CEF
+    // apps. Must precede startCEF().
+    void setRootCachePath(const std::wstring& rootCachePath);
 #endif
     void doMessageLoopWork();
     void SwapBufferFromBgraToRgba(void* _dest, const void* _src, int width, int height);

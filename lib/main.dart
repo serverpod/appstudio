@@ -7,6 +7,8 @@ import 'package:shad/shad.dart';
 import 'agent/agent_controller.dart';
 import 'analytics/app_analytics.dart';
 import 'platform/compact_window.dart';
+import 'platform/host.dart';
+import 'platform/window_close.dart';
 import 'preview/compact_dialog_yield.dart';
 import 'preview/preview_mode_controller.dart';
 import 'process/dev_session_cleanup.dart';
@@ -32,6 +34,7 @@ import 'ui/studio_shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (currentHost.isWindows) installWindowCloseHandler();
 
   await cleanupOrphanedDevSession();
 

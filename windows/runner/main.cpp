@@ -1,6 +1,9 @@
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
+#include <shlobj.h>
+
+#include <string>
 
 #include "flutter_window.h"
 #include "utils.h"
@@ -14,6 +17,19 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   if (cef_exit_code >= 0) {
     return cef_exit_code;
   }
+
+  // CEF's own data, including its process singleton lock, in a directory of
+  // ours: %LOCALAPPDATA%\App Studio\CEF. Left unset, CEF shares one default
+  // directory with every other CEF app that also left it unset.
+  // macOS does the same from CefWrapper.mm.
+  PWSTR local_app_data = nullptr;
+  if (SUCCEEDED(::SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr,
+                                       &local_app_data))) {
+    std::wstring cache_path(local_app_data);
+    cache_path += L"\\App Studio\\CEF";
+    setCEFRootCachePath(cache_path.c_str());
+  }
+  ::CoTaskMemFree(local_app_data);
 
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.

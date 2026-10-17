@@ -496,6 +496,39 @@ Work was done on the branch `spike/windows-phase0`. Nothing is committed.
 - Exit test: launch on Windows, start page renders, no unhandled
   exceptions, quit is clean (no orphaned CEF subprocesses).
 
+#### As built (2026-10-17)
+
+- **Runner** (`windows/runner`): CEF hooks, title "App Studio", 1280×800,
+  670×720 minimum; `setCEFRootCachePath(%LOCALAPPDATA%\App Studio\CEF)` (W3)
+  before the window exists, through a new export of the plugin's C API.
+- **`webview_cef`**, every change fenced so macOS compiles what it did
+  before: software pixel-buffer path is the Windows default
+  (`WEBVIEW_CEF_GPU_TEXTURE` OFF, Phase 0); W1 — `quit` sleeps briefly
+  instead of pumping `CefDoMessageLoopWork()` on Windows; W2 — after
+  shutdown Windows answers a null success instead of NotImplemented; W3 —
+  `setRootCachePath` for Windows/Linux. W4 (key swallowing) stays with
+  Phase 5, W5/W6 with the preview work in Phase 4.
+- **Window close → teardown.** The engine only routes `WM_CLOSE` to the
+  framework for the process's *last* top-level window, and CEF keeps hidden
+  windows of its own, so the close bypassed `onExitRequested` (Phase 0).
+  `FlutterWindow` now intercepts `WM_CLOSE` and asks Dart over
+  `dev.serverpod.appstudio/lifecycle`; `lib/platform/window_close.dart`
+  answers with `exitApplication(AppExitType.cancelable)`, which runs the same
+  `onExitRequested` teardown as ⌘Q. If Dart cannot answer, the window closes
+  as before. Verified: the setup screen's close ran the teardown, no
+  processes left behind. A ~2 s pause on close with nothing running is to be
+  measured in Phase 4.
+- **Compact window:** `CompactWindowPlatform.supportsCompactWindow` (macOS
+  only); without it a minimized phone view behaves as desktop-minimized —
+  chrome hidden, window untouched — so the toggle stays useful.
+- **Job Objects — decided against for the runner.** A child inherits its
+  parent's job, so `serverpod runner start` in a kill-on-close job would take
+  the *detached* runner with it when App Studio exits: against the design
+  (App Studio stops only its own runner, over the socket) and the very
+  process-exit-with-AF_UNIX pattern of the afunix risk. A job belongs only
+  around `opencode serve`, when the agent is switched back on.
+- Boots to the first-run setup screen on Windows (the tool set is Phase 3).
+
 ### Phase 3 — Toolchain on Windows: probe, install, PATH (L)
 
 - Per-platform tool set (4.3). The Windows order is **Developer Mode (4.8)

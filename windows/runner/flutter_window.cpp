@@ -1,6 +1,10 @@
 #include "flutter_window.h"
 
+#include <flutter/method_result_functions.h>
+#include <flutter/standard_method_codec.h>
+
 #include <optional>
+#include <string>
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -34,6 +38,12 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
+  lifecycle_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "dev.serverpod.appstudio/lifecycle",
+          &flutter::StandardMethodCodec::GetInstance());
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
   });
@@ -47,6 +57,8 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  // Before the engine whose messenger it uses.
+  lifecycle_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -58,6 +70,23 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  // Closing the window asks Dart first, so App Studio's exit teardown — the
+  // runner it started, CEF, child processes — runs as it does on macOS. The
+  // engine only asks the framework itself when this is the process's last
+  // top-level window, and CEF keeps hidden windows of its own. Dart answers
+  // by exiting through the engine; if it cannot answer, close as before.
+  if (message == WM_CLOSE && lifecycle_channel_) {
+    auto close_anyway = [hwnd]() { ::DestroyWindow(hwnd); };
+    lifecycle_channel_->InvokeMethod(
+        "requestExit", nullptr,
+        std::make_unique<flutter::MethodResultFunctions<flutter::EncodableValue>>(
+            nullptr,
+            [close_anyway](const std::string&, const std::string&,
+                           const flutter::EncodableValue*) { close_anyway(); },
+            close_anyway));
+    return 0;
+  }
+
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =
