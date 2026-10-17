@@ -1,9 +1,9 @@
 # App Studio
 
-Self-contained macOS IDE for **Serverpod 4** projects. Open a project, run
-`serverpod start` in an embedded terminal, preview the Flutter web app in
-Chromium (CEF) at `http://localhost:9998`, and work with an OpenCode-backed
-agent in the sidebar.
+Self-contained desktop IDE for **Serverpod 4** projects, on macOS and Windows.
+Open a project, run `serverpod start` in an embedded terminal, preview the
+Flutter web app in Chromium (CEF) at `http://localhost:9998`, and work with an
+OpenCode-backed agent in the sidebar.
 
 On first run App Studio installs what it needs the standard way — Apple's
 Command Line Tools, Flutter from its official archive into `~/develop/flutter`,
@@ -91,6 +91,34 @@ There is nothing to publish for the tools. `assets/toolchain_manifest.json`
 holds the version range each one must fall in; a fresh install takes the newest
 release inside it (Flutter's stable feed, pub.dev for the Serverpod CLI), and a
 copy outside it is updated. Change a range there and ship it with the app.
+
+## Windows
+
+App Studio also builds for Windows 10 (1809) and later, x64. On Windows it
+installs Git for Windows, Flutter into `%USERPROFILE%\develop\flutter` and the
+Serverpod CLI, and turns on Developer Mode behind Windows' own administrator
+prompt.
+
+Prerequisites: Flutter 3.47+, Visual Studio 2022 with *Desktop development
+with C++*, Developer Mode and long paths on.
+
+```bash
+flutter run -d windows
+```
+
+Run the tests with `flutter test -x process -j 1`. The tests tagged `process`
+open AF_UNIX sockets, which can crash Windows (see `AGENTS.md`), so they run
+in CI only.
+
+Releases are a separate pipeline from macOS, in PowerShell:
+
+```powershell
+tool\windows\build_release.ps1 -BumpBuild
+tool\windows\publish_release.ps1 -Bucket <bucket>
+tool\windows\promote_release.ps1 -Bucket <bucket> -PrivateKeyFile <key.pem>
+```
+
+`AGENTS.md` (section Windows) and `specs/windows_port.md` have the details.
 
 ## More
 

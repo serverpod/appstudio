@@ -1,5 +1,5 @@
 name: appstudio
-description: Self-contained macOS IDE for Serverpod projects.
+description: Self-contained desktop IDE for Serverpod projects, on macOS and Windows.
 publish_to: 'none'
 version: 0.2.3+22
 

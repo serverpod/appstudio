@@ -1806,6 +1806,171 @@ switch is the Theme addon in the right-hand panel.
 - **Quit is `exit(0)` everywhere**, Widgetbook included — pressing it ends the
   session you are driving.
 
+## Windows
+
+The plan, every decision and what was built in each phase are in
+`specs/windows_port.md`; clean-room testing in a VM is in
+`specs/windows_vm_testing.md`. This section is what to know before touching
+Windows code. macOS must not regress: every Windows path is behind a host
+check, and the macOS code paths stay as they were.
+
+### Dev machine
+
+- Flutter 3.47 / Dart 3.12+ on `Path`, Visual Studio 2022 with *Desktop
+  development with C++*, Developer Mode on, long paths on
+  (`LongPathsEnabled`), `git config --global core.longpaths true`.
+- `flutter run -d windows`. CEF (`packages/webview_cef/third/cef`) and
+  WinSparkle (`build/windows/x64/winsparkle`) download on the first CMake
+  run, pinned and hash-checked.
+- Use the Bash tool, not PowerShell, for agent commands: McAfee's
+  RealProtect flags Claude's encoded PowerShell. Running a `.ps1` with
+  `powershell -File` is fine.
+- The working copy has CRLF line endings (`core.autocrlf`); `.gitattributes`
+  keeps LF in the repo. `sed`/`perl` patterns that end in `\n` miss CRLF
+  lines. Edit with the editor, or normalise in a script. Do not run the
+  repo-wide `dart format`.
+
+### The afunix.sys crash: never kill a process that holds an AF_UNIX socket
+
+A process that exits while it holds a connected AF_UNIX socket can stop
+Windows with a bugcheck (0xD1) in `afunix.sys`. That is the runner's
+transport. It has blue-screened the dev laptop three times and has taken
+GitHub's Windows runners down mid-test. See
+`specs/windows_afunix_bsod_report.md`.
+
+- App Studio never kills a runner or CLI process on Windows (`ProcessKiller`
+  has no `taskkill`). It asks the runner to stop over its socket, and leaves
+  a runner it cannot reach running, with a log line naming
+  `serverpod runner stop`.
+- After its exit teardown, and before an update closes it, App Studio waits
+  `settleAfUnixSockets()` (500 ms) so the kernel finishes closing the runner
+  connection.
+- Tests that start processes or open sockets are tagged `process`. **On a
+  Windows dev machine run `flutter test -x process -j 1`**; the socket tests
+  run in CI's `windows-sockets` job. Socket test files call
+  `settleAfUnixSocketsAfterAll()`.
+- Fakes use `FakeRunner.fakePid()`: odd and above 99999, which no real
+  process has on either OS.
+- Ask before running anything that opens a project on the dev laptop.
+
+### The platform seam
+
+- `lib/platform/host_platform.dart`: `HostPlatform` carries the OS and its
+  `package:path` context. `currentHost` (`host.dart`) is the running one.
+  Paths, `Path` splitting, `PATHEXT`, case-insensitive environment and path
+  comparisons all go through it. Tests construct `HostPlatform.windows` or
+  `.macos` explicitly, so Windows logic is tested on a Mac and the other way
+  round.
+- `lib/platform/windows/`: `WindowsSystem`, the registry, the UAC prompt,
+  `ShellExecute` and protocol handlers, through `dart:ffi` in
+  `Win32System`. Tests use `FakeWindowsSystem`, so no test touches the real
+  registry or raises a prompt.
+- `.bat` launchers are never handed arguments (BatBadBut): `resolveToolCommand`
+  runs the `.exe` a `dart install` launcher points at, and refuses arguments
+  `cmd.exe` would reinterpret.
+
+### Where things are
+
+| What | Windows | macOS |
+|---|---|---|
+| App data | `%APPDATA%\App Studio` | `~/Library/Application Support/App Studio` |
+| CEF cache | `%LOCALAPPDATA%\App Studio\CEF` | in App data |
+| Preferences | `%APPDATA%\Serverpod\App Studio\shared_preferences.json` | NSUserDefaults |
+| Flutter | `%USERPROFILE%\develop\flutter` | `~/develop/flutter` |
+| Serverpod CLI | `%LOCALAPPDATA%\Dart\install\bin\serverpod.bat` | `~/Library/Application Support/Dart/install/bin/serverpod` |
+| `PATH` | `HKCU\Environment\Path`, `REG_EXPAND_SZ` | shell profile line |
+| Git | `%LOCALAPPDATA%\Programs\Git` (Git for Windows) | Command Line Tools |
+| The app | `%LOCALAPPDATA%\Programs\App Studio` (installer) | `/Applications` |
+
+### Toolchain
+
+Windows needs Developer Mode, then Git for Windows, Flutter and Serverpod
+(`ToolId.requiredOn`).
+
+- **Developer Mode:** turned on by an elevated `reg add` behind Windows' own
+  UAC prompt. The runner's symlink fallback for long socket paths needs it.
+- **Git:** installed per-user, silently, from its GitHub release, verified
+  against GitHub's digest. App Studio sets `core.longpaths` only if the user
+  has not set it.
+- **Flutter:** `releases_windows.json`, unpacked with `tar.exe`.
+- **PATH:** App Studio edits only the entry it added, as stored, and
+  broadcasts `WM_SETTINGCHANGE`.
+- **Long paths:** being off is a warning in setup, never a step.
+- **Uninstall:** removes Git through its own `unins000.exe`, and turns
+  Developer Mode off only when ticked (it is offered unticked).
+
+### The window, CEF and keys
+
+- **Closing the window:** the runner sends `requestExit` over
+  `dev.serverpod.appstudio/lifecycle` (`flutter_window.cpp`). Dart runs the
+  same exit teardown as macOS (`window_close.dart`).
+- **One instance at a time:** a named mutex, `Serverpod.AppStudio.Running`,
+  which the installer also waits on. The AppUserModelID is
+  `Serverpod.AppStudio`.
+- **CEF rendering:** software rendering. The GPU texture path is blank under
+  Impeller, so `WEBVIEW_CEF_GPU_TEXTURE` defaults to OFF.
+- **Keys in the preview:** the runner calls `routeKeyForCEF` before
+  `DispatchMessage`. While the preview has focus, keys go to the page alone;
+  Ctrl+X/C/V/A/Z/Y become frame editing commands. Ctrl on other character
+  keys stays the app's shortcut, modifiers go to both, and AltGr characters
+  go to the page.
+- **Menus:** a shad menu strip (`windows_app_menu.dart`) with Ctrl
+  shortcuts. It repeats `MacAppMenu`'s enable rules, so change both together.
+- **Tooltips and copy** use `shortcutHint()`.
+- **Notifications:** toasts from the runner (`toast_notifications.cpp`). They
+  need the installer's Start menu shortcut.
+
+### Releases (separate from macOS)
+
+Nothing in the Windows release path reads or writes anything the macOS one
+owns (decision D5):
+
+- **Build counter:** `windows/release.json`, independent of macOS.
+- **Updates:** WinSparkle, with its own EdDSA key pair. The public key and
+  appcast URL are compiled in from `release.json`, and only release builds
+  with both set check for updates.
+- **Scripts and storage:** PowerShell under `tool/windows/`, writing
+  `releases/windows/`, `appcast/windows/` and `downloads/windows.json`.
+
+```powershell
+tool\windows\build_release.ps1 -BumpBuild [-SignCommand "signtool sign ..."]
+tool\windows\publish_release.ps1 -Bucket <bucket> [-DryRun]   # preview
+tool\windows\promote_release.ps1 -Bucket <bucket> -PrivateKeyFile <pem> [-DryRun]
+```
+
+- **Bundle:** the release ships the Visual C++ runtime and `WinSparkle.dll`
+  beside `appstudio.exe`.
+- **Generated plugin files:** a release build rewrites
+  `windows/flutter/generated_plugin*` (it drops Widgetbook's
+  `url_launcher`). `build_release.ps1` puts them back; never commit that
+  change.
+- **Installer:** `windows/installer/app_studio.iss` (Inno Setup 6). CI builds
+  the release and the installer on every push.
+- **One-time setup:**
+  - Generate the update key pair with
+    `build\windows\x64\winsparkle\WinSparkle-*\bin\winsparkle-tool.exe
+    generate-key --file <private.pem>`.
+  - Put the public key and appcast URL in `release.json`.
+  - Keep the private key with the macOS signing secrets, but separate from
+    them.
+- Signing (Authenticode) is optional until there is a certificate. Unsigned
+  installers trigger SmartScreen.
+
+### CI
+
+`.github/workflows/ci.yml` has these jobs:
+
+- **macOS:** the full suite.
+- **Windows:** everything but the socket tests.
+- **`windows-sockets`:** one step per test group, so a machine crash names
+  its group.
+- **`windows installer`:** the release build and the installer.
+
+The repository is public, so the GitHub API works without a token. It allows
+60 requests an hour, so poll sparingly; the Actions page in a browser does
+not count against that limit. Logs need a GitHub sign-in, but annotations
+do not, which is why the jobs report through `::notice`/`::error`.
+
 ## Conventions for agents
 
 - After a UI change, look at it running — Widgetbook through the Dart MCP
