@@ -216,7 +216,11 @@ class _ToolchainSetupDialogState extends State<ToolchainSetupDialog> {
           final version? => versionBadge(version),
           null => null,
         },
-        trailing: appSuccessBadge(theme, child: const Text('Installed')),
+        // Developer Mode is a setting, not something installed.
+        trailing: appSuccessBadge(
+          theme,
+          child: Text(status.id == ToolId.developerMode ? 'On' : 'Installed'),
+        ),
       );
     }
     final replacing = status.bestRejected?.detectedVersion;

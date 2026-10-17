@@ -1,18 +1,37 @@
+import '../platform/host_platform.dart';
 import 'toolchain_manifest.dart';
 import 'tool_version.dart';
 
 /// The tools App Studio needs, in install order: the Command Line Tools
-/// supply the `git` Flutter runs on, and the Serverpod CLI is installed with
-/// Flutter's own `dart`.
+/// (macOS) or Git for Windows supply the `git` Flutter runs on, and the
+/// Serverpod CLI is installed with Flutter's own `dart`. On Windows,
+/// Developer Mode comes first: Flutter and the Serverpod runner need the
+/// symbolic links only it allows.
+///
+/// Each tool says which hosts need it; a host's tool set is
+/// [ToolId.requiredOn], in this order.
 enum ToolId {
-  commandLineTools('command_line_tools', 'Apple\'s command line tools'),
-  flutter('flutter', 'Flutter'),
-  serverpodCli('serverpod_cli', 'Serverpod');
+  commandLineTools(
+    'command_line_tools',
+    'Apple\'s command line tools',
+    {HostOs.macos},
+  ),
+  developerMode('developer_mode', 'Developer Mode', {HostOs.windows}),
+  git('git', 'Git for Windows', {HostOs.windows}),
+  flutter('flutter', 'Flutter', {HostOs.macos, HostOs.windows}),
+  serverpodCli('serverpod_cli', 'Serverpod', {HostOs.macos, HostOs.windows});
 
-  const ToolId(this.manifestId, this.displayName);
+  const ToolId(this.manifestId, this.displayName, this.hosts);
 
   final String manifestId;
   final String displayName;
+
+  /// The hosts that need this tool.
+  final Set<HostOs> hosts;
+
+  /// The tools [host] needs, in install order.
+  static List<ToolId> requiredOn(HostPlatform host) =>
+      [for (final id in values) if (id.hosts.contains(host.os)) id];
 
   static ToolId? fromManifestId(String id) {
     for (final tool in values) {

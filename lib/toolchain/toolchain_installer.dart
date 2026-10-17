@@ -6,6 +6,10 @@ import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 
+import '../platform/host.dart';
+import '../platform/windows/win32_system.dart';
+import '../platform/windows/windows_system.dart';
+import '../process/tool_command.dart';
 import 'install_plan.dart';
 import 'install_progress.dart';
 import 'install_record.dart';
@@ -61,16 +65,25 @@ class ToolchainInstaller {
     http.Client? httpClient,
     LoginShellPathReader? loginShellPath,
     ShellProfile? profile,
+    WindowsSystem? windows,
     this.pollInterval = const Duration(seconds: 3),
   })  : _http = httpClient ?? http.Client(),
         _loginShellPath = loginShellPath ?? captureLoginShellPath,
-        profile = profile ?? ShellProfile.resolve(home: paths.home);
+        profile = profile ??
+            ShellProfile.resolve(home: paths.home, host: paths.host),
+        windows = windows ??
+            (paths.host.isWindows ? Win32System() : const NoWindowsSystem());
 
   final ToolchainPaths paths;
   final ShellProfile profile;
   final Duration pollInterval;
   final http.Client _http;
   final LoginShellPathReader _loginShellPath;
+
+  /// The registry and the UAC prompt, on Windows.
+  final WindowsSystem windows;
+
+  HostPlatform get _host => paths.host;
 
   /// Room over the archive size for the archive itself plus the unpacked SDK.
   static const _diskFactor = 3;
@@ -92,6 +105,131 @@ class ToolchainInstaller {
       'com.apple.dt.CommandLineTools.installondemand';
 
   void close() => _http.close();
+
+  // -- Developer Mode (Windows) ---------------------------------------------
+
+  /// Turns Developer Mode on. It is a machine-wide setting, so Windows asks
+  /// for an administrator's approval in its own UAC prompt; App Studio itself
+  /// never runs elevated. What happens is read back from the registry rather
+  /// than taken from the prompt's outcome.
+  Future<RecordedInstall> enableDeveloperMode({
+    required ProgressSink onProgress,
+  }) async {
+    onProgress(ToolProgress(
+      id: ToolId.developerMode,
+      phase: ToolPhase.waitingForApproval,
+      phaseStartedAt: DateTime.now(),
+    ));
+    if (developerModeLockedByPolicy(windows)) {
+      throw const ToolInstallException(
+        'Developer Mode is turned off by your organization\'s policy. Ask '
+        'whoever manages this PC to allow it, then choose Try again.',
+      );
+    }
+    final systemRoot = Platform.environment['SystemRoot'] ?? r'C:\Windows';
+    final declined = await windows.runElevated(
+          _host.path.join(systemRoot, 'System32', 'reg.exe'),
+          'add "HKLM\\$kAppModelUnlockKey" /v $kDeveloperModeValue '
+          '/t REG_DWORD /d 1 /f',
+        ) ==
+        null;
+    if (developerModeEnabled(windows)) {
+      return RecordedInstall(
+        id: ToolId.developerMode,
+        installedAt: DateTime.now(),
+      );
+    }
+    throw ToolInstallException(
+      '${declined ? 'Windows did not get approval to turn on Developer Mode.' : 'Developer Mode is still off.'} '
+      'Turn it on yourself in Settings → System → For developers, then '
+      'choose Try again.',
+    );
+  }
+
+  // -- Git for Windows ------------------------------------------------------
+
+  /// Git for Windows' own installer, downloaded from its GitHub release and
+  /// checked against the digest GitHub publishes, run silently for this user
+  /// only — no administrator, nothing outside the user's profile. It adds its
+  /// `cmd` directory to the user's `Path` itself, so the line is its to
+  /// remove, not App Studio's.
+  Future<RecordedInstall> installGit(
+    GitRelease release, {
+    required ProgressSink onProgress,
+    required CancelToken cancel,
+  }) async {
+    final expected = release.downloadBytes ?? 0;
+    var progress = ToolProgress(
+      id: ToolId.git,
+      phase: ToolPhase.downloading,
+      totalBytes: expected,
+      phaseStartedAt: DateTime.now(),
+    );
+    onProgress(progress);
+    await Directory(paths.downloadsDir).create(recursive: true);
+    final installer = File(
+      _host.path.join(paths.downloadsDir, 'Git-${release.version}.exe'),
+    );
+    await _download(
+      url: release.installerUrl,
+      target: installer,
+      expectedBytes: expected,
+      cancel: cancel,
+      onBytes: (received, total) {
+        progress = progress.copyWith(
+          receivedBytes: received,
+          totalBytes: total > 0 ? total : expected,
+        );
+        onProgress(progress);
+      },
+    );
+    cancel.throwIfCancelled();
+    onProgress(progress = progress.copyWith(
+      phase: ToolPhase.verifying,
+      phaseStartedAt: DateTime.now(),
+    ));
+    await _verify(installer, release.sha256);
+
+    cancel.throwIfCancelled();
+    onProgress(progress = progress.copyWith(
+      phase: ToolPhase.installing,
+      phaseStartedAt: DateTime.now(),
+    ));
+    final ProcessResult result;
+    try {
+      result = await Process.run(installer.path, const [
+        '/VERYSILENT',
+        '/NORESTART',
+        '/NOCANCEL',
+        '/SP-',
+        '/SUPPRESSMSGBOXES',
+        '/CURRENTUSER',
+        '/NOICONS',
+        '/o:PathOption=Cmd',
+      ]);
+    } finally {
+      await _deleteQuietly(installer);
+    }
+    final root = _host.path.join(
+      Platform.environment['LOCALAPPDATA'] ??
+          _host.path.join(paths.home, 'AppData', 'Local'),
+      'Programs',
+      'Git',
+    );
+    final git = File(_host.path.join(root, 'cmd', 'git.exe'));
+    if (result.exitCode != 0 || !await git.exists()) {
+      throw ToolInstallException(
+        'Git for Windows could not be installed (exit ${result.exitCode}).',
+        detail: _tail('${result.stdout}\n${result.stderr}'),
+      );
+    }
+    return RecordedInstall(
+      id: ToolId.git,
+      path: root,
+      version: '${release.version}',
+      installedAt: DateTime.now(),
+    );
+  }
 
   // -- Command Line Tools ---------------------------------------------------
 
@@ -268,7 +406,9 @@ class ToolchainInstaller {
     try {
       await _unzip(archive, staging);
       final unpacked = Directory(p.join(staging.path, 'flutter'));
-      if (!await File(p.join(unpacked.path, 'bin', 'flutter')).exists()) {
+      if (!await File(
+        p.join(unpacked.path, 'bin', _host.flutterLauncherName),
+      ).exists()) {
         throw const ToolInstallException(
           'The Flutter download is incomplete. Try again.',
         );
@@ -278,7 +418,7 @@ class ToolchainInstaller {
       if (owned != null && await target.exists()) {
         await target.delete(recursive: true);
       }
-      await unpacked.rename(target.path);
+      await _renameWithRetry(unpacked, target.path);
     } finally {
       await _deleteQuietly(staging);
     }
@@ -360,6 +500,30 @@ class ToolchainInstaller {
   }
 
   Future<ProcessResult> _runFlutter(String root, List<String> args) {
+    if (_host.isWindows) {
+      // `flutter.bat` needs git, and the Git for Windows installed a step
+      // earlier is only on the registry's `Path`, not on ours.
+      final env = _host.copyEnvironment(Platform.environment)
+        ..['PATH'] = [
+          _host.path.join(root, 'bin'),
+          ...?registryPath(windows)?.split(';'),
+          ...?Platform.environment['PATH']?.split(';'),
+        ].where((e) => e.isNotEmpty).join(';')
+        ..remove('FLUTTER_ROOT');
+      final command = resolveToolCommand(
+        _host.path.join(root, 'bin', _host.flutterLauncherName),
+        args,
+        host: _host,
+      );
+      return Process.run(
+        command.executable,
+        command.arguments,
+        environment: env,
+        includeParentEnvironment: false,
+        stdoutEncoding: utf8,
+        stderrEncoding: utf8,
+      );
+    }
     final env = Map<String, String>.from(Platform.environment)
       ..['PATH'] = '${p.join(root, 'bin')}:/usr/bin:/bin:/usr/sbin:/sbin'
       ..remove('FLUTTER_ROOT');
@@ -391,10 +555,17 @@ class ToolchainInstaller {
       phaseStartedAt: DateTime.now(),
     ));
     final dartBin = p.dirname(dartExecutable);
-    final env = Map<String, String>.from(Platform.environment)
-      // `dart install` runs install_name_tool through the /usr/bin shims,
-      // which the Command Line Tools make real.
-      ..['PATH'] = '$dartBin:/usr/bin:/bin:/usr/sbin:/sbin';
+    final env = _host.isWindows
+        ? (_host.copyEnvironment(Platform.environment)
+          ..['PATH'] = [
+            dartBin,
+            ...?registryPath(windows)?.split(';'),
+            ...?Platform.environment['PATH']?.split(';'),
+          ].where((e) => e.isNotEmpty).join(';'))
+        : (Map<String, String>.from(Platform.environment)
+          // `dart install` runs install_name_tool through the /usr/bin shims,
+          // which the Command Line Tools make real.
+          ..['PATH'] = '$dartBin:/usr/bin:/bin:/usr/sbin:/sbin');
     final result = await Process.run(
       dartExecutable,
       ['install', 'serverpod_cli@$version'],
@@ -415,7 +586,7 @@ class ToolchainInstaller {
     );
     return RecordedInstall(
       id: ToolId.serverpodCli,
-      path: p.join(binDir, 'serverpod'),
+      path: p.join(binDir, _host.installedExecutableName('serverpod')),
       version: '$version',
       installedAt: DateTime.now(),
       pathLines: [?line],
@@ -455,6 +626,7 @@ class ToolchainInstaller {
   /// the user's own shell sets up. Returns the line when it was written — the
   /// only case in which it is App Studio's to remove later.
   Future<RecordedPathLine?> addToShellPath(String dir, String line) async {
+    if (_host.isWindows) return _addToUserPath(dir);
     final rc = profile.path;
     if (rc == null) return null;
     String? shellPath;
@@ -468,8 +640,49 @@ class ToolchainInstaller {
 
   Future<void> removeShellLines(List<RecordedPathLine> lines) async {
     for (final line in lines) {
-      await removeShellLine(line.file, line.line);
+      if (line.file == kWindowsUserPathRecord) {
+        _removeFromUserPath(line.line);
+      } else {
+        await removeShellLine(line.file, line.line);
+      }
     }
+  }
+
+  /// Windows: [dir] at the end of the user's `Path` in the registry, unless
+  /// it is already on the machine's or the user's. The stored value is edited
+  /// as stored, so `%USERPROFILE%`-style entries survive, and written back as
+  /// `REG_EXPAND_SZ` — the type Windows gives the user `Path` itself.
+  RecordedPathLine? _addToUserPath(String dir) {
+    if (pathContainsDir(registryPath(windows), dir, host: _host)) return null;
+    final current = windows.readRawString(
+            RegistryRoot.currentUser, kUserEnvironmentKey, 'Path') ??
+        '';
+    final updated = current.isEmpty
+        ? dir
+        : current.endsWith(';')
+            ? '$current$dir'
+            : '$current;$dir';
+    if (!windows.writeUserExpandString(kUserEnvironmentKey, 'Path', updated)) {
+      return null;
+    }
+    windows.broadcastEnvironmentChange();
+    return RecordedPathLine(file: kWindowsUserPathRecord, line: dir);
+  }
+
+  /// Takes exactly the entry App Studio added out of the user's `Path`, and
+  /// nothing else.
+  void _removeFromUserPath(String dir) {
+    final current = windows.readRawString(
+        RegistryRoot.currentUser, kUserEnvironmentKey, 'Path');
+    if (current == null) return;
+    final entries = current.split(';');
+    final kept = [
+      for (final e in entries)
+        if (!(e.isNotEmpty && _host.pathEquals(e, dir))) e,
+    ];
+    if (kept.length == entries.length) return;
+    windows.writeUserExpandString(kUserEnvironmentKey, 'Path', kept.join(';'));
+    windows.broadcastEnvironmentChange();
   }
 
   // -- Legacy ---------------------------------------------------------------
@@ -659,10 +872,17 @@ class ToolchainInstaller {
   /// the Command Line Tools shims.
   Future<void> _unzip(File archive, Directory into) async {
     await into.create(recursive: true);
-    final result = await Process.run(
-      '/usr/bin/unzip',
-      ['-q', '-o', archive.path, '-d', into.path],
-    );
+    // Windows: the tar.exe Windows ships (bsdtar) reads zip archives.
+    final systemRoot = Platform.environment['SystemRoot'] ?? r'C:\Windows';
+    final result = _host.isWindows
+        ? await Process.run(
+            _host.path.join(systemRoot, 'System32', 'tar.exe'),
+            ['-xf', archive.path, '-C', into.path],
+          )
+        : await Process.run(
+            '/usr/bin/unzip',
+            ['-q', '-o', archive.path, '-d', into.path],
+          );
     if (result.exitCode != 0) {
       throw ToolInstallException(
         'Could not unpack Flutter.',
@@ -672,6 +892,20 @@ class ToolchainInstaller {
   }
 
   // -- helpers --------------------------------------------------------------
+
+  /// A rename that, on Windows, survives the moment Defender or the search
+  /// indexer still holds one of the files just unpacked.
+  Future<void> _renameWithRetry(Directory from, String to) async {
+    for (var attempt = 1;; attempt++) {
+      try {
+        await from.rename(to);
+        return;
+      } on FileSystemException {
+        if (!_host.isWindows || attempt >= 5) rethrow;
+        await Future<void>.delayed(Duration(seconds: attempt));
+      }
+    }
+  }
 
   String _pretty(String path) => p.isWithin(paths.home, path)
       ? '~/${p.relative(path, from: paths.home)}'

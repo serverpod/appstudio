@@ -96,7 +96,8 @@ final completeInventory = _inventory({
 
 /// First run on a clean Mac: nothing found anywhere.
 final emptyInventory = _inventory({
-  for (final id in ToolId.values) id: (const <ToolCandidate>[], ToolAction.install),
+  for (final id in previewManifest.tools.keys)
+    id: (const <ToolCandidate>[], ToolAction.install),
 });
 
 /// The awkward middle — developer tools already there, Flutter missing, and a
@@ -132,7 +133,10 @@ final manualUpdateInventory = _inventory({
 
 /// A build from before this one left its own toolchain behind.
 final legacyInventory = _inventory(
-  {for (final id in ToolId.values) id: (const <ToolCandidate>[], ToolAction.install)},
+  {
+    for (final id in previewManifest.tools.keys)
+      id: (const <ToolCandidate>[], ToolAction.install),
+  },
   legacy: true,
 );
 

@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../platform/host.dart';
+import '../platform/windows/win32_system.dart';
+import '../platform/windows/windows_system.dart';
 import '../process/tool_command.dart';
 import 'install_record.dart';
 import 'login_shell_path.dart';
@@ -189,10 +191,11 @@ class ProbeSandbox {
     required this.runner,
     required this.loginShellPath,
     required this.environment,
+    this.windows = const NoWindowsSystem(),
   });
 
-  /// Nothing on `PATH`, no login shell, and every command fails without
-  /// running — the machine looks like it has no tools at all.
+  /// Nothing on `PATH`, no login shell, no registry, and every command fails
+  /// without running — the machine looks like it has no tools at all.
   static final ProbeSandbox empty = ProbeSandbox(
     runner: (executable, arguments, {environment}) async =>
         ProcessResult(0, 1, '', ''),
@@ -203,6 +206,9 @@ class ProbeSandbox {
   final ProcessRunner runner;
   final LoginShellPathReader loginShellPath;
   final Map<String, String> environment;
+
+  /// The registry Developer Mode is read from.
+  final WindowsSystem windows;
 }
 
 // ---------------------------------------------------------------------------
@@ -217,11 +223,15 @@ class ToolProbe {
     ProcessRunner? runner,
     LoginShellPathReader? loginShellPath,
     Map<String, String>? environment,
+    WindowsSystem? windows,
     ProbeSandbox? sandbox,
   })  : _run = runner ?? sandbox?.runner ?? _defaultRunner,
         _loginShellPath =
             loginShellPath ?? sandbox?.loginShellPath ?? captureLoginShellPath,
-        _env = environment ?? sandbox?.environment ?? Platform.environment;
+        _env = environment ?? sandbox?.environment ?? Platform.environment,
+        _windows = windows ??
+            sandbox?.windows ??
+            (paths.host.isWindows ? Win32System() : const NoWindowsSystem());
 
   final ToolchainPaths paths;
   final ToolManifest manifest;
@@ -236,6 +246,7 @@ class ToolProbe {
 
   final ProcessRunner _run;
   final LoginShellPathReader _loginShellPath;
+  final WindowsSystem _windows;
   Future<String?>? _shellPath;
 
   static Future<ProcessResult> _defaultRunner(
@@ -268,8 +279,11 @@ class ToolProbe {
     tools[ToolId.flutter] = flutter;
     final dartExecutable = flutter.resolved?.facts['dartExecutable'];
 
+    // Only the tools this host needs are in the manifest.
     final rest = await Future.wait([
-      _probeCommandLineTools(),
+      if (manifest[ToolId.commandLineTools] != null) _probeCommandLineTools(),
+      if (manifest[ToolId.developerMode] != null) _probeDeveloperMode(),
+      if (manifest[ToolId.git] != null) _probeGit(),
       _probeServerpod(dartExecutable, deep: deep),
     ]);
     for (final status in rest) {
@@ -332,6 +346,87 @@ class ToolProbe {
     } catch (_) {
       return null;
     }
+  }
+
+  // -- Developer Mode (Windows) ---------------------------------------------
+
+  /// A registry value, not an install: on or off. App Studio's install step
+  /// turns it on through a UAC prompt.
+  Future<ToolStatus> _probeDeveloperMode() async {
+    final spec = manifest[ToolId.developerMode]!;
+    const id = ToolId.developerMode;
+    final on = developerModeEnabled(_windows);
+    return ToolStatus(
+      spec: spec,
+      candidates: [
+        ToolCandidate(
+          id: id,
+          source: _sourceFor(id, null),
+          fitness: on ? ToolFitness.satisfied : ToolFitness.notFound,
+          reason: !on && developerModeLockedByPolicy(_windows)
+              ? 'turned off by your organization\'s policy'
+              : null,
+        ),
+      ],
+      action: on ? ToolAction.none : ToolAction.install,
+    );
+  }
+
+  // -- Git (Windows) --------------------------------------------------------
+
+  /// Any working Git for Windows will do: on `PATH`, or in either place its
+  /// installer puts it (for all users, or for this one).
+  Future<ToolStatus> _probeGit() async {
+    final spec = manifest[ToolId.git]!;
+    const id = ToolId.git;
+    final found = <String>[];
+    for (final candidate in [
+      await _which('git'),
+      if (_env['ProgramFiles'] case final dir?)
+        _path.join(dir, 'Git', 'cmd', 'git.exe'),
+      if (_env['LOCALAPPDATA'] case final dir?)
+        _path.join(dir, 'Programs', 'Git', 'cmd', 'git.exe'),
+      if (record[id]?.path case final root?)
+        _path.join(root, 'cmd', 'git.exe'),
+    ]) {
+      if (candidate == null) continue;
+      if (found.any((f) => _host.pathEquals(f, candidate))) continue;
+      if (await File(candidate).exists()) found.add(candidate);
+    }
+
+    final candidates = <ToolCandidate>[];
+    for (final path in found) {
+      // git version 2.56.0.windows.2
+      final detected = parseServerpodVersion(
+        await _runForOutput(
+          path,
+          const ['--version'],
+          environment: _host.essentialEnvironment(_env),
+        ),
+      );
+      final verdict =
+          qualifyVersioned(exists: true, detected: detected, spec: spec);
+      // <root>\cmd\git.exe → <root>
+      final root = _path.dirname(_path.dirname(path));
+      candidates.add(ToolCandidate(
+        id: id,
+        source: _sourceFor(id, root),
+        fitness: verdict.fitness,
+        reason: verdict.reason,
+        root: root,
+        executable: path,
+        detectedVersion: detected,
+      ));
+      if (verdict.fitness == ToolFitness.satisfied) break;
+    }
+    final satisfied = candidates.any((c) => c.isSatisfied);
+    return ToolStatus(
+      spec: spec,
+      candidates: candidates.isEmpty
+          ? const [ToolCandidate.notFound(id, ToolSource.host)]
+          : candidates,
+      action: satisfied ? ToolAction.none : ToolAction.install,
+    );
   }
 
   // -- Flutter --------------------------------------------------------------

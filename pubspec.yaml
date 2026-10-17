@@ -28,6 +28,10 @@ dependencies:
   json_rpc_2: ^4.0.0
   stream_channel: ^2.1.2
   meta: ^1.16.0
+  # Windows: the registry (Developer Mode, the user PATH), the UAC prompt and
+  # the environment-change broadcast, called directly rather than through
+  # PowerShell (lib/platform/windows/).
+  ffi: ^2.2.0
 
 dev_dependencies:
   flutter_test:

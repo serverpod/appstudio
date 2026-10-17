@@ -49,7 +49,10 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
   /// tools" is a state the UI can explain, a failed launch is not.
   static Future<ToolchainController> create() async {
     final paths = ToolchainPaths.resolve();
-    final manifest = await ToolManifest.loadBaked(rootBundle.loadString);
+    final manifest = await ToolManifest.loadBaked(
+      rootBundle.loadString,
+      host: paths.host,
+    );
     final record = await InstallRecord.load(paths.installRecordFile);
 
     Toolchain toolchain;
@@ -188,11 +191,22 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
     switch (status.id) {
       case ToolId.commandLineTools:
         return const PlannedTool(id: ToolId.commandLineTools);
+      case ToolId.developerMode:
+        // A setting, not a download.
+        return const PlannedTool(id: ToolId.developerMode);
+      case ToolId.git:
+        final release = await fetchGitRelease(client, arch: currentArch());
+        return PlannedTool(
+          id: ToolId.git,
+          version: release.version,
+          gitRelease: release,
+        );
       case ToolId.flutter:
         final release = await fetchFlutterRelease(
           client,
           accepts: status.spec.accepts,
           arch: currentArch(),
+          windows: paths.host.isWindows,
         );
         // An update runs `flutter upgrade`, which picks its own release; the
         // feed only says what that will be.
@@ -306,6 +320,24 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
     switch (id) {
       case ToolId.commandLineTools:
         await _remember(await installer.installCommandLineTools(
+          onProgress: onProgress,
+          cancel: cancel,
+        ));
+
+      case ToolId.developerMode:
+        await _remember(
+          await installer.enableDeveloperMode(onProgress: onProgress),
+        );
+
+      case ToolId.git:
+        final release = _plan[id]?.gitRelease;
+        if (release == null) {
+          throw const ToolInstallException(
+            'No Git for Windows release was chosen.',
+          );
+        }
+        await _remember(await installer.installGit(
+          release,
           onProgress: onProgress,
           cancel: cancel,
         ));
@@ -442,6 +474,9 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
         // Only the standalone tools — a full Xcode is never ours.
         ToolId.commandLineTools =>
           await Directory('/Library/Developer/CommandLineTools').exists(),
+        // Removing these is Phase 6 of the Windows port (specs/
+        // windows_port.md); until then uninstall does not offer them.
+        ToolId.developerMode || ToolId.git => false,
         ToolId.flutter =>
           entry.path != null && await Directory(entry.path!).exists(),
         ToolId.serverpodCli =>
@@ -467,6 +502,9 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
         await installer.uninstallFlutter(entry);
       case ToolId.commandLineTools:
         await installer.uninstallCommandLineTools();
+      case ToolId.developerMode || ToolId.git:
+        // Never offered yet: see removableTools.
+        return;
     }
     await _saveRecord(_record.without(id));
   }

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../platform/host_platform.dart';
 import 'tool_status.dart';
 import 'tool_version.dart';
 
@@ -58,7 +59,13 @@ class ToolManifest {
 
   ToolSpec? operator [](ToolId id) => tools[id];
 
-  static ToolManifest? tryParse(String source) {
+  /// The tools [host] needs; the others the file lists are ignored, so one
+  /// file serves every platform.
+  static ToolManifest? tryParse(
+    String source, {
+    HostPlatform host = HostPlatform.macos,
+  }) {
+    final required = ToolId.requiredOn(host);
     final Object? decoded;
     try {
       decoded = jsonDecode(source);
@@ -76,12 +83,12 @@ class ToolManifest {
         final spec = ToolSpec.tryParse(
           entry.map((k, v) => MapEntry(k.toString(), v)),
         );
-        if (spec != null) tools[spec.id] = spec;
+        if (spec != null && required.contains(spec.id)) tools[spec.id] = spec;
       }
     }
-    // Every tool is required; a file missing one is not a manifest this build
-    // can run on.
-    if (!ToolId.values.every(tools.containsKey)) return null;
+    // Every tool this host needs is required; a file missing one is not a
+    // manifest this build can run on.
+    if (!required.every(tools.containsKey)) return null;
 
     return ToolManifest(tools: Map.unmodifiable(tools));
   }
@@ -89,10 +96,11 @@ class ToolManifest {
   /// [loadAsset] is injected (normally `rootBundle.loadString`) so this library
   /// stays free of Flutter and can run in a plain Dart test.
   static Future<ToolManifest> loadBaked(
-    Future<String> Function(String key) loadAsset,
-  ) async {
+    Future<String> Function(String key) loadAsset, {
+    HostPlatform host = HostPlatform.macos,
+  }) async {
     final source = await loadAsset(kBakedManifestAsset);
-    final manifest = tryParse(source);
+    final manifest = tryParse(source, host: host);
     if (manifest == null) {
       throw StateError('Bundled $kBakedManifestAsset is not a valid manifest');
     }

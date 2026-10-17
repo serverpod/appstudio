@@ -11,6 +11,13 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../platform/host.dart';
+
+/// What an install record names as the "file" of a `PATH` entry App Studio
+/// added to the user's `Path` in the Windows registry. The recorded "line" is
+/// the directory itself.
+const kWindowsUserPathRecord = r'HKCU\Environment\Path';
+
 /// The rc file to add `PATH` lines to, from `$SHELL`.
 ///
 /// zsh gets `~/.zprofile` because that is what Flutter's macOS instructions
@@ -27,7 +34,20 @@ class ShellProfile {
 
   bool get isSupported => path != null;
 
-  static ShellProfile resolve({required String home, String? shellOverride}) {
+  /// On Windows there is no rc file: `PATH` lives in the registry, under the
+  /// user's own environment, and every program started afterwards reads it
+  /// from there. [kWindowsUserPathRecord] stands in for the file.
+  static ShellProfile resolve({
+    required String home,
+    String? shellOverride,
+    HostPlatform? host,
+  }) {
+    if ((host ?? currentHost).isWindows) {
+      return const ShellProfile(
+        shell: 'windows',
+        path: kWindowsUserPathRecord,
+      );
+    }
     final shellPath =
         shellOverride ?? Platform.environment['SHELL'] ?? '/bin/zsh';
     final shell = p.basename(shellPath);

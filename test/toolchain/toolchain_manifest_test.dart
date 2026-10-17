@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:appstudio/platform/host_platform.dart';
 import 'package:appstudio/toolchain/tool_status.dart';
 import 'package:appstudio/toolchain/tool_version.dart';
 import 'package:appstudio/toolchain/toolchain_manifest.dart';
@@ -65,9 +66,13 @@ void main() {
     expect(ToolManifest.tryParse(jsonEncode(json)), isNotNull);
   });
 
-  test('the bundled manifest parses and covers every tool', () async {
-    final manifest = await loadTestManifest();
-    expect(manifest.tools.keys, containsAll(ToolId.values));
+  test('the bundled manifest covers every tool, on every host', () async {
+    final source = await loadTestManifestSource();
+    for (final host in [HostPlatform.macos, HostPlatform.windows]) {
+      final manifest = ToolManifest.tryParse(source, host: host);
+      expect(manifest, isNotNull, reason: '$host');
+      expect(manifest!.tools.keys, ToolId.requiredOn(host), reason: '$host');
+    }
   });
 
   test('the bundled Flutter range has no upper bound', () async {

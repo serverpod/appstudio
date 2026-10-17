@@ -6,6 +6,10 @@ enum ToolPhase {
   /// Apple's Command Line Tools installer is up; it reports nothing back, so
   /// all we can do is wait for the tools to appear.
   waitingForApple,
+
+  /// Windows' UAC prompt is up for Developer Mode; the user approves it, or
+  /// not.
+  waitingForApproval,
   downloading,
   verifying,
   extracting,
@@ -28,6 +32,7 @@ enum ToolPhase {
   String get label => switch (this) {
         queued => 'Waiting for',
         waitingForApple => 'Installing',
+        waitingForApproval => 'Turning on',
         downloading => 'Downloading',
         verifying => 'Verifying',
         extracting => 'Unpacking',
@@ -46,6 +51,8 @@ enum ToolPhase {
   /// which shows its byte count instead.
   String? get hint => switch (this) {
         waitingForApple => 'Follow the installation steps in the pop-up window.',
+        waitingForApproval =>
+          'Approve the Windows prompt to let App Studio change this setting.',
         verifying || extracting => 'This takes a minute.',
         _ => null,
       };

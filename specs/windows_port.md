@@ -569,6 +569,53 @@ Work was done on the branch `spike/windows-phase0`. Nothing is committed.
   - Developer Mode (4.8) is a blocking prerequisite.
 - Widgetbook use cases for the Windows variants of every setup state.
 
+#### As built (2026-10-17)
+
+- **Tool set per host.** `ToolId` declares the hosts that need it
+  (`ToolId.requiredOn`): macOS keeps Command Line Tools → Flutter →
+  Serverpod; Windows is Developer Mode → Git for Windows → Flutter →
+  Serverpod. One `assets/toolchain_manifest.json` serves both;
+  `ToolManifest.tryParse(…, host:)` requires and keeps only that host's
+  tools, so a Mac's inventory is exactly what it was.
+- **`lib/platform/windows/`**: `WindowsSystem` (interface) +
+  `Win32System` (`dart:ffi`: `RegGetValueW`, `RegSetKeyValueW`,
+  `SendMessageTimeoutW`, `ShellExecuteExW` "runas") — no PowerShell or
+  `reg.exe` parsing; `NoWindowsSystem` elsewhere and in sandboxes;
+  `FakeWindowsSystem` in tests. `ffi` (already in the lockfile) is now a
+  direct dependency. `registryPath()` (machine + user `Path`, expanded)
+  replaces the login-shell `PATH` on Windows, for the probe and installs.
+- **Probe:** Developer Mode from the registry (and the Group Policy that can
+  lock it); Git on `PATH`, in `%ProgramFiles%\Git` or
+  `%LOCALAPPDATA%\Programs\Git`, versioned by `git --version`.
+- **Installs:**
+  - Developer Mode — an elevated `reg.exe add` through Windows' UAC prompt
+    (`ToolPhase.waitingForApproval`), read back from the registry;
+    declined, failed or policy-locked → a `ToolInstallException` naming
+    Settings → System → For developers, and the dialog's Try again.
+  - Git — latest release from the GitHub API, the `-64-bit`/`-arm64`
+    installer verified against the asset's `sha256` digest (refused without
+    one), run `/VERYSILENT /CURRENTUSER /o:PathOption=Cmd` into
+    `%LOCALAPPDATA%\Programs\Git`; its own installer owns the `Path` entry.
+  - Flutter — `releases_windows.json`, `tar.exe` unpacks the zip, the
+    rename into `%USERPROFILE%\develop\flutter` retries while Defender holds
+    files, `flutter.bat` runs with the registry `Path` (so the Git just
+    installed is found).
+  - Serverpod — `dart.exe install` with the registry `Path`; records
+    `serverpod.bat`.
+  - `PATH` — appended to `HKCU\Environment\Path` as stored (`%VARS%` kept,
+    `REG_EXPAND_SZ`), skipped when already on the machine or user `Path`,
+    then `WM_SETTINGCHANGE`. Recorded as `{file: HKCU\Environment\Path,
+    line: <dir>}`; uninstall removes exactly that entry.
+- **Copy:** the manual Flutter update command is `flutter.bat` (PowerShell
+  `& "…"` when quoted) and says PowerShell; Developer Mode reads "On".
+- **Verified on the dev laptop:** the real probe finds everything (286 ms,
+  `needsSetup=false`) and App Studio opens on the start page.
+  **Not yet exercised for real:** Developer Mode via UAC, the Git install
+  and a fresh Flutter install — they need the clean-room VM (section 9),
+  since this machine already has all of them. Uninstalling Git/Developer
+  Mode is Phase 6 (not offered until then). Widgetbook Windows use cases and
+  the `LongPathsEnabled` warning are still to do.
+
 ### Phase 4 — Runner, projects and preview on Windows (L)
 
 - Discovery: 108-byte limit off macOS; registry dir from the host;

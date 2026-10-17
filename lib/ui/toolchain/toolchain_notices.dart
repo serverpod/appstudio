@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
@@ -141,6 +142,18 @@ class LegacyInstallNotice extends StatelessWidget {
 String manualUpdateCommand(ToolCandidate candidate) {
   final root = candidate.root ?? '';
   final pretty = prettyPath(root);
+  // A Windows SDK: `flutter.bat`, and PowerShell — the terminal Windows opens —
+  // needs `&` to run a quoted path. The full path either way: `~` is not
+  // something every Windows shell expands.
+  if (root.contains(r'\')) {
+    final bat = '$root\\bin\\flutter.bat';
+    final flutter = bat.contains(' ') ? '& "$bat"' : bat;
+    final channel = candidate.facts['channel'];
+    return [
+      if (channel != null && channel != 'stable') '$flutter channel stable',
+      '$flutter upgrade',
+    ].join('\n');
+  }
   final flutter = pretty.contains(' ')
       ? '"$root/bin/flutter"'
       : '$pretty/bin/flutter';
@@ -228,8 +241,10 @@ class _ManualUpdateDialogState extends State<ManualUpdateDialog> {
               ? 'Update ${pending.single.spec.displayName}'
               : 'Update your tools',
         ),
-        description: const Text(
-          'Run this in Terminal, then check again.',
+        description: Text(
+          'Run this in '
+          '${defaultTargetPlatform == TargetPlatform.windows ? 'PowerShell' : 'Terminal'}'
+          ', then check again.',
         ),
         actions: [
           ShadButton.outline(

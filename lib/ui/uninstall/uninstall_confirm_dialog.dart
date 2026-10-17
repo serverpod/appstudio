@@ -36,6 +36,9 @@ String? uninstallConsequence(ToolId id) => switch (id) {
       ToolId.commandLineTools =>
         'Removes git, compilers, and the other command line developer tools. '
             'If other apps use them, they may be affected.',
+      ToolId.developerMode =>
+        'Other developer tools on this PC may rely on Developer Mode.',
+      ToolId.git => 'Other apps and terminals that use git may be affected.',
       ToolId.flutter || ToolId.serverpodCli => null,
     };
 

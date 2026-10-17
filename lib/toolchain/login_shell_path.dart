@@ -26,6 +26,8 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../platform/host.dart';
+import '../platform/windows/win32_system.dart';
+import '../platform/windows/windows_system.dart';
 
 /// Wraps the value so rc noise — banners, version-manager chatter, a
 /// `compinit` warning — cannot be mistaken for the answer.
@@ -42,14 +44,21 @@ typedef LoginShellPathReader = Future<String?> Function();
 /// Never throws: a shell that is missing, wedged or hostile must degrade to
 /// "no extra PATH", not take the probe down with it.
 ///
-/// Windows has no login shell, and a GUI app there inherits Explorer's
-/// environment rather than launchd's, so there is nothing to ask: null.
+/// Windows has no login shell. Its counterpart is the `Path` in the registry,
+/// which a running App Studio may predate: see [registryPath].
 Future<String?> captureLoginShellPath({
   String? shellOverride,
   Duration timeout = _defaultTimeout,
   HostPlatform? host,
+  WindowsSystem? windows,
 }) async {
-  if ((host ?? currentHost).isWindows) return null;
+  if ((host ?? currentHost).isWindows) {
+    try {
+      return registryPath(windows ?? Win32System());
+    } catch (_) {
+      return null;
+    }
+  }
   final shell = shellOverride ?? Platform.environment['SHELL'] ?? '/bin/zsh';
 
   final Process process;

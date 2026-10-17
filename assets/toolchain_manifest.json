@@ -7,6 +7,16 @@
       "description": "Apple's git, compilers and linkers. Flutter and Serverpod run on them."
     },
     {
+      "id": "developer_mode",
+      "displayName": "Developer Mode",
+      "description": "A Windows setting that lets Flutter and Serverpod create the links they need."
+    },
+    {
+      "id": "git",
+      "displayName": "Git for Windows",
+      "description": "The git Flutter runs on."
+    },
+    {
       "id": "flutter",
       "displayName": "Flutter",
       "description": "Builds and serves the Flutter web app shown in the preview pane.",

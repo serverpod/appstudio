@@ -16,6 +16,16 @@ final kFlutterReleasesUrl = Uri.parse(
   'https://storage.googleapis.com/flutter_infra_release/releases/releases_macos.json',
 );
 
+/// The same feed for Windows.
+final kFlutterWindowsReleasesUrl = Uri.parse(
+  'https://storage.googleapis.com/flutter_infra_release/releases/releases_windows.json',
+);
+
+/// Git for Windows' latest release, from its official GitHub repository.
+final kGitForWindowsReleaseUrl = Uri.parse(
+  'https://api.github.com/repos/git-for-windows/git/releases/latest',
+);
+
 /// pub.dev's version listing for the Serverpod CLI.
 final kServerpodVersionsUrl =
     Uri.parse('https://pub.dev/api/packages/serverpod_cli');
@@ -46,9 +56,31 @@ class FlutterRelease {
       );
 }
 
+/// One Git for Windows installer from its latest GitHub release.
+class GitRelease {
+  const GitRelease({
+    required this.version,
+    required this.installerUrl,
+    required this.sha256,
+    this.downloadBytes,
+  });
+
+  final ToolVersion version;
+  final Uri installerUrl;
+
+  /// From the asset's `digest`, which GitHub computes on upload.
+  final String sha256;
+  final int? downloadBytes;
+}
+
 /// What will be installed for one tool.
 class PlannedTool {
-  const PlannedTool({required this.id, this.version, this.flutterRelease});
+  const PlannedTool({
+    required this.id,
+    this.version,
+    this.flutterRelease,
+    this.gitRelease,
+  });
 
   final ToolId id;
 
@@ -59,7 +91,11 @@ class PlannedTool {
   /// Only for a fresh Flutter install.
   final FlutterRelease? flutterRelease;
 
-  int? get downloadBytes => flutterRelease?.downloadBytes;
+  /// Only for Git for Windows.
+  final GitRelease? gitRelease;
+
+  int? get downloadBytes =>
+      flutterRelease?.downloadBytes ?? gitRelease?.downloadBytes;
 }
 
 class InstallPlan {
@@ -130,6 +166,49 @@ FlutterRelease? pickFlutterRelease(
   return best;
 }
 
+/// The installer for [arch] (`x64` or `arm64`) in a Git for Windows GitHub
+/// release, or null when the release has none, or no digest to verify it by.
+GitRelease? pickGitRelease(String release, {required String arch}) {
+  final Object? decoded;
+  try {
+    decoded = jsonDecode(release);
+  } catch (_) {
+    return null;
+  }
+  if (decoded is! Map || decoded['prerelease'] == true) return null;
+  // v2.56.0.windows.2 → 2.56.0
+  final tag = decoded['tag_name'];
+  final version = tag is String
+      ? ToolVersion.tryParse(
+          RegExp(r'^v?(\d+\.\d+\.\d+)').firstMatch(tag)?.group(1),
+        )
+      : null;
+  final assets = decoded['assets'];
+  if (version == null || assets is! List) return null;
+  final suffix = arch == 'arm64' ? '-arm64.exe' : '-64-bit.exe';
+  for (final asset in assets) {
+    if (asset is! Map) continue;
+    final name = asset['name'];
+    if (name is! String || !name.startsWith('Git-') || !name.endsWith(suffix)) {
+      continue;
+    }
+    final url = asset['browser_download_url'];
+    final digest = asset['digest'];
+    // Nothing to verify the download against: refuse it.
+    if (url is! String || digest is! String || !digest.startsWith('sha256:')) {
+      return null;
+    }
+    final size = asset['size'];
+    return GitRelease(
+      version: version,
+      installerUrl: Uri.parse(url),
+      sha256: digest.substring('sha256:'.length).toLowerCase(),
+      downloadBytes: size is int ? size : null,
+    );
+  }
+  return null;
+}
+
 /// The newest version of a pub package inside [accepts], preferring stable
 /// releases — pub's own rule, so this is what `dart install` would pick too.
 ToolVersion? pickPubVersion(String listing, VersionRange accepts) {
@@ -165,10 +244,13 @@ Future<FlutterRelease> fetchFlutterRelease(
   http.Client client, {
   required VersionRange accepts,
   required String arch,
+  bool windows = false,
 }) async {
   final String feed;
   try {
-    final response = await client.get(kFlutterReleasesUrl).timeout(_timeout);
+    final response = await client
+        .get(windows ? kFlutterWindowsReleasesUrl : kFlutterReleasesUrl)
+        .timeout(_timeout);
     if (response.statusCode != 200) throw 'HTTP ${response.statusCode}';
     feed = response.body;
   } catch (_) {
@@ -179,7 +261,8 @@ Future<FlutterRelease> fetchFlutterRelease(
   final release = pickFlutterRelease(feed, accepts: accepts, arch: arch);
   if (release == null) {
     throw PlanException(
-      'No stable Flutter release for this Mac matches $accepts.',
+      'No stable Flutter release for this ${windows ? 'PC' : 'Mac'} matches '
+      '$accepts.',
     );
   }
   return release.withDownloadBytes(
@@ -209,6 +292,32 @@ Future<ToolVersion> fetchServerpodVersion(
     throw PlanException('No Serverpod release matches $accepts.');
   }
   return version;
+}
+
+Future<GitRelease> fetchGitRelease(
+  http.Client client, {
+  required String arch,
+}) async {
+  final String body;
+  try {
+    final response = await client.get(
+      kGitForWindowsReleaseUrl,
+      headers: const {'Accept': 'application/vnd.github+json'},
+    ).timeout(_timeout);
+    if (response.statusCode != 200) throw 'HTTP ${response.statusCode}';
+    body = response.body;
+  } catch (_) {
+    throw const PlanException(
+      'Could not reach GitHub to look up the latest Git for Windows.',
+    );
+  }
+  final release = pickGitRelease(body, arch: arch);
+  if (release == null) {
+    throw const PlanException(
+      'The latest Git for Windows release has no installer for this PC.',
+    );
+  }
+  return release;
 }
 
 /// Size is a nicety for the plan; a HEAD that fails leaves it unknown.
