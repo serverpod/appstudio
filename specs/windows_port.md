@@ -984,6 +984,12 @@ longer says macOS only.
     (`afunix_guard.dart`, 1 s) did not make it go away.
   - So the afunix risk is not limited to the dev laptop's build, and it is
     not limited to killed processes.
+  - The image is Windows Server 2025 build 26100.33438 with afunix.sys
+    10.0.26100.32684, far newer than the laptop's .8972.
+  - In run #13 it went down in the group where the runner stops or crashes
+    and drops connected clients: a disconnect while a read is pending,
+    mid-test. That is exactly what users meet when a runner stops or
+    crashes, which makes the VM pass the deciding evidence.
 - Widgetbook runs on Windows too (`flutter run -d windows -t
   widgetbook/main.dart`) once Phase 2 lands.
 

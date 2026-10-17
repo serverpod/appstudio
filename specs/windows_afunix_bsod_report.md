@@ -23,9 +23,14 @@ machines go down the same way in App Studio's AF_UNIX tests.
 - **Evidence:** the `windows sockets (canary)` job in
   `.github/workflows/ci.yml`. Its runs are public at
   github.com/serverpod/appstudio/actions; the logs need a sign-in.
-- **Still missing:** the image's afunix.sys version. The main Windows job
-  now reports it as an annotation. Add it to both reports below before
-  filing.
+- **The image:** Windows Server 2025 Datacenter build 26100.33438, with
+  **afunix.sys 10.0.26100.32684**. That is far newer than the laptop's
+  10.0.26100.8972, so the bug is not fixed in current Windows. Add this to
+  both reports below.
+- **Run #13:** runner discovery and the first `serverpod_process_test` group
+  passed. The machine went down in the group "a runner someone else
+  started", where the fake runner stops or crashes and drops connected
+  clients abruptly, mid-test rather than at process exit.
 
 ---
 
