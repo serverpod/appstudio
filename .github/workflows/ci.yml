@@ -48,38 +48,39 @@ jobs:
       - name: Analyze
         run: flutter analyze
 
-      # One test file at a time on Windows: the same way the suite is run on
-      # the dev laptop, and the AF_UNIX tests do not race each other.
       - name: Test (macOS)
         if: runner.os == 'macOS'
         run: flutter test
 
-      # Its own limit, under the job's, so a hang fails this step and the next
-      # one still runs.
-      - name: Test (Windows)
-        if: runner.os == 'Windows'
-        timeout-minutes: 20
-        shell: bash
-        run: flutter test -j 1 --reporter expanded 2>&1 | tee test-output.txt
-
-      # Reading a job's log needs a GitHub sign-in; its annotations do not.
-      # The end of the output, as one annotation, shows where it failed or
-      # stopped.
-      - name: Where the Windows tests stopped
-        if: failure() && runner.os == 'Windows'
-        shell: bash
-        run: |
-          tail_text=$(tail -n 60 test-output.txt \
-            | sed -e 's/\x1b\[[0-9;]*m//g' -e 's/\r$//' -e 's/%/%25/g' \
-            | awk '{printf "%s%%0A", $0}')
-          echo "::error title=Windows test output (last 60 lines)::${tail_text}"
-
-      # Which afunix.sys this runner had, next to the result, for the crash
-      # tracked in specs/windows_afunix_bsod_report.md.
+      # Windows runs in pieces. Every full run so far took the machine down
+      # mid-test: the step limit below never fired and the job ran out its
+      # 30 minutes, which a hang inside a test cannot do. The likely cause is
+      # the afunix.sys crash in specs/windows_afunix_bsod_report.md, set off by
+      # a test process exiting with an AF_UNIX socket open. Separate steps name
+      # the file: the one left "in progress" is the one that was running.
+      #
+      # Reading a job's log needs a GitHub sign-in; its annotations do not, so
+      # what matters is reported as annotations.
       - name: Windows build and afunix.sys
-        if: always() && runner.os == 'Windows'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $cv = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
-          "Windows $($cv.ProductName) build $($cv.CurrentBuild).$($cv.UBR)"
-          (Get-Item "$env:SystemRoot\System32\drivers\afunix.sys").VersionInfo.FileVersion
+          $afunix = (Get-Item "$env:SystemRoot\System32\drivers\afunix.sys").VersionInfo.FileVersion
+          "::notice title=Windows and afunix.sys::$($cv.ProductName) build $($cv.CurrentBuild).$($cv.UBR), afunix.sys $afunix"
+
+      # One test file at a time, as on the dev laptop.
+      - name: Test (Windows, no processes or sockets)
+        if: runner.os == 'Windows'
+        timeout-minutes: 15
+        run: flutter test -x process -j 1
+
+      - name: Test (Windows, runner discovery)
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        run: flutter test test/runner/runner_discovery_test.dart
+
+      - name: Test (Windows, Serverpod process)
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        run: flutter test test/process/serverpod_process_test.dart
