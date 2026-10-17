@@ -5,7 +5,9 @@ import 'dart:io';
 import 'package:meta/meta.dart';
 import 'package:path/path.dart' as p;
 
+import '../platform/host.dart';
 import '../process/process_killer.dart';
+import 'runner_postgres.dart';
 import 'runner_client.dart';
 import 'runner_discovery.dart';
 
@@ -94,8 +96,19 @@ Future<void> reclaimOwnedRunner({
         } finally {
           await client.close();
         }
+        if (currentHost.isWindows) {
+          await stopOrphanedPostgres(
+            owned.serverDir,
+            isAlive: const ProcessKiller().isAlive,
+          );
+        }
+      // Not on Windows: a runner that does not answer may still hold AF_UNIX
+      // connections, and ending such a process has blue-screened Windows
+      // (afunix.sys, specs/windows_port.md).
       case NoRunner(staleManifest: final manifest?)
-          when manifest.pid == owned.pid && !manifest.isFinished:
+          when manifest.pid == owned.pid &&
+              !manifest.isFinished &&
+              !currentHost.isWindows:
         await const ProcessKiller().requestStop(owned.pid);
       case _:
         break;

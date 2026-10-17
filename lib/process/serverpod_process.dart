@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../platform/host.dart';
 import '../preview/preview_phase.dart';
 import '../process/full_restart_view.dart';
 import '../process/project_ready_view.dart';
@@ -13,6 +14,7 @@ import '../runner/runner_client.dart';
 import '../runner/runner_discovery.dart';
 import '../runner/runner_log.dart';
 import '../runner/runner_ownership.dart';
+import '../runner/runner_postgres.dart';
 import '../runner/runner_protocol.dart';
 import '../runner/server_status.dart';
 import '../session/project_session.dart';
@@ -725,11 +727,20 @@ class ServerpodProcessController extends ChangeNotifier
       final client = _client;
       if (client != null && _owned) {
         log.addLocal('Stopping the Serverpod runner.');
+        final serverDir = _serverDir;
+        var stopped = false;
         try {
           await client.stop();
           await client.done.timeout(const Duration(seconds: 15));
+          stopped = true;
         } catch (_) {
           _signalRunner();
+        }
+        if (stopped && serverDir != null && currentHost.isWindows) {
+          await stopOrphanedPostgres(
+            serverDir,
+            isAlive: const ProcessKiller().isAlive,
+          );
         }
         await clearOwnedRunner();
       } else if (client != null) {
@@ -741,7 +752,7 @@ class ServerpodProcessController extends ChangeNotifier
       } else if (_launch != null) {
         // Started but never attached: the CLI is still waiting for its
         // runner, and the runner may already exist.
-        _launch?.kill();
+        if (!currentHost.isWindows) _launch?.kill();
         _signalRunner();
         await clearOwnedRunner();
       }
@@ -755,11 +766,24 @@ class ServerpodProcessController extends ChangeNotifier
   }
 
   /// The runner by signal, for when its socket cannot ask it. It handles
-  /// SIGTERM as a graceful shutdown; Windows has no such request, and there
-  /// its process tree is ended instead.
+  /// SIGTERM as a graceful shutdown.
+  ///
+  /// Not on Windows, where there is no such request — only ending the process
+  /// — and ending a process that holds AF_UNIX connections, as the runner and
+  /// the CLI waiting on it do, has blue-screened Windows (afunix.sys,
+  /// specs/windows_port.md). The runner is left up for
+  /// `serverpod runner stop`, and the log says so.
   void _signalRunner() {
     final pid = _pid;
     if (pid == null || pid <= 0) return;
+    if (currentHost.isWindows) {
+      log.addLocal(
+        'The Serverpod runner did not stop when asked and was left running. '
+        'Stop it with `serverpod runner stop` in the server folder.',
+        level: RunnerLogLevel.warning,
+      );
+      return;
+    }
     unawaited(const ProcessKiller().requestStop(pid));
   }
 
