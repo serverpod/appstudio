@@ -18,6 +18,25 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     return cef_exit_code;
   }
 
+  // One App Studio at a time, as macOS gives one instance per app: a second
+  // would fight the first over CEF's cache lock and the projects' runners. A
+  // second launch brings the first window forward instead. The installer's
+  // AppMutex names the same mutex, so it waits for App Studio to close.
+  HANDLE instance_mutex =
+      ::CreateMutexW(nullptr, FALSE, L"Serverpod.AppStudio.Running");
+  if (instance_mutex != nullptr && ::GetLastError() == ERROR_ALREADY_EXISTS) {
+    if (HWND existing =
+            ::FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", L"App Studio")) {
+      if (::IsIconic(existing)) ::ShowWindow(existing, SW_RESTORE);
+      ::SetForegroundWindow(existing);
+    }
+    return EXIT_SUCCESS;
+  }
+
+  // Taskbar grouping, pinning and toast notifications go by this id. The
+  // installer gives the Start menu shortcut the same one.
+  ::SetCurrentProcessExplicitAppUserModelID(L"Serverpod.AppStudio");
+
   // CEF's own data, including its process singleton lock, in a directory of
   // ours: %LOCALAPPDATA%\App Studio\CEF. Left unset, CEF shares one default
   // directory with every other CEF app that also left it unset.

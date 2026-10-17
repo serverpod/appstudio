@@ -11,6 +11,7 @@ add_executable(${BINARY_NAME} WIN32
   "main.cpp"
   "utils.cpp"
   "win32_window.cpp"
+  "winsparkle_updater.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
   "Runner.rc"
   "runner.exe.manifest"
@@ -35,6 +36,44 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
+
+# WinSparkle, for updates (winsparkle_updater.cpp). A pinned release, checked
+# against the digest GitHub publishes for it, like every other download.
+set(WINSPARKLE_VERSION "0.9.4")
+set(WINSPARKLE_SHA256
+  "6037df37fc263bd1650a1c4949681a9d40ffe991d01f35892a406cb5d103c976")
+set(WINSPARKLE_DIR "${CMAKE_BINARY_DIR}/winsparkle")
+set(WINSPARKLE_ROOT "${WINSPARKLE_DIR}/WinSparkle-${WINSPARKLE_VERSION}")
+if(NOT EXISTS "${WINSPARKLE_ROOT}/include/winsparkle.h")
+  set(WINSPARKLE_ZIP "${WINSPARKLE_DIR}/WinSparkle-${WINSPARKLE_VERSION}.zip")
+  file(DOWNLOAD
+    "https://github.com/vslavik/winsparkle/releases/download/v${WINSPARKLE_VERSION}/WinSparkle-${WINSPARKLE_VERSION}.zip"
+    "${WINSPARKLE_ZIP}"
+    EXPECTED_HASH SHA256=${WINSPARKLE_SHA256}
+    TLS_VERIFY ON)
+  file(ARCHIVE_EXTRACT INPUT "${WINSPARKLE_ZIP}" DESTINATION "${WINSPARKLE_DIR}")
+endif()
+target_include_directories(${BINARY_NAME} PRIVATE "${WINSPARKLE_ROOT}/include")
+target_link_libraries(${BINARY_NAME} PRIVATE
+  "${WINSPARKLE_ROOT}/x64/Release/WinSparkle.lib")
+# For the top-level install step, which puts the DLL beside the executable.
+set(WINSPARKLE_DLL "${WINSPARKLE_ROOT}/x64/Release/WinSparkle.dll"
+  CACHE INTERNAL "WinSparkle's DLL")
+# The release scripts sign updates with the tool from the same package.
+set(WINSPARKLE_TOOL "${WINSPARKLE_ROOT}/bin/winsparkle-tool.exe"
+  CACHE INTERNAL "WinSparkle's signing tool")
+
+# The update feed and its signing key, from windows/release.json. Release
+# builds with both set check for updates; the rest report them unavailable.
+file(READ "${CMAKE_SOURCE_DIR}/release.json" APPSTUDIO_RELEASE_JSON)
+string(JSON APPSTUDIO_APPCAST_URL GET "${APPSTUDIO_RELEASE_JSON}" appcastUrl)
+string(JSON APPSTUDIO_EDDSA_PUBLIC_KEY GET "${APPSTUDIO_RELEASE_JSON}"
+  eddsaPublicKey)
+target_compile_definitions(${BINARY_NAME} PRIVATE
+  "APPSTUDIO_APPCAST_URL=\"${APPSTUDIO_APPCAST_URL}\""
+  "APPSTUDIO_EDDSA_PUBLIC_KEY=\"${APPSTUDIO_EDDSA_PUBLIC_KEY}\"")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${CMAKE_SOURCE_DIR}/release.json")
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)

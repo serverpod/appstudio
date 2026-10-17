@@ -9,6 +9,7 @@
 #include <memory>
 
 #include "win32_window.h"
+#include "winsparkle_updater.h"
 
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
@@ -36,11 +37,8 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       lifecycle_channel_;
 
-  // dev.serverpod.appstudio/updates: the version this build carries, for the
-  // About line and analytics. No updater yet, so updates read as unavailable
-  // (lib/update/update_controller.dart).
-  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
-      updates_channel_;
+  // dev.serverpod.appstudio/updates, through WinSparkle.
+  std::unique_ptr<WinSparkleUpdater> updater_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

@@ -86,3 +86,35 @@ jobs:
         if: ${{ !cancelled() && runner.os == 'Windows' }}
         timeout-minutes: 5
         run: flutter test test/process/serverpod_process_test.dart
+
+  # The Windows release build and its Inno Setup installer, exactly as
+  # tool/windows/build_release.ps1 makes them (GitHub's Windows image has Inno
+  # Setup 6). No tests run here, so nothing here opens an AF_UNIX socket.
+  windows-installer:
+    name: windows installer
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: true
+
+      - name: Dependencies
+        run: flutter pub get
+
+      - name: Build the release and its installer
+        shell: powershell
+        run: tool\windows\build_release.ps1
+
+      # Annotations can be read without signing in to GitHub; logs cannot.
+      - name: Report the installer
+        shell: powershell
+        run: |
+          $f = Get-Item dist\windows\*-setup.exe
+          $sha = (Get-Content "$($f.FullName).sha256").Split(' ')[0]
+          $mb = [math]::Round($f.Length / 1MB, 1)
+          "::notice title=Windows installer::$($f.Name), $mb MB, sha256 $sha"

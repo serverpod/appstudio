@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "dev.serverpod" "\0"
-            VALUE "FileDescription", "appstudio" "\0"
+            VALUE "CompanyName", "Serverpod" "\0"
+            VALUE "FileDescription", "App Studio" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "appstudio" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 dev.serverpod. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Serverpod AB. All rights reserved." "\0"
             VALUE "OriginalFilename", "appstudio.exe" "\0"
-            VALUE "ProductName", "appstudio" "\0"
+            VALUE "ProductName", "App Studio" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

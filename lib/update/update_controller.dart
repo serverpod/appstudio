@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../agent/agent_controller.dart';
+import '../platform/afunix_settle.dart';
 import '../process/serverpod_process.dart';
 import 'session_teardown.dart';
 import 'update_state.dart';
@@ -155,6 +156,9 @@ class UpdateController extends ChangeNotifier {
     } catch (e) {
       debugPrint('UpdateController: teardown before relaunch failed: $e');
     }
+    // The process ends right after this returns: on Windows, let the kernel
+    // finish closing the runner connection first (afunix.sys).
+    await settleAfUnixSockets();
   }
 
   Future<T> _guard<T>(
