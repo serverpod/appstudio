@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 
@@ -67,7 +68,11 @@ class ToolchainInstaller {
     ShellProfile? profile,
     WindowsSystem? windows,
     this.pollInterval = const Duration(seconds: 3),
+    @visibleForTesting
+    Future<ProcessResult> Function(String executable, List<String> arguments)?
+        runUninstaller,
   })  : _http = httpClient ?? http.Client(),
+        _runUninstaller = runUninstaller ?? Process.run,
         _loginShellPath = loginShellPath ?? captureLoginShellPath,
         profile = profile ??
             ShellProfile.resolve(home: paths.home, host: paths.host),
@@ -79,6 +84,8 @@ class ToolchainInstaller {
   final Duration pollInterval;
   final http.Client _http;
   final LoginShellPathReader _loginShellPath;
+  final Future<ProcessResult> Function(String executable, List<String> args)
+      _runUninstaller;
 
   /// The registry and the UAC prompt, on Windows.
   final WindowsSystem windows;
@@ -126,13 +133,7 @@ class ToolchainInstaller {
         'whoever manages this PC to allow it, then choose Try again.',
       );
     }
-    final systemRoot = Platform.environment['SystemRoot'] ?? r'C:\Windows';
-    final declined = await windows.runElevated(
-          _host.path.join(systemRoot, 'System32', 'reg.exe'),
-          'add "HKLM\\$kAppModelUnlockKey" /v $kDeveloperModeValue '
-          '/t REG_DWORD /d 1 /f',
-        ) ==
-        null;
+    final declined = !await _setDeveloperMode(on: true);
     if (developerModeEnabled(windows)) {
       return RecordedInstall(
         id: ToolId.developerMode,
@@ -144,6 +145,32 @@ class ToolchainInstaller {
       'Turn it on yourself in Settings → System → For developers, then '
       'choose Try again.',
     );
+  }
+
+  /// Turns Developer Mode back off, through the same UAC prompt. Only offered
+  /// when App Studio turned it on.
+  Future<void> disableDeveloperMode() async {
+    if (!developerModeEnabled(windows)) return;
+    final declined = !await _setDeveloperMode(on: false);
+    if (!developerModeEnabled(windows)) return;
+    throw ToolInstallException(
+      declined
+          ? 'Windows did not get approval to turn off Developer Mode.'
+          : 'Developer Mode is still on. Turn it off in Settings → System → '
+              'For developers.',
+    );
+  }
+
+  /// One elevated `reg add`. False when the prompt was declined or the
+  /// program could not start; the registry says whether it worked.
+  Future<bool> _setDeveloperMode({required bool on}) async {
+    final systemRoot = Platform.environment['SystemRoot'] ?? r'C:\Windows';
+    return await windows.runElevated(
+          _host.path.join(systemRoot, 'System32', 'reg.exe'),
+          'add "HKLM\\$kAppModelUnlockKey" /v $kDeveloperModeValue '
+          '/t REG_DWORD /d ${on ? 1 : 0} /f',
+        ) !=
+        null;
   }
 
   // -- Git for Windows ------------------------------------------------------
@@ -229,6 +256,52 @@ class ToolchainInstaller {
       version: '${release.version}',
       installedAt: DateTime.now(),
     );
+  }
+
+  /// How long Git's uninstaller gets to finish.
+  static const gitUninstallTimeout = Duration(minutes: 3);
+
+  /// Git for Windows' own uninstaller, silently. It takes the `Path` entry
+  /// its installer added with it.
+  ///
+  /// Inno Setup's uninstaller copies itself to the temp folder and returns
+  /// while that copy does the work, so its exit says nothing: `git.exe`
+  /// going is what counts.
+  Future<void> uninstallGit(RecordedInstall owned) async {
+    final root = owned.path;
+    if (root == null) return;
+    final git = File(_host.path.join(root, 'cmd', 'git.exe'));
+    final uninstaller = File(_host.path.join(root, 'unins000.exe'));
+    if (!await uninstaller.exists()) {
+      if (!await git.exists()) return;
+      throw const ToolInstallException(
+        'Git for Windows has no uninstaller where App Studio installed it. '
+        'Remove it from Settings → Apps → Installed apps.',
+      );
+    }
+    final result = await _runUninstaller(uninstaller.path, const [
+      '/VERYSILENT',
+      '/NORESTART',
+      '/SUPPRESSMSGBOXES',
+    ]);
+    if (result.exitCode != 0) {
+      throw ToolInstallException(
+        'Git for Windows could not be uninstalled (exit ${result.exitCode}).',
+        detail: _tail('${result.stdout}\n${result.stderr}'),
+      );
+    }
+    final deadline = DateTime.now().add(gitUninstallTimeout);
+    while (await git.exists()) {
+      if (DateTime.now().isAfter(deadline)) {
+        throw const ToolInstallException(
+          'Git for Windows is still installed. Close any program using git '
+          'and remove it from Settings → Apps → Installed apps.',
+        );
+      }
+      await Future<void>.delayed(pollInterval);
+    }
+    // Whatever the uninstaller left in the folder App Studio chose.
+    await _deleteQuietly(Directory(root));
   }
 
   // -- Command Line Tools ---------------------------------------------------

@@ -738,6 +738,44 @@ held open by a running `dart.exe` are the Windows-specific failure mode —
 stop the session first (already the order) and retry deletes. The app's own
 binaries are removed by the installer's uninstaller, not by App Studio.
 
+#### As built (2026-10-17)
+
+- **Offered** (`ToolchainController.removableTools`), only for tools App
+  Studio's install record holds, in removal order:
+  - Serverpod, then Flutter.
+  - Git for Windows, when its `cmd\git.exe` is still there; ticked.
+  - Developer Mode, when it is still on; offered unticked
+    (`kUninstallUntickedByDefault`) and labelled "Turn off Developer Mode".
+- **Git:**
+  - `unins000.exe /VERYSILENT /NORESTART /SUPPRESSMSGBOXES`. Inno's
+    uninstaller relaunches itself from the temp folder and returns at once,
+    so App Studio polls until `git.exe` is gone (up to 3 minutes), then
+    deletes what is left of the folder.
+  - Git's uninstaller removes its own `Path` entry.
+  - If there is no uninstaller, the error points to Settings → Apps →
+    Installed apps.
+- **Developer Mode:** the same elevated `reg add`, with `/d 0`, read back
+  from the registry. A declined prompt is a named failure, and the rest of
+  the uninstall continues.
+- **Folders:**
+  - `%APPDATA%\App Studio` as before.
+  - New: `%LOCALAPPDATA%\App Studio` (`ToolchainPaths.localDataRoot`),
+    which holds the CEF cache.
+  - `~\.serverpod` goes with the CLI, as on macOS.
+  - All of them go through `deleteDirectory`, which retries five times,
+    500 ms apart. That covers files the session's processes and CEF's
+    helpers still hold for a moment after teardown.
+- **Copy:** the dialog and the final screen say "Settings → Apps → Installed
+  apps" on Windows instead of the Trash.
+- **Left for Phase 8:**
+  - `shared_preferences` is cleared but its file stays, under
+    `%APPDATA%\dev.serverpod\appstudio`, named from `Runner.rc`'s
+    CompanyName and ProductName. Those two still read `dev.serverpod` and
+    `appstudio`. Rename them with the installer, and have its uninstaller
+    remove that folder.
+- **Still to check in the VM:** a real Git uninstall, and the UAC prompt
+  turning Developer Mode off.
+
 ### Phase 7 — Compact window on Windows (L–XL, optional for v1)
 
 Win32 implementation of the `window` channel (borderless,

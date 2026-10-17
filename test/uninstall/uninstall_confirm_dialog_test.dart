@@ -128,6 +128,43 @@ void main() {
       expect(outcome.choice!.tools, isEmpty);
     });
 
+    testWidgets('offers Git ticked and Developer Mode unticked', (tester) async {
+      // Git is a program App Studio put there; Developer Mode is a Windows
+      // setting other developer tools may have come to rely on since.
+      final outcome = await pumpDialog(tester, const [
+        ToolId.serverpodCli,
+        ToolId.flutter,
+        ToolId.git,
+        ToolId.developerMode,
+      ]);
+      await settle(tester);
+
+      expect(checkbox(tester, 'Uninstall Git for Windows').value, isTrue);
+      expect(checkbox(tester, 'Turn off Developer Mode').value, isFalse);
+      expect(find.textContaining('use git may be affected'), findsOneWidget);
+      expect(find.textContaining('may rely on Developer Mode'), findsOneWidget);
+
+      await tester.tap(find.text('Uninstall'));
+      await settle(tester);
+      expect(outcome.choice!.tools, {
+        ToolId.serverpodCli,
+        ToolId.flutter,
+        ToolId.git,
+      });
+    });
+
+    testWidgets('Developer Mode goes only when ticked', (tester) async {
+      final outcome = await pumpDialog(tester, const [ToolId.developerMode]);
+      await settle(tester);
+
+      await tester.tap(find.text('Turn off Developer Mode'));
+      await settle(tester);
+      await tester.tap(find.text('Uninstall'));
+      await settle(tester);
+
+      expect(outcome.choice!.tools, {ToolId.developerMode});
+    });
+
     testWidgets('offers no tools when App Studio installed none',
         (tester) async {
       await pumpDialog(tester, const []);

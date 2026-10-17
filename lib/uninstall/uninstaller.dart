@@ -12,11 +12,13 @@ import 'uninstall_result.dart';
 
 export 'uninstall_result.dart';
 
-/// Removes what App Studio put on this Mac, apart from the app bundle.
+/// Removes what App Studio put on this machine, apart from the app itself.
 ///
 /// Always:
 ///
-///  * `~/Library/Application Support/App Studio` — App Studio's own data.
+///  * `~/Library/Application Support/App Studio` (`%APPDATA%\App Studio` on
+///    Windows) — App Studio's own data — and, on Windows,
+///    `%LOCALAPPDATA%\App Studio`, the preview's browser cache.
 ///  * Whatever an earlier build left for tools: its private toolchain and the
 ///    fenced `PATH` block in the user's shell config.
 ///  * Preferences (NSUserDefaults) — recents, theme, notice dismissals.
@@ -29,7 +31,9 @@ export 'uninstall_result.dart';
 ///  * the Serverpod CLI (`dart uninstall`), and with it `~/.serverpod` — the
 ///    CLI's own state, including the Serverpod Cloud login;
 ///  * the Flutter SDK, and the `PATH` line App Studio added for it;
-///  * the Command Line Tools, behind an administrator prompt.
+///  * the Command Line Tools, behind an administrator prompt;
+///  * on Windows, Git for Windows, through its own uninstaller, and Developer
+///    Mode, behind the UAC prompt (offered unticked).
 ///
 /// `~/.pub-cache` goes with Flutter — it is Flutter's Dart's package cache —
 /// and stays when Flutter does.
@@ -82,6 +86,16 @@ class Uninstaller {
         await toolchains.uninstallTool(ToolId.flutter);
       });
     }
+    if (choice.tools.contains(ToolId.git)) {
+      await step('uninstalling Git for Windows', () async {
+        await toolchains.uninstallTool(ToolId.git);
+      });
+    }
+    if (choice.tools.contains(ToolId.developerMode)) {
+      await step('turning off Developer Mode', () async {
+        await toolchains.uninstallTool(ToolId.developerMode);
+      });
+    }
     if (choice.tools.contains(ToolId.commandLineTools)) {
       await step('uninstalling Apple\'s command line tools', () async {
         await toolchains.uninstallTool(ToolId.commandLineTools);
@@ -94,20 +108,19 @@ class Uninstaller {
     });
 
     await step('deleting the App Studio support folder', () async {
-      final dir = Directory(toolchains.paths.appSupportRoot);
-      if (await dir.exists()) {
-        await dir.delete(recursive: true);
-      }
+      await deleteDirectory(Directory(toolchains.paths.appSupportRoot));
     });
+    if (toolchains.paths.localDataRoot case final local?) {
+      await step('deleting the preview\'s browser cache', () async {
+        await deleteDirectory(Directory(local));
+      });
+    }
 
     // The CLI's own state goes with the CLI. After the session is down: the
     // CLI writes here on every run, and the cloud CLI holds its login here.
     if (choice.tools.contains(ToolId.serverpodCli)) {
       await step('deleting Serverpod\'s settings', () async {
-        final dir = Directory(toolchains.paths.serverpodStateDir);
-        if (await dir.exists()) {
-          await dir.delete(recursive: true);
-        }
+        await deleteDirectory(Directory(toolchains.paths.serverpodStateDir));
         // The install record lived in there. Whatever App Studio installed and
         // the user chose to keep is still its to offer next time.
         await toolchains.persistRecord();
@@ -121,5 +134,27 @@ class Uninstaller {
     });
 
     return UninstallResult(failures: failures);
+  }
+}
+
+/// Deletes [dir] and everything in it, if it is there.
+///
+/// Retried, because on Windows a file is not deletable while any process has
+/// it open, and the ones that do are on their way out: the session was just
+/// torn down, and CEF's helper processes outlive its shutdown by a moment.
+/// Throws the last failure if [dir] is still there after every attempt.
+Future<void> deleteDirectory(
+  Directory dir, {
+  int attempts = 5,
+  Duration delay = const Duration(milliseconds: 500),
+}) async {
+  for (var attempt = 1; ; attempt++) {
+    try {
+      if (await dir.exists()) await dir.delete(recursive: true);
+      return;
+    } on FileSystemException {
+      if (attempt >= attempts) rethrow;
+      await Future<void>.delayed(delay);
+    }
   }
 }

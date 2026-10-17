@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../platform/windows/windows_system.dart';
 import 'install_plan.dart';
 import 'install_progress.dart';
 import 'install_record.dart';
@@ -459,13 +460,16 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
 
   // -- uninstall ------------------------------------------------------------
 
-  /// Tools App Studio installed that are still on this Mac — what uninstall
-  /// offers, in the order it removes them.
+  /// Tools App Studio installed that are still on this machine — what
+  /// uninstall offers, in the order it removes them. The record only ever
+  /// holds this host's tools, so each host gets its own.
   Future<List<ToolId>> removableTools() async {
     final found = <ToolId>[];
     for (final id in const [
       ToolId.serverpodCli,
       ToolId.flutter,
+      ToolId.git,
+      ToolId.developerMode,
       ToolId.commandLineTools,
     ]) {
       final entry = _record[id];
@@ -474,9 +478,10 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
         // Only the standalone tools — a full Xcode is never ours.
         ToolId.commandLineTools =>
           await Directory('/Library/Developer/CommandLineTools').exists(),
-        // Removing these is Phase 6 of the Windows port (specs/
-        // windows_port.md); until then uninstall does not offer them.
-        ToolId.developerMode || ToolId.git => false,
+        ToolId.developerMode => developerModeEnabled(installer.windows),
+        ToolId.git => entry.path != null &&
+            await File(paths.host.path.join(entry.path!, 'cmd', 'git.exe'))
+                .exists(),
         ToolId.flutter =>
           entry.path != null && await Directory(entry.path!).exists(),
         ToolId.serverpodCli =>
@@ -502,9 +507,10 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
         await installer.uninstallFlutter(entry);
       case ToolId.commandLineTools:
         await installer.uninstallCommandLineTools();
-      case ToolId.developerMode || ToolId.git:
-        // Never offered yet: see removableTools.
-        return;
+      case ToolId.git:
+        await installer.uninstallGit(entry);
+      case ToolId.developerMode:
+        await installer.disableDeveloperMode();
     }
     await _saveRecord(_record.without(id));
   }

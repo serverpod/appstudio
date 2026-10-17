@@ -29,7 +29,7 @@ Set<ToolId> effectiveUninstallSelection(
   return result.intersection(offered.toSet());
 }
 
-/// What removing a tool does to everything else on the Mac, where that is
+/// What removing a tool does to everything else on the machine, where that is
 /// worth saying. Flutter and Serverpod say nothing: removing them is what the
 /// checkbox label already says.
 String? uninstallConsequence(ToolId id) => switch (id) {
@@ -61,7 +61,8 @@ Future<UninstallChoice?> showUninstallConfirmDialog(
 /// App Studio's own data — its Application Support folder and preferences —
 /// always goes, so a relaunch behaves like a fresh install. The tools it
 /// installed are real installs that other things may now depend on, so each
-/// is a checkbox, ticked. Removing Flutter also clears the Dart package cache;
+/// is a checkbox, ticked — except Developer Mode, a Windows setting other
+/// tools may rely on, which starts unticked. Removing Flutter also clears the Dart package cache;
 /// with Flutter staying, the cache is left alone.
 class UninstallConfirmDialog extends StatefulWidget {
   const UninstallConfirmDialog({super.key, this.removableTools = const []});
@@ -74,7 +75,8 @@ class UninstallConfirmDialog extends StatefulWidget {
 }
 
 class _UninstallConfirmDialogState extends State<UninstallConfirmDialog> {
-  late Set<ToolId> _picked = widget.removableTools.toSet();
+  late Set<ToolId> _picked = widget.removableTools.toSet()
+    ..removeAll(kUninstallUntickedByDefault);
 
   Set<ToolId> get _selection =>
       effectiveUninstallSelection(_picked, widget.removableTools);
@@ -91,9 +93,9 @@ class _UninstallConfirmDialogState extends State<UninstallConfirmDialog> {
     // The alert variant is the one with no close X — Cancel is the way out.
     return ShadDialog.alert(
       title: const Text('Uninstall App Studio'),
-      description: const Text(
-        'Uninstall the selected components. Afterward, you can drag the app '
-        'itself to the Trash.',
+      description: Text(
+        'Uninstall the selected components. Afterward, you can '
+        '$removeAppAfterward.',
       ),
       actions: [
         ShadButton.outline(
@@ -132,7 +134,13 @@ class _UninstallConfirmDialogState extends State<UninstallConfirmDialog> {
               onChanged: (v) => setState(() {
                 _picked = v ? {..._picked, id} : ({..._picked}..remove(id));
               }),
-              label: Text('Uninstall ${id.displayName}', style: kWeightMedium),
+              label: Text(
+                // A setting is turned off, not uninstalled.
+                id == ToolId.developerMode
+                    ? 'Turn off ${id.displayName}'
+                    : 'Uninstall ${id.displayName}',
+                style: kWeightMedium,
+              ),
               sublabel: _sublabel(id),
             ),
           ],

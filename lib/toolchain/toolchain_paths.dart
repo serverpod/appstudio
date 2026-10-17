@@ -95,6 +95,13 @@ class ToolchainPaths {
   /// too, because it is about Serverpod tooling rather than about App Studio.
   String get serverpodStateDir => _path.join(home, '.serverpod');
 
+  /// Windows: App Studio's machine-local data — the preview's CEF cache, which
+  /// the runner puts in `%LOCALAPPDATA%\App Studio\CEF` (`windows/runner/
+  /// main.cpp`). Null on macOS, where all of it is under [appSupportRoot].
+  String? get localDataRoot => host.isWindows
+      ? _path.join(home, 'AppData', 'Local', kAppSupportDirName)
+      : null;
+
   /// What App Studio installed, and which `PATH` lines it added for it.
   String get installRecordFile =>
       _path.join(serverpodStateDir, 'app_studio_installs.json');

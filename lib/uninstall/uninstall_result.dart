@@ -20,6 +20,24 @@ class UninstallResult {
   bool get isClean => failures.isEmpty;
 }
 
+/// The step App Studio cannot do for itself: removing the app. On Windows the
+/// installer's own uninstaller does that.
+bool get _windows => defaultTargetPlatform == TargetPlatform.windows;
+
+/// "Afterward, you can …" in the confirm dialog.
+String get removeAppAfterward => _windows
+    ? 'remove the app itself from Settings → Apps → Installed apps'
+    : 'drag the app itself to the Trash';
+
+/// "You can now safely …" on the screen that follows.
+String get removeAppNow => _windows
+    ? 'uninstall App Studio from Settings → Apps → Installed apps'
+    : 'move App Studio to the Trash';
+
+/// Tools the dialog offers unticked: settings other software may rely on,
+/// rather than something App Studio alone uses.
+const kUninstallUntickedByDefault = {ToolId.developerMode};
+
 /// What the user agreed to remove.
 class UninstallChoice {
   const UninstallChoice({required this.tools});

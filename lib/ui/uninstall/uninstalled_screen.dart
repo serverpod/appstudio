@@ -68,9 +68,9 @@ class _UninstalledContent extends StatelessWidget {
               Text(
                 result.isClean
                     ? 'All supporting files have been deleted. You can now '
-                        'safely move App Studio to the Trash.'
+                        'safely $removeAppNow.'
                     : 'Most supporting files have been deleted. You can now '
-                        'safely move App Studio to the Trash.',
+                        'safely $removeAppNow.',
                 style: theme.textTheme.muted.copyWith(
                   color: scheme.mutedForeground,
                 ),
