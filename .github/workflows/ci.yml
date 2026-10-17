@@ -54,9 +54,25 @@ jobs:
         if: runner.os == 'macOS'
         run: flutter test
 
+      # Its own limit, under the job's, so a hang fails this step and the next
+      # one still runs.
       - name: Test (Windows)
         if: runner.os == 'Windows'
-        run: flutter test -j 1
+        timeout-minutes: 20
+        shell: bash
+        run: flutter test -j 1 --reporter expanded 2>&1 | tee test-output.txt
+
+      # Reading a job's log needs a GitHub sign-in; its annotations do not.
+      # The end of the output, as one annotation, shows where it failed or
+      # stopped.
+      - name: Where the Windows tests stopped
+        if: failure() && runner.os == 'Windows'
+        shell: bash
+        run: |
+          tail_text=$(tail -n 60 test-output.txt \
+            | sed -e 's/\x1b\[[0-9;]*m//g' -e 's/\r$//' -e 's/%/%25/g' \
+            | awk '{printf "%s%%0A", $0}')
+          echo "::error title=Windows test output (last 60 lines)::${tail_text}"
 
       # Which afunix.sys this runner had, next to the result, for the crash
       # tracked in specs/windows_afunix_bsod_report.md.
