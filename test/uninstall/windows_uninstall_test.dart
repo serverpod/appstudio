@@ -296,6 +296,26 @@ void main() {
         isNull,
       );
     });
+
+    test('preferences are where shared_preferences keeps them, on Windows',
+        () {
+      // %APPDATA%\<CompanyName>\<ProductName>, from windows/runner/Runner.rc.
+      final windows =
+          ToolchainPaths.forHome(r'C:\Users\alex', host: HostPlatform.windows);
+      expect(windows.preferencesRoot,
+          r'C:\Users\alex\AppData\Roaming\Serverpod\App Studio');
+      expect(
+        ToolchainPaths.forHome('/Users/alex', host: HostPlatform.macos)
+            .preferencesRoot,
+        isNull,
+      );
+    });
+
+    test('Runner.rc names the folder preferencesRoot expects', () {
+      final rc = File('windows/runner/Runner.rc').readAsStringSync();
+      expect(rc, contains('VALUE "CompanyName", "Serverpod"'));
+      expect(rc, contains('VALUE "ProductName", "App Studio"'));
+    });
   });
 
   group('deleteDirectory', () {

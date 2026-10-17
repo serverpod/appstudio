@@ -131,6 +131,10 @@ class Uninstaller {
     await step('clearing preferences', () async {
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
+      // Windows keeps them in a file of its own folder; clearing leaves it.
+      if (toolchains.paths.preferencesRoot case final dir?) {
+        await deleteDirectory(Directory(dir));
+      }
     });
 
     return UninstallResult(failures: failures);

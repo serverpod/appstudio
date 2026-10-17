@@ -102,6 +102,13 @@ class ToolchainPaths {
       ? _path.join(home, 'AppData', 'Local', kAppSupportDirName)
       : null;
 
+  /// Windows: where `shared_preferences` keeps its file —
+  /// `%APPDATA%\<CompanyName>\<ProductName>` from `windows/runner/Runner.rc`.
+  /// Null on macOS, where preferences are NSUserDefaults.
+  String? get preferencesRoot => host.isWindows
+      ? _path.join(home, 'AppData', 'Roaming', 'Serverpod', kAppSupportDirName)
+      : null;
+
   /// What App Studio installed, and which `PATH` lines it added for it.
   String get installRecordFile =>
       _path.join(serverpodStateDir, 'app_studio_installs.json');
