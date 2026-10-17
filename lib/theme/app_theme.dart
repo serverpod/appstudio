@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 
@@ -6,11 +7,19 @@ import 'package:shad/shad.dart';
 /// from it rather than spelling each one out.
 const Color kBrandBlue = Color(0xFF1295F0);
 
+bool get _windows => defaultTargetPlatform == TargetPlatform.windows;
+
 /// macOS system UI font (SF Pro on modern macOS).
 const _kMacUiFont = '.AppleSystemUIFont';
 
-/// macOS monospace font for terminal output.
-const kMacMonoFont = 'Menlo';
+/// The UI font: SF on macOS. On Windows, shad's own bundled Inter (`null`
+/// picks it) — the typeface shad's metrics were drawn for, so layouts measure
+/// as designed and no weight correction is needed.
+String? get _uiFont => _windows ? null : _kMacUiFont;
+
+/// Monospace for terminal output and code: Menlo on macOS, Cascadia Mono —
+/// shipped with Windows 11 — on Windows.
+String get kMonoFont => _windows ? 'Cascadia Mono' : 'Menlo';
 
 /// Headline face, bundled at Black (900) and no other weight.
 ///
@@ -29,7 +38,9 @@ const kHeadlineFont = 'Inter';
 /// neither synthesises bold — SF's is simply about twice as hot, so an
 /// uncorrected `w500` lands where Inter's `w600` would and the whole UI reads
 /// a step heavy.
-const _kWeightAxisRatio = 1.65 / 3.17;
+///
+/// 1 on Windows, where the UI font is Inter itself.
+double get _kWeightAxisRatio => _windows ? 1 : 1.65 / 3.17;
 
 /// A `wght` variation carrying the appearance [weight] has in shad's font.
 ///
@@ -73,7 +84,7 @@ extension UiTextWeight on TextStyle {
 /// cost is that such a component loses its *emphasis*, so where that emphasis
 /// matters the call site restores it with [kWeightMedium].
 ShadTextTheme _buildTextTheme() {
-  final base = ShadTextTheme(family: _kMacUiFont);
+  final base = ShadTextTheme(family: _uiFont);
   TextStyle fix(TextStyle s) =>
       s.merge(correctedWeight(s.fontWeight ?? FontWeight.w400));
   // Headlines leave the UI font entirely, so they leave the correction behind

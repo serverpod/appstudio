@@ -17,7 +17,23 @@ class FakeWindowsSystem implements WindowsSystem {
       String parameters)? onElevated;
 
   final elevated = <String>[];
+  final opened = <String>[];
   var broadcasts = 0;
+
+  /// Whether [shellOpen] finds a handler.
+  bool canOpen = true;
+
+  /// `scheme` → the app registered for it.
+  final protocols = <String, String>{};
+
+  @override
+  String? protocolHandler(String scheme) => protocols[scheme];
+
+  @override
+  bool shellOpen(String target) {
+    opened.add(target);
+    return canOpen;
+  }
 
   static String keyFor(RegistryRoot root, String key, String name) =>
       '${root == RegistryRoot.localMachine ? 'HKLM' : 'HKCU'}\\$key\\$name';

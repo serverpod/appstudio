@@ -9,6 +9,7 @@ import 'analytics/app_analytics.dart';
 import 'platform/compact_window.dart';
 import 'platform/host.dart';
 import 'platform/window_close.dart';
+import 'platform/windows_app_menu.dart';
 import 'preview/compact_dialog_yield.dart';
 import 'preview/preview_mode_controller.dart';
 import 'process/dev_session_cleanup.dart';
@@ -222,6 +223,33 @@ class _AppStudioAppState extends State<AppStudioApp> {
   }
 
   void _syncMenu() => _macMenu?.refresh();
+
+  /// The Windows menu strip, with the same handlers [MacAppMenu] is given.
+  Widget _withWindowsMenu(BuildContext context, Widget? child) =>
+      WindowsAppMenuBar(
+        session: widget.session,
+        process: widget.process,
+        agent: widget.agent,
+        themeController: widget.themeController,
+        logView: widget.logView,
+        onNewProject: _showNewProjectScreen,
+        onCheckForUpdates: () => unawaited(widget.updates.checkForUpdates()),
+        onUninstall: _confirmUninstall,
+        canCheckForUpdates: () => widget.updates.state.canCheck,
+        updatesUnavailableReason: () => widget.updates.state.unavailableReason,
+        onSetAutomaticUpdates: (enabled) =>
+            unawaited(widget.updates.setAutomaticallyChecks(enabled)),
+        automaticUpdatesEnabled: () => widget.updates.state.automaticallyChecks,
+        canOpenProjects: () => !_needsToolchainSetup,
+        onCreateAndApplyMigrations: () => _withNavigatorContext(
+          (context) => createAndApplyMigrations(context, widget.process),
+        ),
+        onCreateRepairMigration: () => _withNavigatorContext(
+          (context) => createRepairMigration(context, widget.process),
+        ),
+        changes: Listenable.merge([widget.updates, widget.toolchains]),
+        child: child ?? const SizedBox.shrink(),
+      );
 
   /// Runs a menu command that raises dialogs or toasts. The menu bar lives
   /// above `ShadApp`, so the navigator's context is the one to use.
@@ -457,6 +485,9 @@ class _AppStudioAppState extends State<AppStudioApp> {
           backgroundColor: widget.previewMode.compactWindow
               ? Colors.transparent
               : null,
+          // Windows has no menu bar to add to: the menus are a strip in the
+          // window, over every screen. macOS gets `MacAppMenu` instead.
+          builder: currentHost.isWindows ? _withWindowsMenu : null,
           home: switch (_uninstalled) {
             final result? => UninstalledScreen(result: result),
             // The teardown stops the server and the agent, which takes a

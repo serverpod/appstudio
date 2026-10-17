@@ -43,7 +43,7 @@ class _CommandBlockState extends State<CommandBlock> {
                 // `small` is `leading-none`: fine for one line, cramped for
                 // two. Commands wrap onto several lines, so give them room.
                 style: theme.textTheme.small.copyWith(
-                  fontFamily: kMacMonoFont,
+                  fontFamily: kMonoFont,
                   height: 1.7,
                 ),
               ),

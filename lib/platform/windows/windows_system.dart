@@ -47,6 +47,17 @@ abstract interface class WindowsSystem {
   /// own UAC prompt — and waits for it. The exit code, or null when the prompt
   /// was declined or the program could not be started.
   Future<int?> runElevated(String executable, String parameters);
+
+  /// Opens [target] — a URL, or a `scheme://` deep link — with whatever
+  /// Windows has registered for it, as a double-click would. False when
+  /// nothing could open it.
+  bool shellOpen(String target);
+
+  /// The name of the app registered for `scheme://` links, or null when none
+  /// is. Covers Store (MSIX) apps, which register schemes outside the classic
+  /// registry keys — on Windows an unregistered scheme raises a "choose an
+  /// app" dialog, so this is the check before offering a deep link.
+  String? protocolHandler(String scheme);
 }
 
 /// No registry, no prompt: every read finds nothing and every change fails.
@@ -73,6 +84,12 @@ class NoWindowsSystem implements WindowsSystem {
 
   @override
   Future<int?> runElevated(String executable, String parameters) async => null;
+
+  @override
+  bool shellOpen(String target) => false;
+
+  @override
+  String? protocolHandler(String scheme) => null;
 }
 
 /// The `Path` a process started now would get: the machine's entries, then

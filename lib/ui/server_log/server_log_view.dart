@@ -31,10 +31,10 @@ double? _cachedCharWidth;
 /// columns are character counts times this — the way the TUI lays them out.
 double _charWidth() => _cachedCharWidth ??= () {
       final painter = TextPainter(
-        text: const TextSpan(
+        text: TextSpan(
           text: 'M',
           style: TextStyle(
-            fontFamily: kMacMonoFont,
+            fontFamily: kMonoFont,
             fontSize: kServerLogFontSize,
           ),
         ),
@@ -378,7 +378,7 @@ class _ServerLogViewState extends State<ServerLogView> {
 }
 
 TextStyle _mono(Color color) => TextStyle(
-      fontFamily: kMacMonoFont,
+      fontFamily: kMonoFont,
       fontSize: kServerLogFontSize,
       height: 1.45,
       color: color,

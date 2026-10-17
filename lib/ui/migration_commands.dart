@@ -165,7 +165,7 @@ class ForceMigrationDialog extends StatelessWidget {
             child: SelectableText(
               message.trim(),
               style: theme.textTheme.muted.copyWith(
-                fontFamily: kMacMonoFont,
+                fontFamily: kMonoFont,
                 fontSize: 12,
               ),
             ),

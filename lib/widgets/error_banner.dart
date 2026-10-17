@@ -63,7 +63,7 @@ class ErrorBanner extends StatelessWidget {
                 child: Text(
                   log!,
                   style: theme.textTheme.muted.copyWith(
-                    fontFamily: kMacMonoFont,
+                    fontFamily: kMonoFont,
                     fontSize: 10.5,
                     height: 1.4,
                   ),

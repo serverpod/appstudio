@@ -4,7 +4,10 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
+import '../platform/host.dart';
 import '../platform/studio_notifications.dart';
+import '../platform/windows/win32_system.dart';
+import '../platform/windows/windows_system.dart';
 import '../process/ide_integration.dart';
 import '../process/project_ready_view.dart';
 import '../util/home_dir.dart';
@@ -149,6 +152,69 @@ Uri _openCodeDeepLink(String projectPath) => Uri.parse(
 Uri _codexDeepLink(String projectPath) =>
     Uri.parse('codex://threads/new?path=${Uri.encodeComponent(projectPath)}');
 
+/// How a project folder reaches an editor on Windows. The same two routes as
+/// on macOS, minus `open -a`, which has no Windows counterpart:
+///
+/// - **The Electron editors' CLI** — the editor's executable with
+///   `ELECTRON_RUN_AS_NODE=1` on `resources\app\out\cli.js` and the folder,
+///   which is exactly what their own `bin\*.cmd` launchers run, so Cursor
+///   reaches its Agents Window here too.
+///   Found where their user installers put them, then their system ones.
+/// - **A deep link**, opened through `ShellExecute` — offered only when
+///   Windows has the scheme registered (Store apps included), because an
+///   unregistered one raises a "choose an app" dialog instead of failing.
+sealed class _WindowsEditor {
+  const _WindowsEditor();
+}
+
+final class _WindowsCli extends _WindowsEditor {
+  const _WindowsCli({required this.userDir, required this.exe, this.systemDir});
+
+  /// Under `%LOCALAPPDATA%\Programs`.
+  final String userDir;
+
+  /// Under `%ProgramFiles%`, for a machine-wide install.
+  final String? systemDir;
+  final String exe;
+}
+
+final class _WindowsLink extends _WindowsEditor {
+  const _WindowsLink(this.scheme, this.link);
+
+  final String scheme;
+  final Uri Function(String projectPath) link;
+}
+
+const _windowsEditors = <IdeIntegration, _WindowsEditor>{
+  IdeIntegration.cursor: _WindowsCli(userDir: 'cursor', exe: 'Cursor.exe'),
+  IdeIntegration.vscode: _WindowsCli(
+    userDir: 'Microsoft VS Code',
+    systemDir: 'Microsoft VS Code',
+    exe: 'Code.exe',
+  ),
+  IdeIntegration.claude: _WindowsLink('claude', _claudeDeepLink),
+  IdeIntegration.codex: _WindowsLink('codex', _codexDeepLink),
+  IdeIntegration.opencode: _WindowsLink('opencode', _openCodeDeepLink),
+};
+
+/// A Windows editor found on this PC.
+sealed class _WindowsTarget {
+  const _WindowsTarget();
+}
+
+final class _FoundCli extends _WindowsTarget {
+  const _FoundCli(this.exe, this.script);
+
+  final String exe;
+  final String script;
+}
+
+final class _FoundLink extends _WindowsTarget {
+  const _FoundLink(this.link);
+
+  final Uri Function(String projectPath) link;
+}
+
 /// Resolves the open project's configured editors against what is installed on
 /// this Mac, and hands the project to one on request.
 ///
@@ -164,10 +230,17 @@ class ExternalEditorsController extends ChangeNotifier
     String? Function(String appName)? findApp,
     bool Function(String path)? fileExists,
     Future<bool> Function(List<String> command)? launch,
+    HostPlatform? host,
+    WindowsSystem? windows,
+    this._environment,
+    Future<bool> Function(String exe, List<String> arguments)? runElectronCli,
   }) : _readEditors = readEditors ?? _defaultReadEditors,
        _findApp = findApp ?? _defaultFindApp,
        _fileExists = fileExists ?? _defaultFileExists,
-       _launch = launch ?? _defaultLaunch {
+       _launch = launch ?? _defaultLaunch,
+       _host = host ?? currentHost,
+       _windowsSystem = windows,
+       _runElectronCli = runElectronCli ?? _defaultRunElectronCli {
     session.addListener(_onSessionChanged);
     process.addListener(_onProcessChanged);
     _canOpen = process.projectIsReady;
@@ -181,6 +254,17 @@ class ExternalEditorsController extends ChangeNotifier
   final String? Function(String appName) _findApp;
   final bool Function(String path) _fileExists;
   final Future<bool> Function(List<String> command) _launch;
+
+  final HostPlatform _host;
+  final WindowsSystem? _windowsSystem;
+  final Map<String, String>? _environment;
+  final Future<bool> Function(String exe, List<String> arguments)
+      _runElectronCli;
+
+  WindowsSystem get _windows => _windowsSystem ?? Win32System();
+
+  /// Windows: what to run per [ExternalEditor.id].
+  Map<String, _WindowsTarget> _windowsTargets = const {};
 
   List<ExternalEditor> _editors = const [];
 
@@ -206,10 +290,25 @@ class ExternalEditorsController extends ChangeNotifier
   @override
   Future<void> open(ExternalEditor editor) async {
     final projectPath = _boundProjectPath;
-    final resolved = _resolved[editor.id];
-    if (projectPath == null || resolved == null) return;
+    if (projectPath == null) return;
 
-    if (!await _launch(resolved.commandFor(projectPath))) {
+    final bool launched;
+    if (_host.isWindows) {
+      final target = _windowsTargets[editor.id];
+      if (target == null) return;
+      launched = switch (target) {
+        _FoundLink(:final link) =>
+          _windows.shellOpen(link(projectPath).toString()),
+        _FoundCli(:final exe, :final script) =>
+          await _runElectronCli(exe, [script, projectPath]),
+      };
+    } else {
+      final resolved = _resolved[editor.id];
+      if (resolved == null) return;
+      launched = await _launch(resolved.commandFor(projectPath));
+    }
+
+    if (!launched) {
       await StudioNotifications.show(
         title: 'App Studio',
         body: 'Could not open the project in ${editor.label}.',
@@ -243,6 +342,7 @@ class ExternalEditorsController extends ChangeNotifier
 
   Future<void> _resolve(String? projectPath) async {
     final generation = ++_generation;
+    if (_host.isWindows) return _resolveWindows(projectPath, generation);
 
     final editors = <ExternalEditor>[];
     final resolved = <String, _ResolvedApp>{};
@@ -270,6 +370,57 @@ class ExternalEditorsController extends ChangeNotifier
     notifyListeners();
   }
 
+  Future<void> _resolveWindows(String? projectPath, int generation) async {
+    final editors = <ExternalEditor>[];
+    final targets = <String, _WindowsTarget>{};
+    if (projectPath != null) {
+      final configured = await _readEditors(projectPath);
+      for (final entry in _windowsEditors.entries) {
+        if (!configured.contains(entry.key)) continue;
+        final target = _findWindows(entry.value);
+        if (target == null) continue;
+        editors.add(
+          ExternalEditor(id: entry.key.option, label: entry.key.label),
+        );
+        targets[entry.key.option] = target;
+      }
+    }
+
+    if (generation != _generation) return;
+    if (listEquals(editors, _editors)) return;
+    _editors = List.unmodifiable(editors);
+    _windowsTargets = Map.unmodifiable(targets);
+    notifyListeners();
+  }
+
+  /// Where the editor is on this PC, or null when it is not — or, for a deep
+  /// link, when nothing has the scheme.
+  _WindowsTarget? _findWindows(_WindowsEditor editor) {
+    switch (editor) {
+      case _WindowsLink(:final scheme, :final link):
+        return _windows.protocolHandler(scheme) == null
+            ? null
+            : _FoundLink(link);
+      case _WindowsCli(:final userDir, :final systemDir, :final exe):
+        final env = _environment ?? Platform.environment;
+        final path = _host.path;
+        for (final dir in [
+          if (env['LOCALAPPDATA'] case final local?)
+            path.join(local, 'Programs', userDir),
+          if (systemDir != null)
+            if (env['ProgramFiles'] case final programs?)
+              path.join(programs, systemDir),
+        ]) {
+          final executable = path.join(dir, exe);
+          final script = path.join(dir, 'resources', 'app', 'out', 'cli.js');
+          if (_fileExists(executable) && _fileExists(script)) {
+            return _FoundCli(executable, script);
+          }
+        }
+        return null;
+    }
+  }
+
   /// The CLI's absolute paths, or null to fall back to `open -a`.
   ///
   /// Both files ship inside the bundle — there is nothing for the user to
@@ -279,8 +430,8 @@ class ExternalEditorsController extends ChangeNotifier
   /// instead of breaking it.
   _ResolvedCli? _resolveCli(_EditorCli? cli, String appPath) {
     if (cli == null) return null;
-    final executable = p.join(appPath, cli.executable);
-    final script = p.join(appPath, cli.script);
+    final executable = _host.path.join(appPath, cli.executable);
+    final script = _host.path.join(appPath, cli.script);
     if (!_fileExists(executable) || !_fileExists(script)) return null;
     return _ResolvedCli(executable: executable, script: script);
   }
@@ -357,6 +508,22 @@ String? _defaultFindApp(String appName) {
 /// The parent environment is inherited on purpose. Launched from Finder that is
 /// launchd's, which is what the CLI route was measured against; `PATH` only has
 /// to be good enough for `/usr/bin/env`, which is addressed absolutely anyway.
+/// Windows: an Electron editor's executable in node mode on its CLI, as the
+/// editor's own `bin\*.cmd` does — a real `.exe`, so the folder reaches it as
+/// an argument exactly, whatever it contains.
+Future<bool> _defaultRunElectronCli(String exe, List<String> arguments) async {
+  try {
+    final result = await Process.run(
+      exe,
+      arguments,
+      environment: const {'ELECTRON_RUN_AS_NODE': '1'},
+    );
+    return result.exitCode == 0;
+  } on ProcessException {
+    return false;
+  }
+}
+
 Future<bool> _defaultLaunch(List<String> command) async {
   try {
     final result = await Process.run(command.first, command.skip(1).toList());

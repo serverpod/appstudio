@@ -98,7 +98,7 @@ class _RegistrationCodeToastState extends State<RegistrationCodeToast> {
                       TextSpan(
                         text: widget.code,
                         style: TextStyle(
-                          fontFamily: kMacMonoFont,
+                          fontFamily: kMonoFont,
                           fontWeight: FontWeight.w600,
                           color: scheme.foreground,
                         ),

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shad/shad.dart';
 
+import '../platform/shortcut_hint.dart';
 import '../runner/runner_actions_view.dart';
 import '../widgets/toolbar_action_button.dart';
 
@@ -62,6 +63,6 @@ class HotRestartButton extends StatelessWidget {
       return 'Hot restart — waiting for ${running.label.toLowerCase()} to '
           'finish';
     }
-    return 'Hot restart (⌘R)';
+    return 'Hot restart (${shortcutHint('R')})';
   }
 }

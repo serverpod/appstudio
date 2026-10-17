@@ -1,3 +1,4 @@
+import 'package:appstudio/platform/host_platform.dart';
 import 'package:appstudio/process/ide_integration.dart';
 import 'package:appstudio/process/project_ready_view.dart';
 import 'package:appstudio/session/external_editors.dart';
@@ -5,7 +6,7 @@ import 'package:appstudio/session/project_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import '../support/host_skips.dart';
+import '../support/fake_windows_system.dart';
 
 /// A session with no project on disk — `openPath` validates against a real
 /// Serverpod package, which these tests have no use for.
@@ -62,6 +63,8 @@ void main() {
         launches?.add(command);
         return launchSucceeds;
       },
+      // These pin the macOS routes, whatever machine runs them.
+      host: HostPlatform.macos,
     );
   }
 
@@ -166,6 +169,7 @@ void main() {
         },
         findApp: (name) => '/Applications/$name.app',
         launch: (_) async => true,
+        host: HostPlatform.macos,
       );
       addTearDown(editors.dispose);
 
@@ -255,7 +259,7 @@ void main() {
         '/p',
       ],
     ]);
-  }, skip: macOSOnlyForNow); // Windows: Phase 5 (editor launching)
+  });
 
   test('falls back to opening the folder as a document with no CLI', () async {
     // A layout change inside a future Cursor must downgrade the button to the
@@ -350,5 +354,140 @@ void main() {
 
     await editors.open(cursor);
     expect(launches, isEmpty);
+  });
+
+  group('on Windows', () {
+    const local = r'C:\Users\alex\AppData\Local';
+    const cursorExe = r'C:\Users\alex\AppData\Local\Programs\cursor\Cursor.exe';
+    const cursorCli =
+        r'C:\Users\alex\AppData\Local\Programs\cursor\resources\app\out\cli.js';
+    const project = r'C:\Users\alex\My Projects\app';
+
+    ExternalEditorsController windowsController({
+      required Set<IdeIntegration> configured,
+      Set<String> files = const {},
+      Map<String, String> protocols = const {},
+      FakeWindowsSystem? windows,
+      List<List<String>>? cliRuns,
+    }) {
+      final system = windows ?? FakeWindowsSystem();
+      system.protocols.addAll(protocols);
+      final session = _FakeSession()..setPath(project);
+      return ExternalEditorsController(
+        session: session,
+        process: _FakeProcess(projectIsReady: true),
+        readEditors: (path) async => path == project ? configured : const {},
+        // macOS lookups must never be what decides a Windows editor.
+        findApp: (_) => fail('looked for a macOS bundle'),
+        fileExists: files.contains,
+        launch: (_) => fail('launched a macOS command'),
+        host: HostPlatform.windows,
+        windows: system,
+        environment: const {
+          'LOCALAPPDATA': local,
+          'ProgramFiles': r'C:\Program Files',
+        },
+        runElectronCli: (exe, arguments) async {
+          cliRuns?.add([exe, ...arguments]);
+          return true;
+        },
+      );
+    }
+
+    test('hands the folder to Cursor through its CLI, as an argument', () async {
+      final runs = <List<String>>[];
+      final editors = windowsController(
+        configured: {IdeIntegration.cursor},
+        files: {cursorExe, cursorCli},
+        cliRuns: runs,
+      );
+      addTearDown(editors.dispose);
+      await pumpEventQueue();
+
+      expect(editors.editors.map((e) => e.id), ['cursor']);
+      await editors.open(editors.editors.single);
+      // The folder is one argument to a real `.exe` — never a `.cmd` line
+      // that cmd.exe would re-parse, spaces and all.
+      expect(runs, [
+        [cursorExe, cursorCli, project],
+      ]);
+    });
+
+    test('finds a machine-wide VS Code under Program Files', () async {
+      const code = r'C:\Program Files\Microsoft VS Code\Code.exe';
+      const cli =
+          r'C:\Program Files\Microsoft VS Code\resources\app\out\cli.js';
+      final runs = <List<String>>[];
+      final editors = windowsController(
+        configured: {IdeIntegration.vscode},
+        files: {code, cli},
+        cliRuns: runs,
+      );
+      addTearDown(editors.dispose);
+      await pumpEventQueue();
+
+      await editors.open(editors.editors.single);
+      expect(runs, [
+        [code, cli, project],
+      ]);
+    });
+
+    test('offers no CLI editor whose script is missing', () async {
+      // An executable without `cli.js` is a layout we have not seen; there is
+      // no `open -a` to fall back to, so the button is better absent.
+      final editors = windowsController(
+        configured: {IdeIntegration.cursor},
+        files: {cursorExe},
+      );
+      addTearDown(editors.dispose);
+      await pumpEventQueue();
+
+      expect(editors.editors, isEmpty);
+    });
+
+    test('opens a deep link through the shell', () async {
+      final windows = FakeWindowsSystem();
+      final editors = windowsController(
+        configured: {IdeIntegration.claude, IdeIntegration.opencode},
+        protocols: {'claude': 'Claude', 'opencode': 'OpenCode'},
+        windows: windows,
+      );
+      addTearDown(editors.dispose);
+      await pumpEventQueue();
+
+      for (final editor in editors.editors) {
+        await editors.open(editor);
+      }
+      expect(windows.opened, [
+        'claude://code/new?folder=${Uri.encodeComponent(project)}',
+        'opencode://open-project?directory=${Uri.encodeComponent(project)}',
+      ]);
+    });
+
+    test('offers no deep link Windows has nothing registered for', () async {
+      // An unregistered scheme raises a "choose an app" dialog rather than
+      // failing, so it must never get as far as a button.
+      final windows = FakeWindowsSystem();
+      final editors = windowsController(
+        configured: {IdeIntegration.codex},
+        windows: windows,
+      );
+      addTearDown(editors.dispose);
+      await pumpEventQueue();
+
+      expect(editors.editors, isEmpty);
+      expect(windows.opened, isEmpty);
+    });
+
+    test('offers nothing for Antigravity', () async {
+      final editors = windowsController(
+        configured: {IdeIntegration.antigravity},
+        protocols: {'antigravity': 'Antigravity'},
+      );
+      addTearDown(editors.dispose);
+      await pumpEventQueue();
+
+      expect(editors.editors, isEmpty);
+    });
   });
 }

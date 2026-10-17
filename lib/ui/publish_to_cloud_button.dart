@@ -77,7 +77,7 @@ class PublishToCloudDialog extends StatelessWidget {
             TextSpan(
               text: 'serverpod cloud launch',
               style: TextStyle(
-                fontFamily: kMacMonoFont,
+                fontFamily: kMonoFont,
                 color: theme.colorScheme.foreground,
               ),
             ),

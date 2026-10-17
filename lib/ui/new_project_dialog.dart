@@ -394,7 +394,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
                   color: scheme.mutedForeground,
                 ),
                 style: textTheme.small.copyWith(
-                  fontFamily: kMacMonoFont,
+                  fontFamily: kMonoFont,
                   fontSize: 11.5,
                 ),
               ),

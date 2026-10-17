@@ -393,7 +393,7 @@ class _MessageBubble extends StatelessWidget {
       height: 1.4,
     );
     final codeStyle = theme.textTheme.small.copyWith(
-      fontFamily: kMacMonoFont,
+      fontFamily: kMonoFont,
       fontSize: 12,
       height: 1.55,
       backgroundColor: scheme.muted,
@@ -568,7 +568,7 @@ class _ToolRowState extends State<_ToolRow> {
                         style: theme.textTheme.small
                             .copyWith(
                               fontSize: 12,
-                              fontFamily: kMacMonoFont,
+                              fontFamily: kMonoFont,
                               height: 1.35,
                             )
                             .medium,
@@ -601,7 +601,7 @@ class _ToolRowState extends State<_ToolRow> {
                     'Error:\n${part.error}',
                 ].where((e) => e.isNotEmpty).join('\n\n'),
                 style: theme.textTheme.small.copyWith(
-                  fontFamily: kMacMonoFont,
+                  fontFamily: kMonoFont,
                   fontSize: 11,
                   height: 1.55,
                   color: scheme.mutedForeground,
@@ -752,7 +752,7 @@ class _PermissionCard extends StatelessWidget {
           SelectableText(
             part.details.join('\n'),
             style: theme.textTheme.small.copyWith(
-              fontFamily: kMacMonoFont,
+              fontFamily: kMonoFont,
               fontSize: 11,
               height: 1.5,
               color: scheme.mutedForeground,

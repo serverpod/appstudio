@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:shad/shad.dart';
 
+import '../platform/shortcut_hint.dart';
 import '../process/full_restart_view.dart';
 import '../widgets/toolbar_action_button.dart';
 
@@ -31,7 +32,9 @@ class FullRestartButton extends StatelessWidget {
           label: 'Full Restart',
           icon: LucideIcons.refreshCcwDot,
           busy: busy,
-          tooltip: busy ? 'Restarting the server…' : 'Full restart (⇧⌘R)',
+          tooltip: busy
+              ? 'Restarting the server…'
+              : 'Full restart (${shortcutHint('R', shift: true)})',
           onPressed: process.canRestart
               ? () => unawaited(process.restart())
               : null,

@@ -46,6 +46,13 @@ class Win32System implements WindowsSystem {
       Int32 Function(Pointer<_ShellExecuteInfo>),
       int Function(Pointer<_ShellExecuteInfo>)>('ShellExecuteExW');
 
+  // HINSTANCE ShellExecuteW(HWND, LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR, INT)
+  static final _shellExecute = _shell32.lookupFunction<
+      IntPtr Function(IntPtr, Pointer<Utf16>, Pointer<Utf16>, Pointer<Utf16>,
+          Pointer<Utf16>, Int32),
+      int Function(int, Pointer<Utf16>, Pointer<Utf16>, Pointer<Utf16>,
+          Pointer<Utf16>, int)>('ShellExecuteW');
+
   // DWORD WaitForSingleObject(HANDLE, DWORD)
   static final _waitForSingleObject = _kernel32.lookupFunction<
       Uint32 Function(IntPtr, Uint32),
@@ -171,6 +178,52 @@ class Win32System implements WindowsSystem {
           5000,
           arena<IntPtr>(),
         );
+      });
+
+  @override
+  bool shellOpen(String target) => using((arena) {
+        // Above 32 is success; anything else is an error code.
+        return _shellExecute(
+              0,
+              'open'.toNativeUtf16(allocator: arena),
+              target.toNativeUtf16(allocator: arena),
+              nullptr,
+              nullptr,
+              _swShowNormal,
+            ) >
+            32;
+      });
+
+  static const _swShowNormal = 1;
+
+  // HRESULT AssocQueryStringW(ASSOCF, ASSOCSTR, LPCWSTR, LPCWSTR, LPWSTR,
+  //                           DWORD*)
+  static final _assocQueryString = DynamicLibrary.open('shlwapi.dll')
+      .lookupFunction<
+          Int32 Function(Uint32, Uint32, Pointer<Utf16>, Pointer<Utf16>,
+              Pointer<Utf16>, Pointer<Uint32>),
+          int Function(int, int, Pointer<Utf16>, Pointer<Utf16>,
+              Pointer<Utf16>, Pointer<Uint32>)>('AssocQueryStringW');
+
+  static const _assocfIsProtocol = 0x00001000;
+  static const _assocstrFriendlyAppName = 4;
+
+  @override
+  String? protocolHandler(String scheme) => using((arena) {
+        const capacity = 512;
+        final length = arena<Uint32>()..value = capacity;
+        final buffer = arena<Uint16>(capacity).cast<Utf16>();
+        final result = _assocQueryString(
+          _assocfIsProtocol,
+          _assocstrFriendlyAppName,
+          scheme.toNativeUtf16(allocator: arena),
+          nullptr,
+          buffer,
+          length,
+        );
+        if (result != 0) return null;
+        final name = buffer.toDartString();
+        return name.isEmpty ? null : name;
       });
 
   @override
