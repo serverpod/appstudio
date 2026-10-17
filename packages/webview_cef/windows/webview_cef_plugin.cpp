@@ -23,6 +23,8 @@
 #include <atomic>
 #include <chrono>
 #include <vector>
+#include <string>
+#include <unordered_set>
 
 namespace webview_cef {
 	class WebviewTextureRenderer : public WebviewTexture{
@@ -455,20 +457,137 @@ namespace webview_cef {
 			delete args;
 			break;
 		}
-		// WM_IME_* are handled in ImeSubclassProc (before DefWindowProc), not here.
-		case WM_SYSCHAR:
-		case WM_SYSKEYDOWN:
-		case WM_SYSKEYUP:
-		case WM_KEYDOWN:
-		case WM_KEYUP:
-		case WM_CHAR: {
-			if (webviewPlugins.find(hwnd) != webviewPlugins.end()) {
-				CefKeyEvent keyEvent = getCefKeyEvent(message, wparam, lparam);
-				webviewPlugins[hwnd]->sendKeyEvent(keyEvent);
+		// WM_IME_* are handled in ImeSubclassProc (before DefWindowProc), and
+		// key messages in routeKeyMessage (before DispatchMessage), not here.
+		}
+	}
+
+	namespace {
+		// Where a key down went, so its characters and its key up follow it.
+		enum class KeyRoute {
+			flutter,  // Flutter alone: not the preview's, or the app's shortcut.
+			shared,   // Both: modifiers, so Flutter's shortcuts still see Ctrl.
+			page,     // The page alone, as a key event.
+			edit,     // The page alone, as an editing command; no characters.
+		};
+
+		KeyRoute g_lastDown = KeyRoute::flutter;
+
+		// Keys whose down the page took from Flutter. Their up must go the same
+		// way: Flutter must never see the up of a key it never saw go down.
+		std::unordered_set<WPARAM> g_keysForPage;
+
+		bool isModifier(WPARAM vk) {
+			switch (vk) {
+			case VK_SHIFT: case VK_CONTROL: case VK_MENU:
+			case VK_LSHIFT: case VK_RSHIFT: case VK_LCONTROL: case VK_RCONTROL:
+			case VK_LMENU: case VK_RMENU: case VK_LWIN: case VK_RWIN:
+			case VK_CAPITAL: case VK_NUMLOCK:
+				return true;
+			default:
+				return false;
 			}
-			break;
 		}
+
+		// The editing chords the macOS router turns into frame commands. Ctrl+Y
+		// is redo on Windows as well as Ctrl+Shift+Z; Ctrl+Shift+X/C/V/A are
+		// different commands, left to the page.
+		std::string editCommandFor(WPARAM vk, bool shift) {
+			switch (vk) {
+			case 'X': return shift ? std::string() : "cut";
+			case 'C': return shift ? std::string() : "copy";
+			case 'V': return shift ? std::string() : "paste";
+			case 'A': return shift ? std::string() : "selectAll";
+			case 'Z': return shift ? "redo" : "undo";
+			case 'Y': return shift ? std::string() : "redo";
+			default: return std::string();
+			}
 		}
+
+		// A Ctrl chord on a character key belongs to the app (Ctrl+R, Ctrl+N …),
+		// as every ⌘ chord does on macOS. Ctrl on any other key — arrows, Home,
+		// Backspace, F-keys — is text navigation or a page key, and stays there.
+		bool isCharacterKey(WPARAM vk) {
+			return (vk >= '0' && vk <= '9') || (vk >= 'A' && vk <= 'Z') ||
+				(vk >= VK_OEM_1 && vk <= VK_OEM_3) ||
+				(vk >= VK_OEM_4 && vk <= VK_OEM_8) || vk == VK_OEM_102;
+		}
+	}
+
+	bool WebviewCefPlugin::routeKeyMessage(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
+		const bool down = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
+		const bool up = message == WM_KEYUP || message == WM_SYSKEYUP;
+		const bool character = message == WM_CHAR || message == WM_SYSCHAR;
+		const bool dead = message == WM_DEADCHAR || message == WM_SYSDEADCHAR;
+		if (!down && !up && !character && !dead) return false;
+
+		auto it = webviewPlugins.find(hwnd);
+		WebviewPlugin* plugin = it == webviewPlugins.end() ? nullptr : it->second.get();
+		// Flutter's focus, not CEF's: the browser keeps its own focus after the
+		// user clicks back into the app, and keys typed there are not the page's.
+		const bool focused = plugin != nullptr && plugin->getAnyBrowserFocused();
+		auto send = [&]() {
+			CefKeyEvent keyEvent = getCefKeyEvent(message, wparam, lparam);
+			return plugin != nullptr && plugin->sendKeyEvent(keyEvent);
+		};
+
+		if (up) {
+			const bool forPage = g_keysForPage.erase(wparam) > 0;
+			if (forPage || focused) send();
+			return forPage;
+		}
+
+		// Characters follow the key down that TranslateMessage made them from.
+		if (character || dead) {
+			switch (g_lastDown) {
+			case KeyRoute::page:
+				if (character) send();
+				return true;
+			case KeyRoute::edit:
+				return true;
+			default:
+				return false;
+			}
+		}
+
+		g_lastDown = KeyRoute::flutter;
+		if (!focused) return false;
+
+		const bool ctrl = IsKeyDown(VK_CONTROL);
+		const bool alt = IsKeyDown(VK_MENU);
+		const bool shift = IsKeyDown(VK_SHIFT);
+
+		// VK_PROCESSKEY: the IME has the key. Both, as before this router, so
+		// the IME pipeline in ImeSubclassProc is unchanged.
+		if (isModifier(wparam) || wparam == VK_PROCESSKEY) {
+			send();
+			g_lastDown = KeyRoute::shared;
+			return false;
+		}
+		// Alt+F4 closes the window, which DefWindowProc does only if it sees it.
+		if (alt && wparam == VK_F4) return false;
+
+		// Ctrl+Alt is AltGr on most European layouts, which types characters
+		// (@, {, € …): a page key, never a shortcut.
+		if (ctrl && !alt) {
+			const std::string command = editCommandFor(wparam, shift);
+			if (!command.empty()) {
+				if (!plugin->sendEditCommand(command)) return false;
+				g_keysForPage.insert(wparam);
+				g_lastDown = KeyRoute::edit;
+				return true;
+			}
+			const bool pageChord = shift && (wparam == 'X' || wparam == 'C' ||
+				wparam == 'V' || wparam == 'A');
+			if (!pageChord && isCharacterKey(wparam)) return false;
+		}
+
+		// No browser to deliver to: swallowing the key would read as a dead
+		// keyboard, so leave it to Flutter.
+		if (!send()) return false;
+		g_keysForPage.insert(wparam);
+		g_lastDown = KeyRoute::page;
+		return true;
 	}
 
 }  // namespace webview_cef

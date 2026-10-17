@@ -13,6 +13,9 @@ class WebviewCefPlugin : public flutter::Plugin {
  public:
   static void RegisterWithRegistrar(FlutterDesktopPluginRegistrarRef registrar);
   static void handleMessageProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
+  // Delivers a keyboard message to a focused webview. True when the message
+  // is the page's alone and must not also reach Flutter.
+  static bool routeKeyMessage(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
 
   WebviewCefPlugin();
   virtual ~WebviewCefPlugin();

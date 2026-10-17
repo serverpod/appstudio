@@ -59,9 +59,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   ::MSG msg;
   while (::GetMessage(&msg, nullptr, 0, 0)) {
     ::TranslateMessage(&msg);
+    // A key for the focused preview goes to the page alone, so the app's
+    // shortcuts do not fire while the user types there.
+    if (routeKeyForCEF(msg.hwnd, msg.message, msg.wParam, msg.lParam)) {
+      continue;
+    }
     ::DispatchMessage(&msg);
-    // Keyboard input and IME for the webview, and CEF's posts back onto the
-    // Flutter engine thread.
+    // CEF's posts back onto the Flutter engine thread.
     handleWndProcForCEF(msg.hwnd, msg.message, msg.wParam, msg.lParam);
   }
 

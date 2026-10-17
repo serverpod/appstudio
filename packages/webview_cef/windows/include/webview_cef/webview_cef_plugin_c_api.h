@@ -23,6 +23,11 @@ FLUTTER_PLUGIN_EXPORT int initCEFProcesses(HINSTANCE hInstance);
 
 FLUTTER_PLUGIN_EXPORT void handleWndProcForCEF(HWND hwnd, unsigned int message, unsigned __int64 wParam, __int64 lParam);
 
+// Hands a keyboard message to a focused webview. Call after TranslateMessage
+// and before DispatchMessage; true means the key is the page's alone and the
+// message must not be dispatched, so Flutter does not act on it too.
+FLUTTER_PLUGIN_EXPORT bool routeKeyForCEF(HWND hwnd, unsigned int message, unsigned __int64 wParam, __int64 lParam);
+
 // Where CEF keeps its user data, including the process singleton lock. Call
 // from wWinMain, after initCEFProcesses and before the Flutter window exists.
 FLUTTER_PLUGIN_EXPORT void setCEFRootCachePath(const wchar_t* path);

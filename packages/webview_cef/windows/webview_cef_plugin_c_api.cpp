@@ -18,6 +18,11 @@ FLUTTER_PLUGIN_EXPORT void handleWndProcForCEF(HWND hwnd, unsigned int message, 
 	webview_cef::WebviewCefPlugin::handleMessageProc(hwnd, message, wParam, lParam);
 }
 
+FLUTTER_PLUGIN_EXPORT bool routeKeyForCEF(HWND hwnd, unsigned int message, unsigned __int64 wParam, __int64 lParam)
+{
+	return webview_cef::WebviewCefPlugin::routeKeyMessage(hwnd, message, wParam, lParam);
+}
+
 FLUTTER_PLUGIN_EXPORT void setCEFRootCachePath(const wchar_t* path)
 {
 	webview_cef::setRootCachePath(path == nullptr ? std::wstring() : std::wstring(path));
