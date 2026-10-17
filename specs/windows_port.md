@@ -691,6 +691,13 @@ does for a `MissingPluginException`.
   (clean updates, but sandbox/virtualised `%APPDATA%` and file-system
   redirection interfere with editing `HKCU\Environment`, spawning
   user-installed toolchains and writing into `%USERPROFILE%\develop`).
+- **Visual C++ runtime:** a clean Windows does not have the
+  `msvcp140`/`vcruntime140` DLLs Flutter and CEF need. Ship them next to
+  `appstudio.exe` (app-local, from VS's `Microsoft.VC143.CRT`, as the VM test
+  package does) so the per-user install needs no administrator.
+- Release builds leave out plugins that only dev dependencies bring
+  (`url_launcher` via Widgetbook), so building one rewrites
+  `windows/flutter/generated_plugin*` — restore them rather than commit that.
 - **Signing:** Authenticode for the exe, CEF DLLs, `WinSparkle.dll` and the
   installer (Azure Trusted Signing or an OV/EV cert). Unsigned builds hit
   SmartScreen on every download.
