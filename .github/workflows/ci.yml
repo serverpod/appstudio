@@ -174,3 +174,15 @@ jobs:
           $sha = (Get-Content "$($f.FullName).sha256").Split(' ')[0]
           $mb = [math]::Round($f.Length / 1MB, 1)
           "::notice title=Windows installer::$($f.Name), $mb MB, sha256 $sha"
+
+      # For the clean-room VM (specs/windows_vm_testing.md, pass E): the run's
+      # page offers it for download to anyone signed in with access. Unsigned,
+      # and not a release; releases go through tool/windows/.
+      - name: Keep the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            dist/windows/*-setup.exe
+            dist/windows/*-setup.exe.sha256
+          retention-days: 14
