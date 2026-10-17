@@ -76,11 +76,49 @@ jobs:
         run: flutter test -x process -j 1
 
       - name: Test (Windows, runner discovery)
-        if: runner.os == 'Windows'
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
         timeout-minutes: 5
         run: flutter test test/runner/runner_discovery_test.dart
 
-      - name: Test (Windows, Serverpod process)
-        if: runner.os == 'Windows'
-        timeout-minutes: 5
-        run: flutter test test/process/serverpod_process_test.dart
+      # serverpod_process_test is the file that takes the machine down. One
+      # step per group, in file order, to find the first group that does. A
+      # failing step does not stop the next: only a crash should.
+      - name: "Serverpod process 1: with no project"
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        timeout-minutes: 4
+        run: flutter test test/process/serverpod_process_test.dart --name "^with no project "
+
+      - name: "Serverpod process 2: a runner someone else started"
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        timeout-minutes: 4
+        run: flutter test test/process/serverpod_process_test.dart --name "^a runner someone else started "
+
+      - name: "Serverpod process 3: a runner App Studio started"
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        timeout-minutes: 4
+        run: flutter test test/process/serverpod_process_test.dart --name "^a runner App Studio started "
+
+      - name: "Serverpod process 4: the preview"
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        timeout-minutes: 4
+        run: flutter test test/process/serverpod_process_test.dart --name "^the preview "
+
+      - name: "Serverpod process 5: runner stages"
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        timeout-minutes: 4
+        run: flutter test test/process/serverpod_process_test.dart --name "^runner stages "
+
+      - name: "Serverpod process 6: actions"
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        timeout-minutes: 4
+        run: flutter test test/process/serverpod_process_test.dart --name "^actions "
+
+      - name: "Serverpod process 7: the log"
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        timeout-minutes: 4
+        run: flutter test test/process/serverpod_process_test.dart --name "^the log "
+
+      - name: "Serverpod process 8: server status"
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        timeout-minutes: 4
+        run: flutter test test/process/serverpod_process_test.dart --name "^server status "
