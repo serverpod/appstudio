@@ -52,40 +52,94 @@ jobs:
         if: runner.os == 'macOS'
         run: flutter test
 
-      # Windows runs in pieces. Runs before this change took the machine down
-      # mid-test: the step limit never fired and the job ran out its 30
-      # minutes, which a hang inside a test cannot do. The cause is the
-      # afunix.sys crash in specs/windows_afunix_bsod_report.md, set off by a
-      # test process ending with an AF_UNIX socket still open. The socket test
-      # files now let Windows finish closing sockets before they end
-      # (test/support/afunix_guard.dart). If one still takes the machine
-      # down, its step is the one left "in progress".
-      #
-      # Reading a job's log needs a GitHub sign-in; its annotations do not, so
-      # what matters is reported as annotations.
-      - name: Windows build and afunix.sys
+      # Every test that opens no AF_UNIX socket. The socket tests have a job of
+      # their own (windows-sockets, below).
+      - name: Test (Windows)
         if: runner.os == 'Windows'
+        timeout-minutes: 15
+        run: flutter test -x process -j 1
+
+  # The AF_UNIX socket tests on Windows, apart so the rest of CI reports
+  # whatever happens to them.
+  #
+  # Runs here have taken the machine down mid-test: the step limit never
+  # fired and the job ran out its 30 minutes, which a hang inside a test
+  # cannot do. The cause is the afunix.sys crash in
+  # specs/windows_afunix_bsod_report.md. The socket test files let Windows
+  # finish closing sockets before they end (test/support/afunix_guard.dart);
+  # with that, runner discovery passes. serverpod_process_test still crashed
+  # the machine, so it runs one group per step: the step left "in progress"
+  # names the group. A failing step does not skip the next; only a crash
+  # stops the job.
+  #
+  # Reading a job's log needs a GitHub sign-in; its annotations do not, so
+  # what matters is reported as annotations.
+  windows-sockets:
+    name: windows sockets
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: true
+
+      - name: Dependencies
+        run: flutter pub get
+
+      - name: Windows build and afunix.sys
         shell: pwsh
         run: |
           $cv = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
           $afunix = (Get-Item "$env:SystemRoot\System32\drivers\afunix.sys").VersionInfo.FileVersion
           "::notice title=Windows and afunix.sys::$($cv.ProductName) build $($cv.CurrentBuild).$($cv.UBR), afunix.sys $afunix"
 
-      # One test file at a time, as on the dev laptop.
-      - name: Test (Windows, no processes or sockets)
-        if: runner.os == 'Windows'
-        timeout-minutes: 15
-        run: flutter test -x process -j 1
-
-      - name: Test (Windows, runner discovery)
-        if: ${{ !cancelled() && runner.os == 'Windows' }}
+      - name: Runner discovery
         timeout-minutes: 5
         run: flutter test test/runner/runner_discovery_test.dart
 
-      - name: Test (Windows, Serverpod process)
-        if: ${{ !cancelled() && runner.os == 'Windows' }}
-        timeout-minutes: 5
-        run: flutter test test/process/serverpod_process_test.dart
+      - name: "Serverpod process 1: with no project"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 4
+        run: flutter test test/process/serverpod_process_test.dart --name "^with no project "
+
+      - name: "Serverpod process 2: a runner someone else started"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 4
+        run: flutter test test/process/serverpod_process_test.dart --name "^a runner someone else started "
+
+      - name: "Serverpod process 3: a runner App Studio started"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 4
+        run: flutter test test/process/serverpod_process_test.dart --name "^a runner App Studio started "
+
+      - name: "Serverpod process 4: the preview"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 4
+        run: flutter test test/process/serverpod_process_test.dart --name "^the preview "
+
+      - name: "Serverpod process 5: runner stages"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 4
+        run: flutter test test/process/serverpod_process_test.dart --name "^runner stages "
+
+      - name: "Serverpod process 6: actions"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 4
+        run: flutter test test/process/serverpod_process_test.dart --name "^actions "
+
+      - name: "Serverpod process 7: the log"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 4
+        run: flutter test test/process/serverpod_process_test.dart --name "^the log "
+
+      - name: "Serverpod process 8: server status"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 4
+        run: flutter test test/process/serverpod_process_test.dart --name "^server status "
 
   # The Windows release build and its Inno Setup installer, exactly as
   # tool/windows/build_release.ps1 makes them (GitHub's Windows image has Inno
