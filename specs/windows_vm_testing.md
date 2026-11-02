@@ -148,3 +148,83 @@ Revert nothing yet. After it reboots, run the report — it lists the crash
 event and minidump — then copy `C:\Windows\Minidump\*.dmp` out (an
 administrator PowerShell can copy it to the Desktop). That dump is what
 names the driver.
+
+## 5. On a spare, factory-restored laptop instead
+
+Real hardware is a good second opinion: a real GPU for CEF, a vendor image
+with its own antivirus, and the afunix.sys an OEM's Windows ships with. It
+has no snapshots, though, so **the order of the passes matters**: nothing can
+be reverted, and each pass leaves the machine for the next.
+
+### Getting it ready
+
+1. Finish Windows setup with an **administrator** account.
+   - A local account is closest to the VM (name it `Åsa Öberg`, to put a
+     space and non-ASCII into `%USERPROFILE%`).
+   - A Microsoft account is fine too. Its profile folder gets a truncated
+     name instead.
+2. Let **Windows Update** finish and restart, then note the build
+   (`winver`). Keep whatever antivirus the vendor installed: users will have
+   it too.
+3. Install nothing else: no Git, no Flutter, no Visual Studio. Leave
+   Developer Mode and long paths off.
+4. Settings → Accounts → Other users → *Add account*: a **standard** local
+   user, `Test User`, for pass D. Sign in as them once, then sign out.
+5. Nothing on the laptop should matter to anyone: a test can blue-screen it
+   (section 4).
+
+### What to bring
+
+Download these on any computer and copy them over on a USB stick:
+
+- **The installer:** GitHub → `serverpod/appstudio` → Actions → *CI*. Open
+  the newest run on `windows/phase1-foundations`, then Artifacts →
+  **`windows-installer`**. This needs a signed-in account with access;
+  artifacts expire after 14 days, and *Run workflow* on the CI page makes a
+  fresh one. Unzip it: `AppStudio-<v>-x64-setup.exe` and its `.sha256`.
+- **The report script:**
+  `https://raw.githubusercontent.com/serverpod/appstudio/windows/phase1-foundations/tool/windows/vm_collect.ps1`
+  (*Save as*).
+
+On the laptop, check the installer against its sidecar before running it:
+
+```powershell
+(Get-FileHash .\AppStudio-*-x64-setup.exe -Algorithm SHA256).Hash
+```
+
+The installer is unsigned, so SmartScreen stops it: *More info → Run
+anyway*. That is expected until there is a code-signing certificate.
+
+Wherever a pass below says to run the report, use:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\vm_collect.ps1 -Label <pass>
+```
+
+### The order
+
+1. **Pass D first, as `Test User`.** It needs Developer Mode still off.
+   - Install App Studio. A per-user install needs no administrator.
+   - Run it, choose Install, and **cancel** the administrator prompt.
+   - Expect the failure that explains Settings → System → For developers.
+   - Uninstall App Studio from Settings → Apps, run the report
+     (`-Label D-standard-user`), then sign out.
+2. **Pass A, as the administrator.**
+   - Install, run, and let setup turn on Developer Mode (approve the
+     prompt) and install Git, Flutter and the Serverpod CLI.
+   - Report: `-Label A-first-run`.
+3. **Pass B**, then **pass C**, as in section 3.
+4. **Pass E** last. Its final step uninstalls everything (Git ticked,
+   Developer Mode unticked).
+
+To go round again, turn Developer Mode off in Settings → System → For
+developers after pass E. That leaves the laptop as it was before pass A,
+apart from Windows Update.
+
+### Bringing results back
+
+Send the `appstudio-vm-<pass>-….txt` files from the Desktop: USB stick or
+email. After a blue screen, add `C:\Windows\Minidump\*.dmp` too (copy it
+with an administrator PowerShell). Also note what you saw on screen that a
+report cannot show: how the preview looked, how long setup took, any
+antivirus warnings.
