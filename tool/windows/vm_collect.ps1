@@ -3,7 +3,8 @@
 # Run inside the test VM, in PowerShell, after a test pass:
 #   powershell -ExecutionPolicy Bypass -File vm_collect.ps1 -Out <folder>
 # It only reads: the Windows build, Developer Mode, the user and machine Path,
-# App Studio's install record, any processes App Studio or the runner left,
+# App Studio's install record and setup log, any processes App Studio or the
+# runner left,
 # crash dumps, and the runner log of every project under the user's profile.
 # Nothing is changed or uploaded; the report is one text file in -Out.
 param(
@@ -41,6 +42,9 @@ function Section($title) { "`n===== $title =====" }
 
   Section 'Install record (~\.serverpod\app_studio_installs.json)'
   Get-Content "$env:USERPROFILE\.serverpod\app_studio_installs.json" -ErrorAction SilentlyContinue
+
+  Section 'Setup failures (%LOCALAPPDATA%\App Studio\setup.log, last 60 lines)'
+  Get-Content "$env:LOCALAPPDATA\App Studio\setup.log" -Tail 60 -ErrorAction SilentlyContinue
 
   Section 'Processes left running'
   Get-CimInstance Win32_Process |

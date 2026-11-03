@@ -232,6 +232,26 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
 
   // -- install --------------------------------------------------------------
 
+  /// Windows: appends a failed step, with the detail the setup screen leaves
+  /// out, to `setup.log` in App Studio's local data, where the clean-room
+  /// report (`tool/windows/vm_collect.ps1`) picks it up. A release build has
+  /// nowhere else to say what went wrong.
+  void _logFailure(ToolId id, String message, String? detail) {
+    final root = paths.localDataRoot;
+    if (root == null) return;
+    try {
+      Directory(root).createSync(recursive: true);
+      File(p.join(root, 'setup.log')).writeAsStringSync(
+        '${DateTime.now().toIso8601String()}  ${id.name}: $message\n'
+        '${detail ?? '(no detail)'}\n\n',
+        mode: FileMode.append,
+        flush: true,
+      );
+    } catch (e) {
+      debugPrint('ToolchainController: could not write setup.log: $e');
+    }
+  }
+
   /// Clears crashed installs left behind by a previous run. Cheap; fire and
   /// forget at startup.
   Future<void> collectGarbage() async {
@@ -296,6 +316,7 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
           if (e is ToolInstallException && e.detail != null) {
             debugPrint('ToolchainController: ${e.message}\n${e.detail}');
           }
+          _logFailure(id, failure, e is ToolInstallException ? e.detail : null);
           state[id] =
               state[id]!.copyWith(phase: ToolPhase.failed, error: failure);
         }

@@ -9,20 +9,15 @@ void main() {
   group('WindowsRootsClient', () {
     late List<Iterable<String>> fetched;
     late List<http.Request> sent;
+    late int made;
 
     /// Each new inner client fails its handshakes while [failing] says so.
-    WindowsRootsClient client({
-      required bool Function(int clientIndex) failing,
-      bool windowsHelps = true,
-    }) {
+    WindowsRootsClient client({required bool Function(int clientIndex) failing}) {
       fetched = [];
       sent = [];
-      var made = 0;
+      made = 0;
       return WindowsRootsClient(
-        fetchRoots: (hosts) async {
-          fetched.add(hosts);
-          return windowsHelps;
-        },
+        fetchRoots: (hosts) async => fetched.add(hosts),
         newClient: () {
           final index = made++;
           return MockClient((request) async {
@@ -44,6 +39,13 @@ void main() {
       expect(fetched, isEmpty);
     });
 
+    test('makes its context on first use, not when it is made', () async {
+      final c = client(failing: (_) => false);
+      expect(made, 0);
+      await c.get(Uri.parse('https://api.github.com/x'));
+      expect(made, 1);
+    });
+
     test('fetches the roots and resends on a fresh client', () async {
       final c = client(failing: (index) => index == 0);
       final response = await c.post(
@@ -58,6 +60,26 @@ void main() {
       expect(sent.last.body, 'payload');
     });
 
+    test('resends when the root arrived before the fetch looked', () async {
+      // The startup fetch got there first: this fetch finds nothing missing,
+      // but the old context still cannot see the root.
+      final c = WindowsRootsClient(
+        fetchRoots: (_) async {},
+        newClient: () {
+          final index = made++;
+          return MockClient((request) async {
+            if (index == 0) {
+              throw const HandshakeException('CERTIFICATE_VERIFY_FAILED');
+            }
+            return http.Response('ok $index', 200);
+          });
+        },
+      );
+      made = 0;
+      final response = await c.get(Uri.parse('https://github.com/x'));
+      expect(response.body, 'ok 1');
+    });
+
     test('also fetches for the hosts a redirect may lead to', () async {
       final c = client(failing: (index) => index == 0);
       await c.get(Uri.parse('https://example.com/'));
@@ -66,13 +88,13 @@ void main() {
           contains('release-assets.githubusercontent.com'));
     });
 
-    test('rethrows when Windows does not trust the host either', () async {
-      final c = client(failing: (_) => true, windowsHelps: false);
+    test('rethrows when the fresh client fails too', () async {
+      final c = client(failing: (_) => true);
       await expectLater(
         c.get(Uri.parse('https://api.github.com/x')),
         throwsA(isA<HandshakeException>()),
       );
-      expect(sent, hasLength(1));
+      expect(sent, hasLength(2));
     });
 
     test('gives each host one go', () async {

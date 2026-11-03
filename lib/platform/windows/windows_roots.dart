@@ -96,26 +96,34 @@ http.Client studioHttpClient(HostPlatform host) =>
 /// a failed handshake it has Windows fetch the roots, then sends the request
 /// once more on a context made afterwards.
 ///
+/// It resends whatever the fetch found. A root may have arrived since this
+/// client's context was made — from the startup fetch in `main.dart`, which
+/// runs alongside the first requests — and then the fetch finds nothing
+/// missing, yet only a new context can see it. A certificate Windows does
+/// not trust either simply fails again.
+///
 /// The failing host is not always the request's — a GitHub download
 /// redirects to another host — so it fetches the roots for the known hosts
 /// as well as the request's.
 class WindowsRootsClient extends http.BaseClient {
   WindowsRootsClient({
     WindowsSystem? windows,
-    @visibleForTesting Future<bool> Function(Iterable<String> hosts)? fetchRoots,
+    @visibleForTesting Future<void> Function(Iterable<String> hosts)? fetchRoots,
     @visibleForTesting http.Client Function()? newClient,
   })  : _fetchRoots = fetchRoots ??
             ((hosts) => fetchWindowsRoots(windows ?? Win32System(), hosts)),
-        _newClient = newClient ?? _ioClient {
-    _inner = _newClient();
-  }
+        _newClient = newClient ?? _ioClient;
 
   static http.Client _ioClient() =>
       IOClient(HttpClient(context: SecurityContext(withTrustedRoots: true)));
 
-  final Future<bool> Function(Iterable<String> hosts) _fetchRoots;
+  final Future<void> Function(Iterable<String> hosts) _fetchRoots;
   final http.Client Function() _newClient;
-  late http.Client _inner;
+
+  /// Made on first use, not with this client: the context reads the store
+  /// then, and the later that is, the more of the roots it sees.
+  http.Client? _client;
+  http.Client get _inner => _client ??= _newClient();
 
   /// Replaced clients, closed with this one: a download may still be
   /// streaming through one.
@@ -134,9 +142,9 @@ class WindowsRootsClient extends http.BaseClient {
     } on HandshakeException {
       final host = request.url.host;
       if (again == null || !_tried.add(host)) rethrow;
-      if (!await _fetchRoots({host, ...kWindowsRootHosts})) rethrow;
+      await _fetchRoots({host, ...kWindowsRootHosts});
       _retired.add(_inner);
-      _inner = _newClient();
+      _client = _newClient();
       return _inner.send(again);
     }
   }
@@ -154,6 +162,6 @@ class WindowsRootsClient extends http.BaseClient {
     for (final client in _retired) {
       client.close();
     }
-    _inner.close();
+    _client?.close();
   }
 }
