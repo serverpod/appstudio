@@ -161,3 +161,32 @@ AF_UNIX transport under afd.sys). Attach both `.dmp` files. Choosing
 > `pg_ctl stop -D <pgdata> -m fast` stops it cleanly. Reproduced with a
 > fresh `serverpod create` fullstack project at a short and at a long path.
 > Serverpod CLI 4.1.0-beta.3, Windows 11 25H2.
+
+---
+
+## 4. Serverpod — 4.1.0 does not install with stable Dart
+
+Found 2026-11-03, on the spare laptop's first setup; reproduced on the dev
+laptop with Dart 3.13.5 and 3.13.7 (Flutter 3.47.9). Not Windows-specific:
+it is a compile error.
+
+**Title**
+
+> `dart install serverpod_cli@4.1.0` fails: "Can't have modifier 'final' here" in bin/serverpod_cli.dart
+
+**Body**
+
+> With Dart 3.13.7 (Flutter 3.47.9 stable), `dart install serverpod_cli@4.1.0`
+> fails while generating the AOT kernel:
+>
+> ```
+> bin/serverpod_cli.dart:54:14: Error: Can't have modifier 'final' here.
+>     required final String event,
+> bin/serverpod_cli.dart:55:5: Error: Can't have modifier 'final' here.
+>     final Map<String, dynamic> properties = const {},
+> Bad state: Generating AOT kernel dill failed!
+> ```
+>
+> 4.1.0-rc.1 fails the same way; 4.1.0-beta.3 installs. The package declares
+> `sdk: ^3.12.2`, so pub picks it for these SDKs. App Studio skips 4.1.0-rc.1
+> and 4.1.0 until a fixed release is out.

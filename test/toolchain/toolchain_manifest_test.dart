@@ -36,6 +36,39 @@ void main() {
     );
   });
 
+  test('reads the versions to avoid', () {
+    final json = valid();
+    json['tools'] = <Object>[...(json['tools'] as List).take(2), {
+      'id': 'serverpod_cli',
+      'accepts': '>=4.1.0-beta.1 <4.2.0',
+      'avoid': ['4.1.0-rc.1', '4.1.0'],
+    }];
+    final spec = ToolManifest.tryParse(jsonEncode(json))![ToolId.serverpodCli]!;
+    expect(spec.avoid, {
+      ToolVersion.tryParse('4.1.0-rc.1'),
+      ToolVersion.tryParse('4.1.0'),
+    });
+    expect(ToolManifest.tryParse(jsonEncode(valid()))![ToolId.flutter]!.avoid,
+        isEmpty);
+  });
+
+  test('refuses a malformed version to avoid', () {
+    final json = valid();
+    json['tools'] = <Object>[...(json['tools'] as List).take(2), {
+      'id': 'serverpod_cli',
+      'accepts': '>=4.0.0',
+      'avoid': ['not a version'],
+    }];
+    expect(ToolManifest.tryParse(jsonEncode(json)), isNull);
+  });
+
+  test('the bundled manifest avoids the Serverpod releases that do not build',
+      () async {
+    final manifest = ToolManifest.tryParse(await loadTestManifestSource())!;
+    expect(manifest[ToolId.serverpodCli]!.avoid,
+        contains(ToolVersion.tryParse('4.1.0')));
+  });
+
   test('falls back to the built-in display name', () {
     final manifest = ToolManifest.tryParse(jsonEncode(valid()))!;
     expect(manifest[ToolId.flutter]!.displayName, 'Flutter');

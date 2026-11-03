@@ -108,6 +108,25 @@ void main() {
       );
     });
 
+    test('never picks a version to avoid', () {
+      final wide = VersionRange.tryParse('>=4.1.0-beta.1 <4.2.0')!;
+      expect(
+        pickPubVersion(
+          listing([
+            ('4.1.0-beta.3', false),
+            ('4.1.0-rc.1', false),
+            ('4.1.0', false),
+          ]),
+          wide,
+          avoid: {
+            ToolVersion.tryParse('4.1.0-rc.1')!,
+            ToolVersion.tryParse('4.1.0')!,
+          },
+        ).toString(),
+        '4.1.0-beta.3',
+      );
+    });
+
     test('nothing in range yields nothing', () {
       expect(pickPubVersion(listing([('3.4.1', false)]), range), isNull);
     });

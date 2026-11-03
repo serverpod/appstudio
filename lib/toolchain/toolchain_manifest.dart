@@ -20,6 +20,7 @@ class ToolSpec {
     required this.displayName,
     required this.description,
     required this.accepts,
+    this.avoid = const {},
   });
 
   final ToolId id;
@@ -29,6 +30,11 @@ class ToolSpec {
   /// The versions this build of App Studio works with. A copy outside it is
   /// updated; a fresh install picks the newest release inside it.
   final VersionRange accepts;
+
+  /// Releases inside [accepts] that a fresh install never picks, because
+  /// they are known not to install — Serverpod 4.1.0 does not compile with
+  /// the Dart in Flutter 3.47. A copy already installed is left alone.
+  final Set<ToolVersion> avoid;
 
   static ToolSpec? tryParse(Map<String, dynamic> json) {
     final rawId = json['id'] as String?;
@@ -41,11 +47,23 @@ class ToolSpec {
     final accepts = VersionRange.tryParse(json['accepts'] as String? ?? '*');
     if (accepts == null) return null;
 
+    final avoid = <ToolVersion>{};
+    final rawAvoid = json['avoid'];
+    if (rawAvoid != null) {
+      if (rawAvoid is! List) return null;
+      for (final raw in rawAvoid) {
+        final version = ToolVersion.tryParse(raw is String ? raw : null);
+        if (version == null) return null;
+        avoid.add(version);
+      }
+    }
+
     return ToolSpec(
       id: id,
       displayName: json['displayName'] as String? ?? id.displayName,
       description: json['description'] as String? ?? '',
       accepts: accepts,
+      avoid: Set.unmodifiable(avoid),
     );
   }
 }

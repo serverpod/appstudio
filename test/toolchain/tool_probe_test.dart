@@ -132,7 +132,7 @@ void main() {
     test('rejects one outside it', () {
       // 4.0 has no runner to attach to.
       expect(run('4.0.3').fitness, ToolFitness.wrongVersion);
-      expect(run('4.2.0').fitness, ToolFitness.wrongVersion);
+      expect(run('5.0.0').fitness, ToolFitness.wrongVersion);
     });
 
     test('unparseable version output is unusable', () {

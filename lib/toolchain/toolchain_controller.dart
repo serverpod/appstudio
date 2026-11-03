@@ -225,6 +225,7 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
           version: await fetchServerpodVersion(
             client,
             accepts: status.spec.accepts,
+            avoid: status.spec.avoid,
           ),
         );
     }

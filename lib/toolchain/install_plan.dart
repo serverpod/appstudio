@@ -211,7 +211,12 @@ GitRelease? pickGitRelease(String release, {required String arch}) {
 
 /// The newest version of a pub package inside [accepts], preferring stable
 /// releases — pub's own rule, so this is what `dart install` would pick too.
-ToolVersion? pickPubVersion(String listing, VersionRange accepts) {
+/// Never one of [avoid].
+ToolVersion? pickPubVersion(
+  String listing,
+  VersionRange accepts, {
+  Set<ToolVersion> avoid = const {},
+}) {
   final Object? decoded;
   try {
     decoded = jsonDecode(listing);
@@ -228,6 +233,7 @@ ToolVersion? pickPubVersion(String listing, VersionRange accepts) {
     if (raw is! Map || raw['retracted'] == true) continue;
     final version = ToolVersion.tryParse(raw['version'] as String?);
     if (version == null || !accepts.allows(version)) continue;
+    if (avoid.contains(version)) continue;
     if (any == null || version > any) any = version;
     if (!version.isPrerelease && (stable == null || version > stable)) {
       stable = version;
@@ -273,6 +279,7 @@ Future<FlutterRelease> fetchFlutterRelease(
 Future<ToolVersion> fetchServerpodVersion(
   http.Client client, {
   required VersionRange accepts,
+  Set<ToolVersion> avoid = const {},
 }) async {
   final String listing;
   try {
@@ -287,7 +294,7 @@ Future<ToolVersion> fetchServerpodVersion(
       'Could not reach pub.dev to look up the latest Serverpod.',
     );
   }
-  final version = pickPubVersion(listing, accepts);
+  final version = pickPubVersion(listing, accepts, avoid: avoid);
   if (version == null) {
     throw PlanException('No Serverpod release matches $accepts.');
   }

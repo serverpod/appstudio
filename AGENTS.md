@@ -199,10 +199,14 @@ migrations are commands on the same connection.
   `web-server-launch-browser`, which also opens the system browser. A `web-port`
   already there is left alone; App Studio no longer needs one. A project created
   elsewhere with no `device` still works — the app also opens in a browser.
-- The CLI range in `assets/toolchain_manifest.json` is `>=4.1.0-beta.1 <4.2.0`.
+- The CLI range in `assets/toolchain_manifest.json` is `>=4.1.0-beta.1 <5.0.0`.
   4.0 has no runner to attach to. The installer prefers a stable release in range
-  and otherwise takes the newest prerelease, so this resolves to the beta today
-  and to 4.1.0 once it ships.
+  and otherwise takes the newest prerelease, skipping the manifest's `avoid`
+  list. 4.1.0-rc.1 and 4.1.0 are on it: their `bin/serverpod_cli.dart` does not
+  compile with the Dart in Flutter 3.47 (`required final String event` — "Can't
+  have modifier 'final' here"), so `dart install` fails. That resolves to
+  4.1.0-beta.3 today, and to the first 4.1.x after 4.1.0 once one ships. An
+  installed copy of an avoided version still counts as installed.
 
 ### The MCP bridge is gone
 
