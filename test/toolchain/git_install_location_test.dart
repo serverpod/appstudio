@@ -78,4 +78,28 @@ void main() {
   test('is null when Git is nowhere', () async {
     expect(await installer.installedGitRoot(environment: env), isNull);
   });
+
+  group('windowsInstallPubCache', () {
+    test("is the default cache, in lowercase", () {
+      expect(
+        windowsInstallPubCache({'LOCALAPPDATA': r'C:\Users\Åsa Öberg\AppData\Local'}),
+        r'c:\users\åsa öberg\appdata\local\pub\cache',
+      );
+    });
+
+    test("is the user's own PUB_CACHE when set, whatever its key's case", () {
+      expect(
+        windowsInstallPubCache({
+          'Pub_Cache': r'D:\Pub',
+          'LOCALAPPDATA': r'C:\Users\x\AppData\Local',
+        }),
+        r'd:\pub',
+      );
+    });
+
+    test('falls back to the profile without LOCALAPPDATA', () {
+      expect(windowsInstallPubCache({'USERPROFILE': r'C:\Users\X'}),
+          r'c:\users\x\appdata\local\pub\cache');
+    });
+  });
 }

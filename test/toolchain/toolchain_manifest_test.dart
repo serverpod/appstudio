@@ -73,22 +73,6 @@ void main() {
       expect(ToolSpec.tryParse(serverpod(['4.1.0'])), isNull);
     });
 
-    test('the bundled manifest skips 4.1.0 on Windows only', () async {
-      final source = await loadTestManifestSource();
-      final four = ToolVersion.tryParse('4.1.0');
-      expect(
-        ToolManifest.tryParse(source, host: HostPlatform.windows)![
-                ToolId.serverpodCli]!
-            .avoid,
-        contains(four),
-      );
-      expect(
-        ToolManifest.tryParse(source, host: HostPlatform.macos)![
-                ToolId.serverpodCli]!
-            .avoid,
-        isEmpty,
-      );
-    });
   });
 
   test('falls back to the built-in display name', () {

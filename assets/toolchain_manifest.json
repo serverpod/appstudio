@@ -26,8 +26,7 @@
       "id": "serverpod_cli",
       "displayName": "Serverpod",
       "description": "Creates projects, generates code and runs the server.",
-      "accepts": ">=4.1.0-beta.1 <5.0.0",
-      "avoid": { "windows": ["4.1.0-rc.1", "4.1.0"] }
+      "accepts": ">=4.1.0-beta.1 <5.0.0"
     }
   ]
 }

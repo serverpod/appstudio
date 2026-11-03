@@ -32,6 +32,27 @@ class ToolInstallException implements Exception {
   String toString() => message;
 }
 
+/// The pub cache for `dart install` on Windows: the user's own, spelled in
+/// lowercase.
+///
+/// On Windows `dart install` lowercases the paths it compiles from, so they
+/// no longer match the package's `rootUri` in the pub cache. The package then
+/// loses its own language version and is compiled at the SDK's: Serverpod
+/// 4.1.0, which declares 3.12, fails under Dart 3.13 ("Can't have modifier
+/// 'final' here"). A lowercase cache path makes the two match again. Windows
+/// paths ignore case, so it is the same directory, and nothing is fetched
+/// twice.
+String windowsInstallPubCache(Map<String, String> environment) {
+  String? lookup(String name) => environment.entries
+      .where((e) => e.key.toUpperCase() == name)
+      .map((e) => e.value)
+      .firstOrNull;
+  final cache = lookup('PUB_CACHE') ??
+      '${lookup('LOCALAPPDATA') ?? '${lookup('USERPROFILE')}\\AppData\\Local'}'
+          '\\Pub\\Cache';
+  return cache.toLowerCase();
+}
+
 class CancelToken {
   var _cancelled = false;
 
@@ -687,7 +708,8 @@ class ToolchainInstaller {
             dartBin,
             ...?registryPath(windows)?.split(';'),
             ...?Platform.environment['PATH']?.split(';'),
-          ].where((e) => e.isNotEmpty).join(';'))
+          ].where((e) => e.isNotEmpty).join(';')
+          ..['PUB_CACHE'] = windowsInstallPubCache(Platform.environment))
         : (Map<String, String>.from(Platform.environment)
           // `dart install` runs install_name_tool through the /usr/bin shims,
           // which the Command Line Tools make real.
