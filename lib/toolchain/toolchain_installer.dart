@@ -223,9 +223,17 @@ class ToolchainInstaller {
       phase: ToolPhase.installing,
       phaseStartedAt: DateTime.now(),
     ));
+    // Named outright: the installer's own default is Program Files, and
+    // `/CURRENTUSER` alone does not move it (installedGitRoot).
+    final dir = _host.path.join(
+      Platform.environment['LOCALAPPDATA'] ??
+          _host.path.join(paths.home, 'AppData', 'Local'),
+      'Programs',
+      'Git',
+    );
     final ProcessResult result;
     try {
-      result = await Process.run(installer.path, const [
+      result = await Process.run(installer.path, [
         '/VERYSILENT',
         '/NORESTART',
         '/NOCANCEL',
@@ -233,31 +241,56 @@ class ToolchainInstaller {
         '/SUPPRESSMSGBOXES',
         '/CURRENTUSER',
         '/NOICONS',
+        '/DIR=$dir',
         '/o:PathOption=Cmd',
       ]);
     } finally {
       await _deleteQuietly(installer);
     }
-    final root = _host.path.join(
-      Platform.environment['LOCALAPPDATA'] ??
-          _host.path.join(paths.home, 'AppData', 'Local'),
-      'Programs',
-      'Git',
-    );
-    final git = File(_host.path.join(root, 'cmd', 'git.exe'));
-    if (result.exitCode != 0 || !await git.exists()) {
+    final root = result.exitCode == 0 ? await installedGitRoot() : null;
+    if (root == null) {
       throw ToolInstallException(
-        'Git for Windows could not be installed (exit ${result.exitCode}).',
+        result.exitCode == 0
+            ? 'Git for Windows installed, but App Studio cannot find it.'
+            : 'Git for Windows could not be installed '
+                '(exit ${result.exitCode}).',
         detail: _tail('${result.stdout}\n${result.stderr}'),
       );
     }
-    await _enableGitLongPaths(git.path);
+    await _enableGitLongPaths(_host.path.join(root, 'cmd', 'git.exe'));
     return RecordedInstall(
       id: ToolId.git,
       path: root,
       version: '${release.version}',
       installedAt: DateTime.now(),
     );
+  }
+
+  /// Where Git for Windows' installer just put Git: the directory holding
+  /// `cmd\git.exe`, or null when there is none.
+  ///
+  /// The installer has no per-user default of its own — its default is
+  /// `Program Files\Git`, whatever `/CURRENTUSER` asks — so App Studio cannot
+  /// know in advance. The installer records the directory it used under
+  /// `Software\GitForWindows` (HKCU for a per-user install, HKLM for a
+  /// machine-wide one); the two usual directories are the fallback.
+  @visibleForTesting
+  Future<String?> installedGitRoot({Map<String, String>? environment}) async {
+    final env = environment ?? Platform.environment;
+    const key = r'Software\GitForWindows';
+    for (final root in [
+      windows.readRawString(RegistryRoot.currentUser, key, 'InstallPath'),
+      windows.readRawString(RegistryRoot.localMachine, key, 'InstallPath'),
+      if (env['LOCALAPPDATA'] case final dir?)
+        _host.path.join(dir, 'Programs', 'Git'),
+      if (env['ProgramFiles'] case final dir?) _host.path.join(dir, 'Git'),
+    ]) {
+      if (root == null || root.isEmpty) continue;
+      if (await File(_host.path.join(root, 'cmd', 'git.exe')).exists()) {
+        return root;
+      }
+    }
+    return null;
   }
 
   /// `core.longpaths true`, so Git can check out the deep trees Flutter and

@@ -615,6 +615,14 @@ Work was done on the branch `spike/windows-phase0`. Nothing is committed.
   since this machine already has all of them. Uninstalling Git/Developer
   Mode is Phase 6 (not offered until then). Widgetbook Windows use cases and
   the `LongPathsEnabled` warning are still to do.
+- **First real Git install (spare laptop, 2026-11-03):** the installer exited
+  0 but App Studio reported a failure, because Git was not in
+  `%LOCALAPPDATA%\Programs\Git`. Git for Windows' installer defaults to
+  `{commonpf}\Git` and has no `PrivilegesRequiredOverridesAllowed`, so
+  `/CURRENTUSER` does nothing. Now App Studio passes `/DIR=` with the per-user
+  directory, then finds Git where the installer recorded it
+  (`Software\GitForWindows\InstallPath`, HKCU or HKLM) before trying the two
+  usual directories.
 
 ### Phase 4 — Runner, projects and preview on Windows (L)
 
