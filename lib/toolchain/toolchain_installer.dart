@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 
 import '../platform/host.dart';
 import '../platform/windows/win32_system.dart';
+import '../platform/windows/windows_roots.dart';
 import '../platform/windows/windows_system.dart';
 import '../process/tool_command.dart';
 import 'install_plan.dart';
@@ -71,7 +72,7 @@ class ToolchainInstaller {
     @visibleForTesting
     Future<ProcessResult> Function(String executable, List<String> arguments)?
         runProcess,
-  })  : _http = httpClient ?? http.Client(),
+  })  : _http = httpClient ?? studioHttpClient(paths.host),
         _runProcess = runProcess ?? Process.run,
         _loginShellPath = loginShellPath ?? captureLoginShellPath,
         profile = profile ??

@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:ffi';
+import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
@@ -226,6 +228,84 @@ class Win32System implements WindowsSystem {
         return name.isEmpty ? null : name;
       });
 
+  static final _crypt32 = DynamicLibrary.open('crypt32.dll');
+
+  // PCCERT_CONTEXT CertCreateCertificateContext(DWORD, const BYTE*, DWORD)
+  static final _certCreateCertificateContext = _crypt32.lookupFunction<
+      Pointer<Void> Function(Uint32, Pointer<Uint8>, Uint32),
+      Pointer<Void> Function(
+          int, Pointer<Uint8>, int)>('CertCreateCertificateContext');
+
+  // BOOL CertFreeCertificateContext(PCCERT_CONTEXT)
+  static final _certFreeCertificateContext = _crypt32.lookupFunction<
+      Int32 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('CertFreeCertificateContext');
+
+  // BOOL CertGetCertificateChain(HCERTCHAINENGINE, PCCERT_CONTEXT, LPFILETIME,
+  //     HCERTSTORE, PCERT_CHAIN_PARA, DWORD, LPVOID, PCCERT_CHAIN_CONTEXT*)
+  static final _certGetCertificateChain = _crypt32.lookupFunction<
+      Int32 Function(IntPtr, Pointer<Void>, Pointer<Void>, IntPtr,
+          Pointer<_CertChainPara>, Uint32, Pointer<Void>,
+          Pointer<Pointer<_CertChainContext>>),
+      int Function(
+          int,
+          Pointer<Void>,
+          Pointer<Void>,
+          int,
+          Pointer<_CertChainPara>,
+          int,
+          Pointer<Void>,
+          Pointer<Pointer<_CertChainContext>>)>('CertGetCertificateChain');
+
+  // VOID CertFreeCertificateChain(PCCERT_CHAIN_CONTEXT)
+  static final _certFreeCertificateChain = _crypt32.lookupFunction<
+      Void Function(Pointer<_CertChainContext>),
+      void Function(Pointer<_CertChainContext>)>('CertFreeCertificateChain');
+
+  static const _x509AsnEncoding = 0x00000001;
+  static const _pkcs7AsnEncoding = 0x00010000;
+  static const _usageMatchTypeAnd = 0;
+  static const _oidServerAuth = '1.3.6.1.5.5.7.3.1';
+
+  @override
+  Future<bool> buildCertificateChain(Uint8List der) =>
+      // Windows may download roots and intermediates here, for seconds at a
+      // time: off the UI isolate.
+      Isolate.run(() => _buildCertificateChain(der));
+
+  static bool _buildCertificateChain(Uint8List der) => using((arena) {
+        final bytes = arena<Uint8>(der.length);
+        bytes.asTypedList(der.length).setAll(0, der);
+        final cert = _certCreateCertificateContext(
+            _x509AsnEncoding | _pkcs7AsnEncoding, bytes, der.length);
+        if (cert == nullptr) return false;
+        try {
+          final usage = arena<Pointer<Utf8>>()
+            ..value = _oidServerAuth.toNativeUtf8(allocator: arena);
+          final para = arena<_CertChainPara>();
+          para.ref.cbSize = sizeOf<_CertChainPara>();
+          para.ref.requestedUsage
+            ..dwType = _usageMatchTypeAnd
+            ..usage.cUsageIdentifier = 1
+            ..usage.rgpszUsageIdentifier = usage;
+          final chain = arena<Pointer<_CertChainContext>>();
+          // The default engine, the current time, no extra store, no flags:
+          // what Windows' own TLS asks for, network retrieval included.
+          if (_certGetCertificateChain(
+                  0, cert, nullptr, 0, para, 0, nullptr, chain) ==
+              0) {
+            return false;
+          }
+          try {
+            return chain.value.ref.dwErrorStatus == 0;
+          } finally {
+            _certFreeCertificateChain(chain.value);
+          }
+        } finally {
+          _certFreeCertificateContext(cert);
+        }
+      });
+
   @override
   Future<int?> runElevated(String executable, String parameters) async {
     final info = calloc<_ShellExecuteInfo>();
@@ -266,6 +346,38 @@ class Win32System implements WindowsSystem {
         ..free(exitCode);
     }
   }
+}
+
+/// CERT_CHAIN_PARA, nested as Windows declares it: the usage holds a pointer,
+/// so it is 8-byte aligned and starts at offset 8, not right after `cbSize`.
+final class _CertChainPara extends Struct {
+  @Uint32()
+  external int cbSize;
+  external _CertUsageMatch requestedUsage;
+}
+
+/// CERT_USAGE_MATCH.
+final class _CertUsageMatch extends Struct {
+  @Uint32()
+  external int dwType;
+  external _CertEnhKeyUsage usage;
+}
+
+/// CERT_ENHKEY_USAGE.
+final class _CertEnhKeyUsage extends Struct {
+  @Uint32()
+  external int cUsageIdentifier;
+  external Pointer<Pointer<Utf8>> rgpszUsageIdentifier;
+}
+
+/// The start of CERT_CHAIN_CONTEXT: its size, then its CERT_TRUST_STATUS.
+final class _CertChainContext extends Struct {
+  @Uint32()
+  external int cbSize;
+  @Uint32()
+  external int dwErrorStatus;
+  @Uint32()
+  external int dwInfoStatus;
 }
 
 /// SHELLEXECUTEINFOW (64-bit layout).

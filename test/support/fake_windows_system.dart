@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:appstudio/platform/windows/windows_system.dart';
 
 /// An in-memory registry and a scripted UAC prompt, so no test reads or
@@ -28,6 +30,18 @@ class FakeWindowsSystem implements WindowsSystem {
 
   @override
   String? protocolHandler(String scheme) => protocols[scheme];
+
+  /// Certificates handed to [buildCertificateChain].
+  final chains = <Uint8List>[];
+
+  /// Whether [buildCertificateChain] finds a trusted root.
+  bool chainTrusted = true;
+
+  @override
+  Future<bool> buildCertificateChain(Uint8List der) async {
+    chains.add(der);
+    return chainTrusted;
+  }
 
   @override
   bool shellOpen(String target) {

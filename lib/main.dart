@@ -10,6 +10,8 @@ import 'platform/afunix_settle.dart';
 import 'platform/compact_window.dart';
 import 'platform/host.dart';
 import 'platform/window_close.dart';
+import 'platform/windows/win32_system.dart';
+import 'platform/windows/windows_roots.dart';
 import 'platform/windows_app_menu.dart';
 import 'preview/compact_dialog_yield.dart';
 import 'preview/preview_mode_controller.dart';
@@ -37,7 +39,13 @@ import 'ui/studio_shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  if (currentHost.isWindows) installWindowCloseHandler();
+  if (currentHost.isWindows) {
+    installWindowCloseHandler();
+    // A fresh Windows has not downloaded GitHub's root yet, which Dart needs
+    // and so do the Dart tools started later (windows_roots.dart). A few
+    // handshakes; fire and forget.
+    unawaited(fetchWindowsRoots(Win32System()));
+  }
 
   await cleanupOrphanedDevSession();
 

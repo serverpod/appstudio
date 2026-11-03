@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../platform/windows/windows_roots.dart';
 import '../platform/windows/windows_system.dart';
 import 'install_plan.dart';
 import 'install_progress.dart';
@@ -168,7 +169,7 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
     if (_planning || isInstalling) return null;
     _planning = true;
     notifyListeners();
-    final client = http.Client();
+    final client = studioHttpClient(paths.host);
     try {
       final tools = <ToolId, PlannedTool>{};
       for (final status in inventory.installable) {

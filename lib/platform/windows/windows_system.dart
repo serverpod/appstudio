@@ -7,6 +7,8 @@
 /// prompt. `Win32System` (`win32_system.dart`) is the real one.
 library;
 
+import 'dart:typed_data';
+
 enum RegistryRoot { currentUser, localMachine }
 
 /// Where Windows keeps the user's own environment variables.
@@ -58,6 +60,12 @@ abstract interface class WindowsSystem {
   /// registry keys — on Windows an unregistered scheme raises a "choose an
   /// app" dialog, so this is the check before offering a deep link.
   String? protocolHandler(String scheme);
+
+  /// Has Windows build a chain of trust for the DER certificate [der], as its
+  /// own TLS would. Doing so downloads any root Windows trusts but has not
+  /// fetched yet into its root store (`windows_roots.dart` says why that
+  /// matters). True when the chain ends in a trusted root.
+  Future<bool> buildCertificateChain(Uint8List der);
 }
 
 /// No registry, no prompt: every read finds nothing and every change fails.
@@ -90,6 +98,9 @@ class NoWindowsSystem implements WindowsSystem {
 
   @override
   String? protocolHandler(String scheme) => null;
+
+  @override
+  Future<bool> buildCertificateChain(Uint8List der) async => false;
 }
 
 /// The `Path` a process started now would get: the machine's entries, then
