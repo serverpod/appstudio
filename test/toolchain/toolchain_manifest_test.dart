@@ -36,37 +36,59 @@ void main() {
     );
   });
 
-  test('reads the versions to avoid', () {
-    final json = valid();
-    json['tools'] = <Object>[...(json['tools'] as List).take(2), {
-      'id': 'serverpod_cli',
-      'accepts': '>=4.1.0-beta.1 <4.2.0',
-      'avoid': ['4.1.0-rc.1', '4.1.0'],
-    }];
-    final spec = ToolManifest.tryParse(jsonEncode(json))![ToolId.serverpodCli]!;
-    expect(spec.avoid, {
-      ToolVersion.tryParse('4.1.0-rc.1'),
-      ToolVersion.tryParse('4.1.0'),
+  group('avoid', () {
+    Map<String, dynamic> serverpod(Object avoid) => {
+          'id': 'serverpod_cli',
+          'accepts': '>=4.1.0-beta.1 <5.0.0',
+          'avoid': avoid,
+        };
+
+    test('keeps only the versions to avoid on this host', () {
+      final json = serverpod({
+        'windows': ['4.1.0-rc.1', '4.1.0'],
+        'macos': ['4.1.1'],
+      });
+      expect(ToolSpec.tryParse(json, host: HostPlatform.windows)!.avoid, {
+        ToolVersion.tryParse('4.1.0-rc.1'),
+        ToolVersion.tryParse('4.1.0'),
+      });
+      expect(ToolSpec.tryParse(json, host: HostPlatform.macos)!.avoid,
+          {ToolVersion.tryParse('4.1.1')});
     });
-    expect(ToolManifest.tryParse(jsonEncode(valid()))![ToolId.flutter]!.avoid,
-        isEmpty);
-  });
 
-  test('refuses a malformed version to avoid', () {
-    final json = valid();
-    json['tools'] = <Object>[...(json['tools'] as List).take(2), {
-      'id': 'serverpod_cli',
-      'accepts': '>=4.0.0',
-      'avoid': ['not a version'],
-    }];
-    expect(ToolManifest.tryParse(jsonEncode(json)), isNull);
-  });
+    test('is empty when the manifest has none', () {
+      expect(ToolSpec.tryParse({'id': 'flutter'})!.avoid, isEmpty);
+    });
 
-  test('the bundled manifest avoids the Serverpod releases that do not build',
-      () async {
-    final manifest = ToolManifest.tryParse(await loadTestManifestSource())!;
-    expect(manifest[ToolId.serverpodCli]!.avoid,
-        contains(ToolVersion.tryParse('4.1.0')));
+    test('refuses a malformed version, even for another host', () {
+      expect(
+        ToolSpec.tryParse(
+          serverpod({
+            'windows': ['not a version'],
+          }),
+          host: HostPlatform.macos,
+        ),
+        isNull,
+      );
+      expect(ToolSpec.tryParse(serverpod(['4.1.0'])), isNull);
+    });
+
+    test('the bundled manifest skips 4.1.0 on Windows only', () async {
+      final source = await loadTestManifestSource();
+      final four = ToolVersion.tryParse('4.1.0');
+      expect(
+        ToolManifest.tryParse(source, host: HostPlatform.windows)![
+                ToolId.serverpodCli]!
+            .avoid,
+        contains(four),
+      );
+      expect(
+        ToolManifest.tryParse(source, host: HostPlatform.macos)![
+                ToolId.serverpodCli]!
+            .avoid,
+        isEmpty,
+      );
+    });
   });
 
   test('falls back to the built-in display name', () {

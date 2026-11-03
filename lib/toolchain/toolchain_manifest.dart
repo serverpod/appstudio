@@ -31,12 +31,18 @@ class ToolSpec {
   /// updated; a fresh install picks the newest release inside it.
   final VersionRange accepts;
 
-  /// Releases inside [accepts] that a fresh install never picks, because
-  /// they are known not to install — Serverpod 4.1.0 does not compile with
-  /// the Dart in Flutter 3.47. A copy already installed is left alone.
+  /// Releases inside [accepts] that a fresh install on this host never picks,
+  /// because they are known not to install there — on Windows, `dart install`
+  /// builds Serverpod 4.1.0 at the SDK's language version rather than its
+  /// own, and it does not compile. A copy already installed is left alone.
   final Set<ToolVersion> avoid;
 
-  static ToolSpec? tryParse(Map<String, dynamic> json) {
+  /// [json]'s `avoid` maps an OS (`HostOs.name`) to the versions to avoid
+  /// there; the entries for other OSes are checked but not kept.
+  static ToolSpec? tryParse(
+    Map<String, dynamic> json, {
+    HostPlatform host = HostPlatform.macos,
+  }) {
     final rawId = json['id'] as String?;
     if (rawId == null) return null;
     final id = ToolId.fromManifestId(rawId);
@@ -50,11 +56,14 @@ class ToolSpec {
     final avoid = <ToolVersion>{};
     final rawAvoid = json['avoid'];
     if (rawAvoid != null) {
-      if (rawAvoid is! List) return null;
-      for (final raw in rawAvoid) {
-        final version = ToolVersion.tryParse(raw is String ? raw : null);
-        if (version == null) return null;
-        avoid.add(version);
+      if (rawAvoid is! Map) return null;
+      for (final MapEntry(:key, :value) in rawAvoid.entries) {
+        if (value is! List) return null;
+        for (final raw in value) {
+          final version = ToolVersion.tryParse(raw is String ? raw : null);
+          if (version == null) return null;
+          if (key == host.os.name) avoid.add(version);
+        }
       }
     }
 
@@ -100,6 +109,7 @@ class ToolManifest {
         if (entry is! Map) continue;
         final spec = ToolSpec.tryParse(
           entry.map((k, v) => MapEntry(k.toString(), v)),
+          host: host,
         );
         if (spec != null && required.contains(spec.id)) tools[spec.id] = spec;
       }

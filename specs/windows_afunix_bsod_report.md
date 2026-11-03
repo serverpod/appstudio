@@ -164,20 +164,32 @@ AF_UNIX transport under afd.sys). Attach both `.dmp` files. Choosing
 
 ---
 
-## 4. Serverpod — 4.1.0 does not install with stable Dart
+## 4. Dart and Serverpod — `dart install serverpod_cli@4.1.0` fails on Windows
 
-Found 2026-11-03, on the spare laptop's first setup; reproduced on the dev
-laptop with Dart 3.13.5 and 3.13.7 (Flutter 3.47.9). Not Windows-specific:
-it is a compile error.
+Found 2026-11-03 on the spare laptop's first setup. Reproduced on the dev
+laptop with Dart 3.13.5 and 3.13.7. The same Dart 3.13.7 (Flutter 3.47.9)
+installs 4.1.0 fine on macOS, so it is Windows-only. `final` parameters
+compile at language version 3.12 and fail at 3.13 (checked with
+`// @dart=` on Windows), and serverpod_cli declares `sdk: ^3.12.2`. So on
+Windows `dart install` compiles the package at the SDK's language version
+instead of its own. Probably a path mismatch: dartdev's paths come out
+lowercased (`c:\users\…\helperpackage\.dart_tool\package_config.json`), so
+the entry point may not match its package's `rootUri`. That cause is
+unconfirmed.
+
+Two reports: the bug to Dart, and a heads-up with an easy workaround to
+Serverpod.
+
+### 4a. Dart — dart-lang/sdk
 
 **Title**
 
-> `dart install serverpod_cli@4.1.0` fails: "Can't have modifier 'final' here" in bin/serverpod_cli.dart
+> Windows: `dart install` compiles a package at the SDK's language version, not the package's
 
 **Body**
 
-> With Dart 3.13.7 (Flutter 3.47.9 stable), `dart install serverpod_cli@4.1.0`
-> fails while generating the AOT kernel:
+> On Windows, `dart install serverpod_cli@4.1.0` fails while generating the
+> AOT kernel. The same command with the same SDK works on macOS:
 >
 > ```
 > bin/serverpod_cli.dart:54:14: Error: Can't have modifier 'final' here.
@@ -187,6 +199,26 @@ it is a compile error.
 > Bad state: Generating AOT kernel dill failed!
 > ```
 >
-> 4.1.0-rc.1 fails the same way; 4.1.0-beta.3 installs. The package declares
-> `sdk: ^3.12.2`, so pub picks it for these SDKs. App Studio skips 4.1.0-rc.1
-> and 4.1.0 until a fixed release is out.
+> serverpod_cli declares `sdk: ^3.12.2`. At language version 3.12 these
+> parameters compile on Windows; at 3.13 they are the error above. So the
+> package's own language version is not applied. The paths dartdev passes
+> appear lowercased (`--packages=c:\users\…\helperpackage\.dart_tool\package_config.json`),
+> which may stop the entry point matching its package's `rootUri`.
+>
+> Dart 3.13.5 and 3.13.7 (stable), Windows 11 25H2, x64.
+
+### 4b. Serverpod — serverpod/serverpod
+
+**Title**
+
+> Windows: `dart install serverpod_cli` fails for 4.1.0 (Dart bug); dropping `final` from parameters avoids it
+
+**Body**
+
+> On Windows, `dart install serverpod_cli@4.1.0` (and 4.1.0-rc.1) fails with
+> "Can't have modifier 'final' here" at `bin/serverpod_cli.dart:54`
+> (`required final String event`). A Dart SDK bug, reported as <link>,
+> compiles the package at the SDK's language version 3.13 instead of its own
+> 3.12. Removing `final` from parameter lists in the CLI would let it install
+> on Windows until that is fixed. macOS is not affected. App Studio installs
+> 4.1.0-beta.3 on Windows meanwhile.
