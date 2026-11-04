@@ -92,9 +92,9 @@ jobs:
           RUN_SHA: ${{ github.event.workflow_run.head_sha }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           # The CI jobs a release needs, by name (ci.yml). Not the run's own
-          # conclusion: the windows-sockets canary is allowed to fail, but when
-          # it runs out its time — which it often does, see ci.yml — GitHub
-          # reports the whole run as cancelled.
+          # conclusion, which a job allowed to fail can still turn into
+          # "cancelled" by running out its time — what the removed socket
+          # canary did on every run.
           REQUIRED: macos-latest|windows-latest|windows installer
         run: |
           if [[ "$EVENT" == workflow_run ]]; then

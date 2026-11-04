@@ -1911,9 +1911,10 @@ GitHub's Windows runners down mid-test. See
   `settleAfUnixSockets()` (500 ms) so the kernel finishes closing the runner
   connection.
 - Tests that start processes or open sockets are tagged `process`. **On a
-  Windows dev machine run `flutter test -x process -j 1`**; the socket tests
-  run in CI's `windows-sockets` job. Socket test files call
-  `settleAfUnixSocketsAfterAll()`.
+  Windows dev machine run `flutter test -x process -j 1`**. CI runs the same
+  on Windows: the socket tests run on macOS only. Their Windows job crashed
+  the machine and timed out on every run, so it was removed. Socket test
+  files call `settleAfUnixSocketsAfterAll()`.
 - Fakes use `FakeRunner.fakePid()`: odd and above 99999, which no real
   process has on either OS.
 - Ask before running anything that opens a project on the dev laptop.
@@ -2031,8 +2032,6 @@ tool\windows\promote_release.ps1 -Bucket <bucket> -PrivateKeyFile <pem> [-DryRun
 
 - **macOS:** the full suite.
 - **Windows:** everything but the socket tests.
-- **`windows-sockets`:** one step per test group, so a machine crash names
-  its group.
 - **`windows installer`:** the release build and the installer.
 
 The repository is public, so the GitHub API works without a token. It allows

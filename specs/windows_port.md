@@ -998,6 +998,10 @@ longer says macOS only.
     not limited to killed processes.
   - The image is Windows Server 2025 build 26100.33438 with afunix.sys
     10.0.26100.32684, far newer than the laptop's .8972.
+- **The canary was removed (2026-11-04).** It had been cancelled on the job
+  time limit in all 18 recent runs, so it never reported a test result. It
+  also turned every CI run's conclusion into cancelled. The socket tests now
+  run on macOS only.
   - In run #13 it went down in the group where the runner stops or crashes
     and drops connected clients: a disconnect while a read is pending,
     mid-test. That is exactly what users meet when a runner stops or
