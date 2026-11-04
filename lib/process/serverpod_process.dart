@@ -127,6 +127,10 @@ class ServerpodProcessController extends ChangeNotifier
   String? _previewUrl;
   bool _live = false;
   bool _launchRequested = false;
+
+  /// Whether App Studio started this runner, so is the first client to attach
+  /// to it: the runner then launches the `auto_launch` apps itself.
+  bool _runnerLaunchesApps = false;
   int _previewReloadToken = 0;
   String? _registrationCode;
 
@@ -371,6 +375,7 @@ class ServerpodProcessController extends ChangeNotifier
     _error = null;
     _registrationCode = null;
     _launchRequested = false;
+    _runnerLaunchesApps = false;
     _live = false;
     _previewUrl = null;
     _owned = false;
@@ -418,6 +423,7 @@ class ServerpodProcessController extends ChangeNotifier
           notifyListeners();
           final socketPath = await _launchRunner(serverDir, cancelled);
           if (socketPath == null || cancelled()) return;
+          _runnerLaunchesApps = true;
           await _attach(socketPath, epoch);
       }
     } catch (e) {
@@ -590,13 +596,17 @@ class ServerpodProcessController extends ChangeNotifier
   /// Launches the preview app once per attach if the runner has not.
   ///
   /// Only `auto_launch` apps start by themselves, and a project created
-  /// outside App Studio may not have it. The runner ignores a launch for an
-  /// app already starting, so racing its own auto-launch is harmless.
+  /// outside App Studio may not have it. An `auto_launch` app of a runner App
+  /// Studio started is the runner's to launch: when another project holds the
+  /// configured ports, it waits for the server's actual API port and builds
+  /// the app against it, and a launch asked for meanwhile would point the app
+  /// at the configured port, so at that other project's server.
   void _launchPreviewAppIfIdle() {
     final client = _client;
     final app = previewApp;
     if (client == null ||
         app == null ||
+        (app.config.autoLaunch && _runnerLaunchesApps) ||
         _launchRequested ||
         !_canLaunchFlutterApps ||
         _stage != RunnerStage.running ||

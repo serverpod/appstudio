@@ -32,6 +32,7 @@ void main() {
   late Directory scratch;
   final runners = <FakeRunner>[];
   var launches = 0;
+  var launchedSnapshot = <String, Object?>{};
 
   /// Stands a fake runner up the way `serverpod runner start` would, and
   /// reports the CLI as having exited cleanly once it answers.
@@ -40,7 +41,11 @@ void main() {
     required String serverDir,
   }) async {
     launches++;
-    final runner = await FakeRunner.start(serverDir, pid: FakeRunner.fakePid(launches));
+    final runner = await FakeRunner.start(
+      serverDir,
+      pid: FakeRunner.fakePid(launches),
+      snapshot: launchedSnapshot,
+    );
     runners.add(runner);
     return RunnerLaunch(
       output: Stream.fromIterable([
@@ -66,6 +71,7 @@ void main() {
     scratch = await Directory.systemTemp.createTemp('appstudio_process');
     ownedRunnerRecordPathOverride = p.join(scratch.path, 'runner.json');
     launches = 0;
+    launchedSnapshot = {};
     session = ProjectSession();
     process = ServerpodProcessController(
       toolchains: await emptyToolchainController(),
@@ -205,6 +211,29 @@ void main() {
 
       expect(runner.calls, contains('stop'));
       expect(await readOwnedRunner(), isNull);
+    });
+
+    test('leaves an auto-launched app for the runner to launch', () async {
+      // The runner waits for the server's API port when the configured one is
+      // taken; a launch asked for first would build the app against 8080.
+      launchedSnapshot = {
+        'flutterApps': [demoApp],
+      };
+      final runner = await openFresh();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+
+      expect(runner.calls, isNot(contains('launchFlutterApp')));
+    });
+
+    test('still launches an app that is not auto-launched', () async {
+      launchedSnapshot = {
+        'flutterApps': [
+          {...demoApp, 'autoLaunch': false},
+        ],
+      };
+      final runner = await openFresh();
+
+      await until(() => runner.calls.contains('launchFlutterApp'));
     });
 
     test('Full Restart stops it and starts a new one', () async {

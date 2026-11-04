@@ -125,13 +125,14 @@ void main() {
 
     test('accepts a Serverpod CLI inside the range', () {
       expect(run('4.1.0').fitness, ToolFitness.satisfied);
-      // The runner protocol App Studio speaks first shipped in this beta.
-      expect(run('4.1.0-beta.1').fitness, ToolFitness.satisfied);
+      expect(run('4.9.2').fitness, ToolFitness.satisfied);
     });
 
     test('rejects one outside it', () {
-      // 4.0 has no runner to attach to.
+      // 4.0 has no runner to attach to, and the 4.1 prereleases are
+      // superseded by the release.
       expect(run('4.0.3').fitness, ToolFitness.wrongVersion);
+      expect(run('4.1.0-beta.3').fitness, ToolFitness.wrongVersion);
       expect(run('5.0.0').fitness, ToolFitness.wrongVersion);
     });
 

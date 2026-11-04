@@ -199,8 +199,9 @@ migrations are commands on the same connection.
   `web-server-launch-browser`, which also opens the system browser. A `web-port`
   already there is left alone; App Studio no longer needs one. A project created
   elsewhere with no `device` still works — the app also opens in a browser.
-- The CLI range in `assets/toolchain_manifest.json` is `>=4.1.0-beta.1 <5.0.0`.
-  4.0 has no runner to attach to. The installer prefers a stable release in range
+- The CLI range in `assets/toolchain_manifest.json` is `>=4.1.0 <5.0.0`.
+  4.0 has no runner to attach to, and the 4.1 prereleases that first had one
+  are superseded by the release. The installer prefers a stable release in range
   and otherwise takes the newest prerelease, skipping any version the
   manifest's `avoid` names for the host OS (none today; an installed copy of
   one still counts as installed).
