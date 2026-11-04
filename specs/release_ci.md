@@ -43,21 +43,18 @@ This is the recommended answer to "upload when the version changes, or what?":
 So a release is:
 
 ```bash
-make set_version V=1.2.3          # macOS build counter, from the live bucket
-# Windows: increase "build" in windows/release.json by one (see below)
+make set_version V=1.2.3          # both build counters, from the live bucket
 git commit -am "chore: Release 1.2.3." && git push
 ```
+
+`make set_version` writes `pubspec.yaml` (macOS counter) and
+`windows/release.json` (Windows counter). Each new number clears that
+platform's appcast and download manifest, so neither can repeat.
 
 Watch **Actions → Release**. Its summary shows the direct download URL of each
 upload. Install those builds on a clean Mac and a clean PC. When they check
 out, run **Actions → Promote → Run workflow** on `main`, type `1.2.3`, and
 approve the `production` deployment.
-
-> **Windows has its own counter**, and nothing bumps it for you on a Mac
-> (`build_release.ps1 -BumpBuild` needs Windows). Raise `build` in
-> `windows/release.json` by one in the same commit as every version change.
-> Without that, the Windows half fails with "build N is not uploaded, but
-> builds up to N already are", and macOS still uploads.
 
 **Windows is skipped until `windows/release.json` has `appcastUrl` and
 `eddsaPublicKey`.** That is today's state. A build without them never checks

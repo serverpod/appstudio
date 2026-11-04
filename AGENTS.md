@@ -932,6 +932,12 @@ checkout. `publish_dist.sh` re-checks the appcast gate before uploading. All
 of it shares `tool/lib/pubspec_version.sh`;
 `test/tool/version_gate_test.dart` covers it.
 
+**The same command bumps the Windows counter** (`tool/windows/bump_build.sh`
+→ `windows/release.json`), by the same rule against the Windows appcast and
+`downloads/windows.json`. The two counters stay independent. They are bumped
+together only because a version change is a release on both platforms.
+`build_release.ps1 -BumpBuild` remains the route on Windows.
+
 `tool/publish_dist.sh` derives the path from `pubspec.yaml`
 (`version: 1.0.0+1` → `releases/macos/1.0.0/b1/AppStudio-1.0.0-arm64.zip`)
 and uploads with `--if-generation-match=0`, so objects are immutable — a
@@ -1995,7 +2001,7 @@ Windows needs Developer Mode, then Git for Windows, Flutter and Serverpod
 Nothing in the Windows release path reads or writes anything the macOS one
 owns (decision D5):
 
-- **Build counter:** `windows/release.json`, independent of macOS.
+- **Build counter:** `windows/release.json`, independent of macOS. `make set_version` bumps it alongside the macOS one (`tool/windows/bump_build.sh`).
 - **Updates:** WinSparkle, with its own EdDSA key pair. The public key and
   appcast URL are compiled in from `release.json`, and only release builds
   with both set check for updates.

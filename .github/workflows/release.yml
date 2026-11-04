@@ -196,7 +196,7 @@ jobs:
         env:
           REASON: ${{ needs.plan.outputs.macos_reason }}
         run: |
-          echo "::error title=macOS not uploaded::$REASON. Run 'make set_version V=…' and commit pubspec.yaml."
+          echo "::error title=macOS not uploaded::$REASON. Run 'make set_version V=…' and commit pubspec.yaml and windows/release.json."
           exit 1
 
       - uses: actions/checkout@v4
@@ -339,7 +339,7 @@ jobs:
         env:
           REASON: ${{ needs.plan.outputs.windows_reason }}
         run: |
-          echo "::error title=Windows not uploaded::$REASON. Increase \"build\" in windows/release.json and commit it."
+          echo "::error title=Windows not uploaded::$REASON. Run 'make set_version V=…' (it bumps windows/release.json too) and commit it."
           exit 1
 
       - uses: actions/checkout@v4

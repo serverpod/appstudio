@@ -2,6 +2,7 @@
 @Tags(['tool'])
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -292,6 +293,91 @@ void main() {
           await run('1.2', pubspec: pubspec, appcastUrl: url);
       expect(code, isNot(0));
       expect(text, contains('version: 1.0.0+7'));
+    });
+  });
+
+  group('windows/bump_build.sh', () {
+    final bump = p.join(root, 'tool', 'windows', 'bump_build.sh');
+
+    Future<String> releaseJsonWith(int build) async {
+      final file = File(p.join(tmp.path, 'release.json'));
+      await file.writeAsString(
+        '{\n  "build": $build,\n'
+        '  "appcastUrl": "https://example.com/appcast.xml",\n'
+        '  "eddsaPublicKey": "PUBKEY="\n}\n',
+      );
+      return file.path;
+    }
+
+    /// WinSparkle's feed puts the build on the enclosure, as
+    /// tool/windows/promote_release.ps1 writes it.
+    Future<String> windowsAppcastWith(List<int> builds) async {
+      final items = builds
+          .map(
+            (b) =>
+                '<item><enclosure url="https://example.com/s.exe" '
+                'sparkle:version="$b" sparkle:shortVersionString="9.9.9"/></item>',
+          )
+          .join('\n');
+      final file = File(p.join(tmp.path, 'windows.xml'));
+      await file.writeAsString('<rss><channel>\n$items\n</channel></rss>');
+      return 'file://${file.path}';
+    }
+
+    Future<(int, Map<String, dynamic>)> run(
+      String releaseJson, {
+      String appcastUrl = 'file:///nonexistent/windows.xml',
+      String downloadsUrl = 'file:///nonexistent/windows.json',
+    }) async {
+      final result = await Process.run(
+        '/bin/bash',
+        [bump],
+        environment: {
+          'RELEASE_JSON': releaseJson,
+          'WINDOWS_APPCAST_URL': appcastUrl,
+          'WINDOWS_DOWNLOADS_URL': downloadsUrl,
+        },
+      );
+      final json = await File(releaseJson).readAsString();
+      return (
+        result.exitCode,
+        (jsonDecode(json) as Map).cast<String, dynamic>(),
+      );
+    }
+
+    test('with nothing published, bumps the checkout\'s counter', () async {
+      final (code, config) = await run(await releaseJsonWith(1));
+      expect(code, 0);
+      expect(config['build'], 2);
+    });
+
+    test('clears a build in the Windows appcast', () async {
+      final (code, config) = await run(
+        await releaseJsonWith(2),
+        appcastUrl: await windowsAppcastWith([3, 6]),
+      );
+      expect(code, 0);
+      expect(config['build'], 7);
+    });
+
+    test('clears an upload not yet promoted', () async {
+      final downloads = File(p.join(tmp.path, 'windows.json'));
+      await downloads.writeAsString(
+        '{"latest": {"build": 4}, "preview": {"build": 5}}',
+      );
+      final (code, config) = await run(
+        await releaseJsonWith(2),
+        appcastUrl: await windowsAppcastWith([4]),
+        downloadsUrl: 'file://${downloads.path}',
+      );
+      expect(code, 0);
+      expect(config['build'], 6);
+    });
+
+    test('keeps the feed URL and the public key', () async {
+      final (_, config) = await run(await releaseJsonWith(1));
+      expect(config['appcastUrl'], 'https://example.com/appcast.xml');
+      expect(config['eddsaPublicKey'], 'PUBKEY=');
     });
   });
 }

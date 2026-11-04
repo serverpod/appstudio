@@ -18,7 +18,7 @@
 #   make promote           Put the uploaded build in the appcast: auto-update
 #                          goes live for every existing install
 #
-#   make set_version V=…   Set the version and bump the build counter
+#   make set_version V=…   Set the version and bump both build counters
 #   make build             Signed + notarized zip in dist/, nothing uploaded
 #   make publish           Upload the built zip + refresh downloads/macos.json
 #   make build_debug       Unsigned zip, local only
@@ -52,7 +52,7 @@ help:
 	@echo "  make promote           Put the uploaded build in the appcast —"
 	@echo "                         auto-update goes live for every install"
 	@echo ""
-	@echo "  make set_version V=…   Set the version and bump the build counter"
+	@echo "  make set_version V=…   Set the version and bump both build counters"
 	@echo "  make build             Signed + notarized zip in dist/, no upload"
 	@echo "  make publish           Upload the built zip + refresh the download links"
 	@echo "  make build_debug       Unsigned zip, local only"
@@ -157,7 +157,8 @@ clean_all: clean
 # Set the version. The build counter is bumped automatically and never reset —
 # Sparkle compares CFBundleVersion, so a repeat or a rollback would make every
 # installed copy stop seeing updates. It clears promoted releases AND uploads
-# still waiting for promotion.
+# still waiting for promotion. Windows has a counter of its own
+# (windows/release.json), bumped by the same rule in the same command.
 #
 #   make set_version V=1.2.3     make set_version V=patch
 set_version:
@@ -166,6 +167,7 @@ set_version:
 		exit 1; \
 	}
 	cd "$(ROOT)" && ./tool/set_version.sh "$(V)"
+	cd "$(ROOT)" && ./tool/windows/bump_build.sh
 
 # Build, sign and notarize the zip into dist/macos. Nothing is uploaded.
 build: ensure_deps

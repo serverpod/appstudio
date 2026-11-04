@@ -45,7 +45,7 @@ $origin = Get-OriginBaseUrl $Bucket
 $promoted = @(Get-AppcastItems (Get-PublishedText "$origin$AppcastPath"))
 if ($promoted.Count -gt 0 -and $promoted[0].Build -ge $build) {
   throw ("Windows build $build is not newer than build $($promoted[0].Build) " +
-    'in the appcast. Bump it: build_release.ps1 -BumpBuild.')
+    'in the appcast. Bump it: make set_version on a Mac, or build_release.ps1 -BumpBuild.')
 }
 
 Write-Step "Uploading App Studio $version (Windows build $build)"
