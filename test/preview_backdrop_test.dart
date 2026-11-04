@@ -66,6 +66,19 @@ void main() {
     await unmount(tester);
   });
 
+  testWidgets('stays two pixels clear of the phone screen\'s edge',
+      (tester) async {
+    tester.view.devicePixelRatio = 1.25;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await pumpPane(tester);
+
+    final inset = tester.widget<Padding>(
+      find.byKey(const ValueKey('preview-backdrop-inset')),
+    );
+    expect(inset.padding, const EdgeInsets.all(2 / 1.25));
+    await unmount(tester);
+  });
+
   testWidgets('turns black when the preview is switched to dark',
       (tester) async {
     await pumpPane(tester);

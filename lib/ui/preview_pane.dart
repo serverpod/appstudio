@@ -536,15 +536,27 @@ class PreviewPaneState extends State<PreviewPane> {
       surface = const ColoredBox(color: Color(0xFF12122A));
     }
 
+    // At a fractional scale, such as Windows' 125%, the page's canvas rounds
+    // down to whole pixels and leaves a transparent sliver along the screen's
+    // edge. Kept clear of the edge, the backdrop lets the bezel show there,
+    // not a bright line beside a dark app.
+    final inset = widget.mode.viewMode.displayMode == PreviewDisplayMode.desktop
+        ? 0.0
+        : 2 / MediaQuery.devicePixelRatioOf(context);
+
     return Stack(
       fit: StackFit.expand,
       children: [
         // CEF composites with an alpha channel, so anything the page leaves
         // unpainted would show the shell through. Back it with the previewed
         // app's own light/dark, not App Studio's.
-        ColoredBox(
-          key: const ValueKey('preview-backdrop'),
-          color: previewBackdropColor(widget.mode.previewBrightness),
+        Padding(
+          key: const ValueKey('preview-backdrop-inset'),
+          padding: EdgeInsets.all(inset),
+          child: ColoredBox(
+            key: const ValueKey('preview-backdrop'),
+            color: previewBackdropColor(widget.mode.previewBrightness),
+          ),
         ),
         surface,
         PreviewStatusOverlay(
