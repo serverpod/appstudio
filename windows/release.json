@@ -1,5 +1,5 @@
 {
   "build": 1,
-  "appcastUrl": "",
-  "eddsaPublicKey": ""
+  "appcastUrl": "https://asdl.serverpod.dev/appcast/windows/appcast.xml",
+  "eddsaPublicKey": "0jJUWaqZVwUmU+UJU3qtubV3bdQnurJRYhH27LjKEXA="
 }
