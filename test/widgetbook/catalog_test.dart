@@ -100,19 +100,33 @@ void main() {
     expect(useCases.length, greaterThan(50));
   });
 
+  // Both themes at the usual window size, then once more at the lowest window
+  // App Studio allows — the height a small laptop screen forces. Full width:
+  // the minimum width is the studio window test's above, and other screens do
+  // not all fit it yet.
+  final variants = [
+    for (final brightness in Brightness.values) (brightness, null),
+    (Brightness.light, Size(kAppWindowSize.width, kMinAppWindowSize.height)),
+  ];
+
   for (final (path, useCase) in useCases) {
-    for (final brightness in Brightness.values) {
-      testWidgets('$path — ${brightness.name}', (tester) async {
+    for (final (brightness, windowSize) in variants) {
+      final name = windowSize == null ? brightness.name : 'lowest window';
+      testWidgets('$path — $name', (tester) async {
         // A roomy desktop window, as Widgetbook's canvas is.
         tester.view.physicalSize = const Size(1440, 900);
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.reset);
 
+        Widget useCaseWidget = Builder(builder: useCase.builder);
+        if (windowSize != null) {
+          useCaseWidget = AppWindowSize(size: windowSize, child: useCaseWidget);
+        }
         await tester.pumpWidget(
           MaterialApp(
             home: UseCaseHost(
               brightness: brightness,
-              child: Builder(builder: useCase.builder),
+              child: useCaseWidget,
             ),
           ),
         );

@@ -99,8 +99,9 @@ class MainFlutterWindow: NSWindow {
 
     // Fits a 13" display with dock/menu bar. The width is 1024 less the ~354pt
     // the log panel's minimum shed when it went from an 80- to a 29-column
-    // message (`serverLogMinWidth`). Keep `kMinAppWindowSize` in
-    // widgetbook/host.dart in step: the catalog test builds the window there.
+    // message (`serverLogMinWidth`). `kMinAppWindowSize` in
+    // widgetbook/host.dart is the smallest window on any platform (Windows
+    // goes down to 600 high): keep this no smaller.
     let minWidth: CGFloat = 670
     let minHeight: CGFloat = 720
     self.minSize = NSSize(width: minWidth, height: minHeight)

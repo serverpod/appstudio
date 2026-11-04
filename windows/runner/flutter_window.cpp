@@ -3,6 +3,7 @@
 #include <flutter/method_result_functions.h>
 #include <flutter/standard_method_codec.h>
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <string>
@@ -14,8 +15,28 @@
 
 namespace {
 
-constexpr int kMinWindowWidth = 670;
-constexpr int kMinWindowHeight = 720;
+// App Studio's smallest window, as a client area in logical pixels:
+// kMinAppWindowSize in widgetbook/host.dart. macOS keeps 720 high
+// (MainFlutterWindow.swift); 600 fits a 1920x1080 screen at 150% and a
+// 1366x768 one at 100%, taskbar included.
+constexpr int kMinClientWidth = 670;
+constexpr int kMinClientHeight = 600;
+
+// The window size, frame included, whose client area is |width| x |height|
+// logical pixels at |dpi|.
+SIZE WindowSizeFor(int width, int height, UINT dpi) {
+  RECT rect = {0, 0, ::MulDiv(width, dpi, 96), ::MulDiv(height, dpi, 96)};
+  ::AdjustWindowRectExForDpi(&rect, WS_OVERLAPPEDWINDOW, FALSE, 0, dpi);
+  return {rect.right - rect.left, rect.bottom - rect.top};
+}
+
+// The usable part of the monitor |window| is on: the screen less the taskbar.
+RECT WorkAreaFor(HWND window) {
+  MONITORINFO info = {sizeof(info)};
+  ::GetMonitorInfo(::MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST),
+                   &info);
+  return info.rcWork;
+}
 
 }  // namespace
 
@@ -172,12 +193,14 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
       flutter_controller_->engine()->ReloadSystemFonts();
       break;
     case WM_GETMINMAXINFO: {
-      // The same minimum as macOS (MainFlutterWindow.swift) and
-      // kMinAppWindowSize in widgetbook/host.dart, in logical pixels.
-      const double scale = ::GetDpiForWindow(hwnd) / 96.0;
+      // Never more than the screen can show: on a smaller one the window
+      // still fits, and the layout copes with what is left.
+      const SIZE min = WindowSizeFor(kMinClientWidth, kMinClientHeight,
+                                     ::GetDpiForWindow(hwnd));
+      const RECT work = WorkAreaFor(hwnd);
       auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
-      info->ptMinTrackSize.x = static_cast<LONG>(kMinWindowWidth * scale);
-      info->ptMinTrackSize.y = static_cast<LONG>(kMinWindowHeight * scale);
+      info->ptMinTrackSize.x = (std::min)(min.cx, work.right - work.left);
+      info->ptMinTrackSize.y = (std::min)(min.cy, work.bottom - work.top);
       return 0;
     }
   }

@@ -142,12 +142,29 @@ class _InstantRoute extends PageRoute<void> {
 }
 
 /// The window size full-window screens are drawn at: a common laptop window,
-/// comfortably above App Studio's 670×720 minimum (`MainFlutterWindow`).
+/// comfortably above App Studio's minimum ([kMinAppWindowSize]).
 const kAppWindowSize = Size(1280, 800);
 
-/// The smallest window App Studio allows — `test/widgetbook` builds the studio
-/// window at this size to catch overflows a real user could hit.
-const kMinAppWindowSize = Size(670, 720);
+/// The smallest window App Studio allows — `test/widgetbook` builds every
+/// full-window use case at this size to catch overflows a real user could
+/// hit. Windows' minimum (`flutter_window.cpp`) is this; macOS keeps 720
+/// high (`MainFlutterWindow.swift`), which this covers. 600 high fits a
+/// 1920×1080 screen at 150% and a 1366×768 one at 100%, taskbar included.
+const kMinAppWindowSize = Size(670, 600);
+
+/// Draws every [AppWindow] below it at [size] instead of its own — how the
+/// catalog test lays every screen out at [kMinAppWindowSize].
+class AppWindowSize extends InheritedWidget {
+  const AppWindowSize({super.key, required this.size, required super.child});
+
+  final Size size;
+
+  static Size? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<AppWindowSize>()?.size;
+
+  @override
+  bool updateShouldNotify(AppWindowSize oldWidget) => size != oldWidget.size;
+}
 
 /// A full-window screen, drawn at a real window size and scaled down to fit
 /// the canvas.
@@ -165,6 +182,7 @@ class AppWindow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final size = AppWindowSize.maybeOf(context) ?? this.size;
     // Expanded first: Widgetbook hands a use case loose constraints, and a
     // FittedBox under those shrinks to its child and sits at the top-left.
     return SizedBox.expand(

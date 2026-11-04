@@ -1,8 +1,10 @@
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
+#include <flutter_windows.h>
 #include <windows.h>
 #include <shlobj.h>
 
+#include <algorithm>
 #include <string>
 
 #include "flutter_window.h"
@@ -68,8 +70,24 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
   FlutterWindow window(project);
-  Win32Window::Point origin(10, 10);
-  Win32Window::Size size(1280, 800);
+  // 1280x800, or the primary screen's usable area (less the taskbar) where
+  // that is smaller, centred on it. Create takes logical pixels.
+  HMONITOR monitor = ::MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY);
+  MONITORINFO monitor_info = {sizeof(monitor_info)};
+  ::GetMonitorInfo(monitor, &monitor_info);
+  const RECT work = monitor_info.rcWork;
+  const double scale = FlutterDesktopGetDpiForMonitor(monitor) / 96.0;
+  const unsigned int work_width =
+      static_cast<unsigned int>((work.right - work.left) / scale);
+  const unsigned int work_height =
+      static_cast<unsigned int>((work.bottom - work.top) / scale);
+  Win32Window::Size size((std::min)(1280u, work_width),
+                         (std::min)(800u, work_height));
+  Win32Window::Point origin(
+      static_cast<unsigned int>(work.left / scale) +
+          (work_width - size.width) / 2,
+      static_cast<unsigned int>(work.top / scale) +
+          (work_height - size.height) / 2);
   if (!window.Create(L"App Studio", origin, size)) {
     return EXIT_FAILURE;
   }
