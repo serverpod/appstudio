@@ -48,7 +48,7 @@ void main() {
   testWidgets('shows the code', (tester) async {
     await pumpToast(tester);
 
-    expect(find.text('Registration code 48775957'), findsOneWidget);
+    expect(find.text('Verification code 48775957'), findsOneWidget);
   });
 
   testWidgets('copy puts the code on the clipboard', (tester) async {

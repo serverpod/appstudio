@@ -6,7 +6,7 @@ import 'package:shad/shad.dart';
 
 import '../theme/app_theme.dart';
 
-/// Alert shown over the preview when the server logs a sign-up code.
+/// Alert shown over the preview when the server logs a verification code.
 ///
 /// Stays put until a new code arrives or the user dismisses it — signing up
 /// means switching to the server log to read the code otherwise.
@@ -93,7 +93,7 @@ class _RegistrationCodeToastState extends State<RegistrationCodeToast> {
               Expanded(
                 child: Text.rich(
                   TextSpan(
-                    text: 'Registration code ',
+                    text: 'Verification code ',
                     children: [
                       TextSpan(
                         text: widget.code,
