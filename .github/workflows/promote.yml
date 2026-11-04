@@ -1,0 +1,224 @@
+# Release, second half: promote the uploaded build into the appcast, which
+# every installed copy polls. This is the step that reaches users, and a build
+# number cannot be taken back, so it only ever runs by hand:
+#
+#   1. Run it from Actions → Promote → Run workflow, on main, typing the
+#      version being promoted (pubspec.yaml's, e.g. 1.2.3) as confirmation —
+#      the CI counterpart of `make promote`'s "[y/N]".
+#   2. The plan job says what each platform would promote and links the
+#      builds; read it before approving.
+#   3. The promote jobs wait on the `production` environment's required
+#      reviewers. Approve, and they run tool/publish_appcast.sh (macOS) and
+#      tool/windows/promote_release.ps1 (Windows), with their signing keys
+#      from that environment's secrets.
+#
+# What is promoted is what the chosen commit names (pubspec.yaml's version and
+# build, windows/release.json's build), and it must already be uploaded by the
+# Release workflow. A platform whose build is already in its appcast is
+# skipped, so promoting both after only one changed is safe.
+#
+# One-time setup — secrets, environments, Google Cloud: see the release
+# specs/release_ci.md.
+name: Promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version being promoted (pubspec.yaml, e.g. 1.2.3)
+        required: true
+        type: string
+      platforms:
+        description: Platforms to promote
+        required: true
+        type: choice
+        default: both
+        options: [both, macos, windows]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  BUCKET: serverpod-appstudio-toolchain
+  PUBLIC_BASE_URL: https://asdl.serverpod.dev/
+  # See release.yml: no temporary parts, so no delete rights needed for them.
+  CLOUDSDK_STORAGE_PARALLEL_COMPOSITE_UPLOAD_ENABLED: 'False'
+
+jobs:
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      macos: ${{ steps.pick.outputs.macos }}
+      windows: ${{ steps.pick.outputs.windows }}
+    steps:
+      - name: From main only
+        run: |
+          if [[ "$GITHUB_REF" != refs/heads/main ]]; then
+            echo "::error::Promote from main, not $GITHUB_REF."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: What is uploaded and not yet live
+        id: plan
+        run: ./tool/release_plan.sh promote | tee -a "$GITHUB_OUTPUT"
+
+      - name: Confirm the version
+        env:
+          TYPED: ${{ inputs.version }}
+          VERSION: ${{ steps.plan.outputs.macos_version }}
+        run: |
+          if [[ "$TYPED" != "$VERSION" ]]; then
+            echo "::error::You typed '$TYPED', but main names $VERSION. Nothing was promoted."
+            exit 1
+          fi
+
+      # Decided before anyone is asked to approve: a platform that was asked
+      # for and cannot be promoted stops the whole run here, with the reason,
+      # and a platform not asked for is not run.
+      - name: Pick
+        id: pick
+        env:
+          WANT: ${{ inputs.platforms }}
+          M: ${{ steps.plan.outputs.macos }}
+          MR: ${{ steps.plan.outputs.macos_reason }}
+          W: ${{ steps.plan.outputs.windows }}
+          WR: ${{ steps.plan.outputs.windows_reason }}
+        run: |
+          [[ "$WANT" == both || "$WANT" == macos ]] || M=skip
+          [[ "$WANT" == both || "$WANT" == windows ]] || W=skip
+          failed=0
+          [[ "$M" == error ]] && { echo "::error title=macOS cannot be promoted::$MR"; failed=1; }
+          [[ "$W" == error ]] && { echo "::error title=Windows cannot be promoted::$WR"; failed=1; }
+          if [[ "$M" == skip && "$W" == skip && "$failed" == 0 ]]; then
+            echo "::notice title=Nothing to promote::macOS: $MR. Windows: $WR."
+          fi
+          echo "macos=$M" >>"$GITHUB_OUTPUT"
+          echo "windows=$W" >>"$GITHUB_OUTPUT"
+          exit "$failed"
+
+      - name: Summary
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' }}
+        env:
+          WANT: ${{ inputs.platforms }}
+          M: ${{ steps.plan.outputs.macos }}
+          MV: ${{ steps.plan.outputs.macos_version }}
+          MB: ${{ steps.plan.outputs.macos_build }}
+          MU: ${{ steps.plan.outputs.macos_url }}
+          MR: ${{ steps.plan.outputs.macos_reason }}
+          W: ${{ steps.plan.outputs.windows }}
+          WB: ${{ steps.plan.outputs.windows_build }}
+          WU: ${{ steps.plan.outputs.windows_url }}
+          WR: ${{ steps.plan.outputs.windows_reason }}
+        run: |
+          {
+            echo "### Promote $MV ($WANT) from \`${GITHUB_SHA:0:7}\`"
+            echo
+            echo "Approving the \`production\` deployment makes these the live auto-update for every install."
+            echo
+            echo "| Platform | Build | Action | Why | Uploaded build |"
+            echo "|---|---|---|---|---|"
+            echo "| macOS | $MB | $M | $MR | ${MU:+<$MU>} |"
+            echo "| Windows | $WB | $W | $WR | ${WU:+<$WU>} |"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  macos:
+    name: macos (appcast)
+    needs: plan
+    if: needs.plan.outputs.macos == 'promote'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_RELEASE_PROMOTE_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      # The key is written outside the checkout (publish_appcast.sh refuses
+      # one inside it), readable only by this user, and deleted at the end of
+      # the step whatever happens. Its public half is checked against the key
+      # the app ships before anything is signed.
+      - name: Promote into the appcast
+        env:
+          SPARKLE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
+        run: |
+          [[ -n "$SPARKLE_KEY" ]] || { echo "::error::secret SPARKLE_ED25519_PRIVATE_KEY is not set"; exit 1; }
+          export SPARKLE_ED_KEY_FILE="$RUNNER_TEMP/sparkle_ed25519.key"
+          (umask 077; printf '%s\n' "$SPARKLE_KEY" >"$SPARKLE_ED_KEY_FILE")
+          trap 'rm -f "$SPARKLE_ED_KEY_FILE"' EXIT
+          ./tool/publish_appcast.sh --bucket="$BUCKET"
+
+  windows:
+    name: windows (appcast)
+    needs: plan
+    if: needs.plan.outputs.windows == 'promote'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # promote_release.ps1 signs with winsparkle-tool from the WinSparkle
+      # package a build downloads. There is no build here, so fetch the same
+      # pinned, hash-checked package to where the script looks.
+      - name: WinSparkle's signing tool
+        shell: powershell
+        run: |
+          $cmake = Get-Content windows\runner\CMakeLists.txt -Raw
+          $version = [regex]::Match($cmake, 'set\(WINSPARKLE_VERSION "([^"]+)"\)').Groups[1].Value
+          $sha = [regex]::Match($cmake, 'set\(WINSPARKLE_SHA256\s+"([0-9a-f]+)"\)').Groups[1].Value
+          if (-not $version -or -not $sha) { throw 'WinSparkle version or digest not found in CMakeLists.txt' }
+          $dir = 'build\windows\x64\winsparkle'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $zip = "$dir\WinSparkle-$version.zip"
+          Invoke-WebRequest -UseBasicParsing -OutFile $zip `
+            "https://github.com/vslavik/winsparkle/releases/download/v$version/WinSparkle-$version.zip"
+          if ((Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant() -ne $sha) {
+            throw "WinSparkle-$version.zip does not match the digest CMakeLists.txt pins"
+          }
+          Expand-Archive -Path $zip -DestinationPath $dir -Force
+
+      - name: Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_RELEASE_PROMOTE_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      # Same handling as the macOS key: outside the checkout, gone at the end.
+      # The script checks it against eddsaPublicKey in windows/release.json
+      # first, and verifies the signature it made against that key.
+      - name: Promote into the appcast
+        shell: powershell
+        env:
+          WINSPARKLE_KEY: ${{ secrets.WINSPARKLE_ED25519_PRIVATE_KEY }}
+        run: |
+          if (-not $env:WINSPARKLE_KEY) { throw 'secret WINSPARKLE_ED25519_PRIVATE_KEY is not set' }
+          $key = Join-Path $env:RUNNER_TEMP 'winsparkle_ed25519.key'
+          try {
+            [IO.File]::WriteAllText($key, $env:WINSPARKLE_KEY.Trim() + "`n")
+            tool\windows\promote_release.ps1 -Bucket $env:BUCKET `
+              -PublicBaseUrl $env:PUBLIC_BASE_URL -PrivateKeyFile $key
+          } finally {
+            Remove-Item $key -Force -ErrorAction SilentlyContinue
+          }

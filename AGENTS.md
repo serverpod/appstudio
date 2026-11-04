@@ -883,6 +883,38 @@ app inside it can, and Sparkle installs that app directly. The bundle is
 `App Studio.app` (with a space); download filenames stay `AppStudio-…` so URLs
 are typeable.
 
+### Releasing from GitHub Actions
+
+Both halves also run in CI, with the same scripts and gates; setup and the
+full rationale are in `specs/release_ci.md`.
+
+- **`release.yml` uploads; it never promotes.** It runs after CI passes on a
+  push to `main`. `tool/release_plan.sh upload` decides per platform: skip
+  when this exact build's `.sha256` sidecar is already in the bucket (most
+  pushes), upload when the build number beats the appcast *and*
+  `downloads/<os>.json`, and fail when the number is taken. A version bump
+  committed to `main` is the release decision. Re-uploading could never work
+  anyway: notarized bytes differ on every build, and objects are immutable.
+- **macOS is signed in a throwaway keychain**, and notarized with an App Store
+  Connect API key (`NOTARY_KEY_PATH`/`NOTARY_KEY_ID`/`NOTARY_ISSUER` in
+  `distribute_macos.sh`; without them it uses the keychain profile, as on a
+  Mac). **Windows is the installer artifact from the CI run of the same
+  commit**, unsigned.
+- **Windows is skipped while `windows/release.json` lacks `appcastUrl` or
+  `eddsaPublicKey`.** A build without them never checks for updates.
+- **`promote.yml` is `workflow_dispatch` only.** You type the version as
+  confirmation, it runs from `main`, and the promote jobs wait for the
+  `production` environment's required reviewers. The keys come from that
+  environment's secrets as files in the runner's temp directory:
+  `SPARKLE_ED_KEY_FILE` for `publish_appcast.sh`, which checks the derived
+  public key (`tool/lib/eddsa_public_key.py`) against the shipped one, and
+  `-PrivateKeyFile` for `promote_release.ps1`, which checks against
+  `release.json` and verifies its own signature.
+- **Google Cloud is Workload Identity Federation**, with no JSON keys. There
+  are two service accounts, each bound to one environment. The uploader can
+  only *create* under `releases/`, so IAM now enforces the immutability too.
+  The promoter has no access to `releases/` at all.
+
 ### Build numbers are a global counter — this one is unfixable
 
 `+N` in `pubspec.yaml` becomes `CFBundleVersion`, which is **the only thing

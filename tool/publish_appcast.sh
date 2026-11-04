@@ -19,7 +19,13 @@
 # old flow re-downloaded and re-signed every published release on every run,
 # which was N×350 MB of work to say something about one build.
 #
+# CI has no login Keychain holding the key. There, SPARKLE_ED_KEY_FILE names a
+# file holding the private key (what `generate_keys -x` exports), outside the
+# repo, and both the key check and the signing read it instead
+# (.github/workflows/promote.yml).
+#
 # Usage:
+#   [SPARKLE_ED_KEY_FILE=<key file>] \
 #   tool/publish_appcast.sh [--dry-run] [--bucket=NAME]
 #                           [--impersonate-service-account=SA]
 set -euo pipefail
@@ -84,6 +90,22 @@ if [[ -n "$LEAKED" ]]; then
   exit 1
 fi
 
+# A key file is only acceptable OUTSIDE the repo, for the same reason: CI
+# writes it to the runner's temp directory and deletes it after.
+KEY_FILE="${SPARKLE_ED_KEY_FILE:-}"
+if [[ -n "$KEY_FILE" ]]; then
+  if [[ ! -s "$KEY_FILE" ]]; then
+    echo "error: SPARKLE_ED_KEY_FILE names no key: $KEY_FILE" >&2
+    exit 1
+  fi
+  KEY_FILE="$(cd "$(dirname "$KEY_FILE")" && pwd)/$(basename "$KEY_FILE")"
+  if [[ "$KEY_FILE" == "$ROOT_DIR"/* ]]; then
+    echo "error: SPARKLE_ED_KEY_FILE is inside the repo: $KEY_FILE" >&2
+    echo "Keep the private key outside the checkout." >&2
+    exit 1
+  fi
+fi
+
 SPARKLE_BIN="$("$ROOT_DIR/tool/ensure_sparkle_tools.sh")"
 
 # ---------------------------------------------------------------------------
@@ -95,14 +117,18 @@ SPARKLE_BIN="$("$ROOT_DIR/tool/ensure_sparkle_tools.sh")"
 # xcconfig — every update is rejected by every install, silently, and no
 # re-publish fixes it because the old builds are already out there.
 # ---------------------------------------------------------------------------
-KEYCHAIN_KEY="$("$SPARKLE_BIN/generate_keys" -p 2>/dev/null || true)"
+if [[ -n "$KEY_FILE" ]]; then
+  KEYCHAIN_KEY="$(python3 -I "$ROOT_DIR/tool/lib/eddsa_public_key.py" "$KEY_FILE")"
+else
+  KEYCHAIN_KEY="$("$SPARKLE_BIN/generate_keys" -p 2>/dev/null || true)"
+fi
 # Note the trailing "=" of base64: match to end of line, do not split on "=".
 SHIPPED_KEY="$(
   sed -n 's/^SPARKLE_PUBLIC_ED_KEY[[:space:]]*=[[:space:]]*//p' \
     "$ROOT_DIR/macos/Runner/Configs/Sparkle.xcconfig" | head -1
 )"
 if [[ -z "$KEYCHAIN_KEY" ]]; then
-  echo "error: no Sparkle signing key in the login Keychain." >&2
+  echo "error: no Sparkle signing key in the login Keychain (or SPARKLE_ED_KEY_FILE)." >&2
   echo "This machine cannot sign updates. See AGENTS.md for key recovery." >&2
   exit 1
 fi
@@ -112,7 +138,7 @@ if [[ -z "$SHIPPED_KEY" ]]; then
 fi
 if [[ "$KEYCHAIN_KEY" != "$SHIPPED_KEY" ]]; then
   echo "error: the signing key does not match the key shipped in the app." >&2
-  echo "  Keychain: $KEYCHAIN_KEY" >&2
+  echo "  Signing:  $KEYCHAIN_KEY" >&2
   echo "  Shipped:  $SHIPPED_KEY" >&2
   echo "Publishing would produce updates every installed copy rejects." >&2
   exit 1
@@ -196,7 +222,8 @@ echo "    sha256 verified against the published sidecar"
 # ---------------------------------------------------------------------------
 # Generate. The private key is read from the Keychain via SecItemCopyMatching,
 # so it never appears on a command line or in shell history. macOS may prompt
-# for access the first time.
+# for access the first time. With SPARKLE_ED_KEY_FILE it is read from that
+# file; only its path is on the command line.
 # ---------------------------------------------------------------------------
 echo
 echo "==> Generating and signing the new item"
@@ -213,6 +240,7 @@ echo "==> Generating and signing the new item"
   --maximum-deltas 0 \
   --download-url-prefix "$PUBLIC_BASE_URL" \
   --link "https://serverpod.dev" \
+  ${KEY_FILE:+--ed-key-file "$KEY_FILE"} \
   "$RELEASES"
 
 GENERATED="$RELEASES/appcast.xml"

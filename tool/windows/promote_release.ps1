@@ -41,6 +41,24 @@ $url = "$public$object"
 if (-not (Test-Path $PrivateKeyFile)) { throw "No private key at $PrivateKeyFile." }
 $tool = Find-WinSparkleTool
 
+# The key that signs must be the key that ships. Installed copies verify with
+# the eddsaPublicKey compiled in from windows/release.json; a signature from
+# any other key is rejected by every one of them, silently.
+$shipped = [string](Get-ReleaseConfig).eddsaPublicKey
+if (-not $shipped) {
+  throw 'windows/release.json has no eddsaPublicKey: no installed copy could verify this update.'
+}
+$derived = (& $tool public-key --private-key-file $PrivateKeyFile | Out-String)
+if ($LASTEXITCODE -ne 0) { throw 'winsparkle-tool public-key failed.' }
+if ($derived -notmatch 'Public key:\s*(\S+)') {
+  throw "winsparkle-tool printed no public key: $derived"
+}
+if ($Matches[1] -ne $shipped) {
+  throw ("The private key does not match eddsaPublicKey in windows/release.json.`n" +
+    "  Signing: $($Matches[1])`n  Shipped: $shipped")
+}
+Write-Step 'Signing key matches the one shipped in the app'
+
 Write-Step "Promoting App Studio $version (Windows build $build)"
 $existing = Get-PublishedText "$origin$AppcastPath"
 $items = @(Get-AppcastItems $existing)
@@ -77,6 +95,11 @@ try {
   }
   $signature = $Matches[1]
   $length = (Get-Item $download).Length
+  # Checked against the shipped key itself, as an installed copy will.
+  & $tool verify --public-key $shipped --signature $signature $download | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw 'The new signature does not verify against the shipped public key.'
+  }
 
   $pubDate = (Get-Date).ToUniversalTime().ToString('r')
   $item = @"

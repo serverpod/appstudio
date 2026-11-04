@@ -7,6 +7,10 @@
 #
 # Defaults target Serverpod AB Developer ID + notarytool profile "appstudio".
 # Override with env vars; set SIGN_IDENTITY="" to skip codesign.
+#
+# CI has no keychain profile: there, NOTARY_KEY_PATH (an App Store Connect API
+# key, AuthKey_*.p8), NOTARY_KEY_ID and NOTARY_ISSUER are passed to notarytool
+# directly instead (.github/workflows/release.yml).
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -15,6 +19,9 @@ cd "$ROOT_DIR"
 SIGN_IDENTITY="${SIGN_IDENTITY-Developer ID Application: Serverpod AB (WK2NRY4GS4)}"
 NOTARIZE="${NOTARIZE:-0}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-appstudio}"
+NOTARY_KEY_PATH="${NOTARY_KEY_PATH:-}"
+NOTARY_KEY_ID="${NOTARY_KEY_ID:-}"
+NOTARY_ISSUER="${NOTARY_ISSUER:-}"
 SKIP_BUNDLE_CHECK="${SKIP_BUNDLE_CHECK:-0}"
 # Set SKIP_BUILD=1 to re-sign / re-package an existing Release .app (faster notarize retries).
 SKIP_BUILD="${SKIP_BUILD:-0}"
@@ -304,15 +311,24 @@ if [[ "$NOTARIZE" == "1" ]]; then
     echo "NOTARIZE=1 requires SIGN_IDENTITY" >&2
     exit 1
   fi
-  if [[ -z "$NOTARY_PROFILE" ]]; then
+  if [[ -n "$NOTARY_KEY_PATH" ]]; then
+    if [[ ! -f "$NOTARY_KEY_PATH" || -z "$NOTARY_KEY_ID" || -z "$NOTARY_ISSUER" ]]; then
+      echo "NOTARY_KEY_PATH needs an existing .p8 file, NOTARY_KEY_ID and NOTARY_ISSUER" >&2
+      exit 1
+    fi
+    NOTARY_AUTH=(--key "$NOTARY_KEY_PATH" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER")
+  elif [[ -n "$NOTARY_PROFILE" ]]; then
+    NOTARY_AUTH=(--keychain-profile "$NOTARY_PROFILE")
+  else
     echo "NOTARIZE=1 requires NOTARY_PROFILE (notarytool keychain profile)" >&2
+    echo "or NOTARY_KEY_PATH + NOTARY_KEY_ID + NOTARY_ISSUER" >&2
     exit 1
   fi
   echo "==> Submitting for notarization"
   # --wait can exit 0 even when status is Invalid; parse JSON.
   SUBMIT_JSON="$(mktemp)"
   xcrun notarytool submit "$ZIP_PATH" \
-    --keychain-profile "$NOTARY_PROFILE" \
+    "${NOTARY_AUTH[@]}" \
     --wait \
     --output-format json | tee "$SUBMIT_JSON"
   STATUS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status",""))' "$SUBMIT_JSON")"
@@ -322,7 +338,7 @@ if [[ "$NOTARIZE" == "1" ]]; then
     echo "error: notarization status=$STATUS (expected Accepted)" >&2
     if [[ -n "$SUB_ID" ]]; then
       echo "==> Notary log for $SUB_ID" >&2
-      xcrun notarytool log "$SUB_ID" --keychain-profile "$NOTARY_PROFILE" >&2 || true
+      xcrun notarytool log "$SUB_ID" "${NOTARY_AUTH[@]}" >&2 || true
     fi
     exit 1
   fi

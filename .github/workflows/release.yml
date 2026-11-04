@@ -1,0 +1,346 @@
+# Release, first half: build, sign and upload — never promote.
+#
+# Runs after CI passes on a push to main. When the commit names a build that
+# is not in the bucket yet (`make set_version` was run and committed, or
+# windows/release.json's build was bumped), it uploads that build exactly as
+# `make publish` and tool/windows/publish_release.ps1 do: an immutable object
+# under releases/, and the "preview" entry of downloads/<os>.json. The appcast
+# is never touched, so no installed copy is offered the build. Test it from
+# the URL in the run summary on a clean machine, then run the Promote
+# workflow (promote.yml), which is the half that reaches users.
+#
+# A commit that names a build already uploaded is skipped in seconds, which is
+# what every push that did not bump a version does. tool/release_plan.sh
+# decides, and stops the run when a build number is already taken.
+#
+# macOS is built, signed and notarized here, as `make build` does locally. The
+# Windows installer is the one the CI run for the same commit already built
+# (ci.yml, `windows installer`), unsigned for now.
+#
+# One-time setup — secrets, environments, Google Cloud: see the release
+# specs/release_ci.md.
+name: Release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  # Re-run for the head of main, e.g. after fixing a secret. Uses that commit's
+  # CI run, which must have passed.
+  workflow_dispatch:
+    inputs:
+      test_macos_build:
+        description: >-
+          Only build, sign and notarize macOS, and keep the zip as a run
+          artifact. Uploads nothing; for checking the signing setup.
+        type: boolean
+        default: false
+
+# One release at a time, and never cancelled halfway through an upload.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  BUCKET: serverpod-appstudio-toolchain
+  PUBLIC_BASE_URL: https://asdl.serverpod.dev/
+  # A large file would otherwise go up as temporary parts that gcloud composes
+  # and then deletes, which needs delete rights the release service accounts
+  # deliberately lack on releases/ (specs/release_ci.md).
+  CLOUDSDK_STORAGE_PARALLEL_COMPOSITE_UPLOAD_ENABLED: 'False'
+
+jobs:
+  plan:
+    name: plan
+    # workflow_run fires for every CI run, a fork's pull request included, and
+    # `branches: [main]` matches a fork branch that is merely NAMED main. Only
+    # a passing CI run of a push to this repository's main gets past here.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.ci.outputs.sha }}
+      ci_run: ${{ steps.ci.outputs.run }}
+      macos: ${{ steps.plan.outputs.macos }}
+      macos_version: ${{ steps.plan.outputs.macos_version }}
+      macos_build: ${{ steps.plan.outputs.macos_build }}
+      macos_url: ${{ steps.plan.outputs.macos_url }}
+      macos_reason: ${{ steps.plan.outputs.macos_reason }}
+      windows: ${{ steps.plan.outputs.windows }}
+      windows_version: ${{ steps.plan.outputs.windows_version }}
+      windows_build: ${{ steps.plan.outputs.windows_build }}
+      windows_url: ${{ steps.plan.outputs.windows_url }}
+      windows_reason: ${{ steps.plan.outputs.windows_reason }}
+    steps:
+      - name: The commit and its CI run
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          if [[ "$EVENT" == workflow_run ]]; then
+            echo "sha=$RUN_SHA" >>"$GITHUB_OUTPUT"
+            echo "run=$RUN_ID" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$GITHUB_REF" != refs/heads/main ]]; then
+            echo "::error::Releases are made from main, not $GITHUB_REF."
+            exit 1
+          fi
+          run="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
+            --commit "$GITHUB_SHA" --status success --limit 1 \
+            --json databaseId --jq '.[0].databaseId // empty')"
+          if [[ -z "$run" ]]; then
+            echo "::error::CI has not passed on $GITHUB_SHA. Release a commit whose CI is green."
+            exit 1
+          fi
+          echo "sha=$GITHUB_SHA" >>"$GITHUB_OUTPUT"
+          echo "run=$run" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ci.outputs.sha }}
+
+      - name: What is new
+        id: plan
+        env:
+          TEST_MACOS: ${{ inputs.test_macos_build || false }}
+        run: |
+          ./tool/release_plan.sh upload | tee -a "$GITHUB_OUTPUT"
+          if [[ "$TEST_MACOS" == true ]]; then
+            {
+              echo "macos=test"
+              echo "macos_reason=test build: signed and notarized, not uploaded"
+              echo "windows=skip"
+              echo "windows_reason=test build of macOS only"
+            } | tee -a "$GITHUB_OUTPUT"
+          fi
+
+      - name: Summary
+        env:
+          M: ${{ steps.plan.outputs.macos }}
+          MR: ${{ steps.plan.outputs.macos_reason }}
+          W: ${{ steps.plan.outputs.windows }}
+          WR: ${{ steps.plan.outputs.windows_reason }}
+          SHA: ${{ steps.ci.outputs.sha }}
+        run: |
+          {
+            echo "### Release plan for \`${SHA:0:7}\`"
+            echo
+            echo "| Platform | Action | Why |"
+            echo "|---|---|---|"
+            echo "| macOS | $M | $MR |"
+            echo "| Windows | $W | $WR |"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  macos:
+    name: macos (build, sign, notarize, upload)
+    needs: plan
+    if: needs.plan.outputs.macos != 'skip'
+    runs-on: macos-latest
+    timeout-minutes: 120
+    environment: release-upload
+    permissions:
+      contents: read
+      id-token: write   # Workload Identity Federation into Google Cloud
+    steps:
+      - name: Stop on a build number that is taken
+        if: needs.plan.outputs.macos == 'error'
+        env:
+          REASON: ${{ needs.plan.outputs.macos_reason }}
+        run: |
+          echo "::error title=macOS not uploaded::$REASON. Run 'make set_version V=…' and commit pubspec.yaml."
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+
+      # tool/release_plan.sh named the arm64 object, and the archive is named
+      # after `uname -m`; a runner image on another arch would upload a
+      # different file than the one planned.
+      - name: Apple silicon runner
+        run: |
+          [[ "$(uname -m)" == arm64 ]] || { echo "::error::runner is $(uname -m), not arm64"; exit 1; }
+          sw_vers; xcodebuild -version
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: true
+
+      # CEF is fetched and its wrapper built from source on every release, not
+      # restored from a cache: these are the bytes we sign.
+      - name: Dependencies and CEF
+        env:
+          CEF_WRAPPER_BUILD_TYPE: Release
+        run: |
+          brew list ninja >/dev/null 2>&1 || brew install ninja
+          flutter pub get
+          bash packages/webview_cef/macos/scripts/download_cef.sh
+          (cd macos && pod install)
+
+      # A throwaway keychain holding only the Developer ID identity, searched
+      # first, deleted at the end of the job whatever happens.
+      - name: Signing keychain
+        env:
+          P12_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_P12 }}
+          P12_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          [[ -n "$P12_BASE64" ]] || { echo "::error::secret MACOS_DEVELOPER_ID_P12 is not set"; exit 1; }
+          KEYCHAIN="$RUNNER_TEMP/release.keychain-db"
+          PASS="$(openssl rand -base64 32)"
+          echo "::add-mask::$PASS"
+          echo "$P12_BASE64" | base64 --decode >"$RUNNER_TEMP/developer_id.p12"
+          # Developer ID certificates chain through Apple's G2 intermediate,
+          # which a fresh runner may not carry.
+          curl -fsSL -o "$RUNNER_TEMP/DeveloperIDG2CA.cer" \
+            https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+          security create-keychain -p "$PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$PASS" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/developer_id.p12" -k "$KEYCHAIN" \
+            -P "$P12_PASSWORD" -f pkcs12 -T /usr/bin/codesign
+          security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$KEYCHAIN" || true
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
+            -k "$PASS" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" \
+            $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/developer_id.p12"
+          security find-identity -v -p codesigning "$KEYCHAIN" \
+            | grep -q 'Developer ID Application: Serverpod AB (WK2NRY4GS4)' \
+            || { echo "::error::the .p12 holds no 'Developer ID Application: Serverpod AB (WK2NRY4GS4)' identity"; exit 1; }
+
+      - name: Build, sign and notarize
+        env:
+          NOTARIZE: '1'
+          NOTARY_KEY_P8: ${{ secrets.APPLE_NOTARY_API_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_API_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_API_ISSUER_ID }}
+        run: |
+          export NOTARY_KEY_PATH="$RUNNER_TEMP/AuthKey_$NOTARY_KEY_ID.p8"
+          (umask 077; printf '%s\n' "$NOTARY_KEY_P8" >"$NOTARY_KEY_PATH")
+          trap 'rm -f "$NOTARY_KEY_PATH"' EXIT
+          ./tool/distribute_macos.sh
+
+      - name: Keep the test build
+        if: needs.plan.outputs.macos == 'test'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-test-build
+          path: dist/macos/*.zip
+          retention-days: 7
+
+      - name: Google Cloud
+        if: needs.plan.outputs.macos == 'upload'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_RELEASE_UPLOAD_SERVICE_ACCOUNT }}
+
+      - if: needs.plan.outputs.macos == 'upload'
+        uses: google-github-actions/setup-gcloud@v2
+
+      # Every gate runs again here: build number against the live appcast,
+      # archive contents against pubspec, no stale embed, a stapled ticket.
+      - name: Upload (preview only, the appcast is untouched)
+        if: needs.plan.outputs.macos == 'upload'
+        run: ./tool/publish_dist.sh --bucket="$BUCKET"
+
+      - name: Summary
+        if: needs.plan.outputs.macos == 'upload'
+        env:
+          V: ${{ needs.plan.outputs.macos_version }}
+          B: ${{ needs.plan.outputs.macos_build }}
+          URL: ${{ needs.plan.outputs.macos_url }}
+        run: |
+          {
+            echo "### macOS $V (build $B) uploaded"
+            echo
+            echo "Not in the appcast: no installed copy is offered it yet."
+            echo "Test it on a clean Mac: <$URL>"
+            echo
+            echo "Then run the **Promote** workflow to make it the live update."
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the signing keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/release.keychain-db" 2>/dev/null || true
+
+  windows:
+    name: windows (upload the CI installer)
+    needs: plan
+    if: needs.plan.outputs.windows != 'skip'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    environment: release-upload
+    permissions:
+      contents: read
+      actions: read    # the installer artifact of the CI run
+      id-token: write  # Workload Identity Federation into Google Cloud
+    steps:
+      - name: Stop on a build number that is taken
+        if: needs.plan.outputs.windows == 'error'
+        shell: bash
+        env:
+          REASON: ${{ needs.plan.outputs.windows_reason }}
+        run: |
+          echo "::error title=Windows not uploaded::$REASON. Increase \"build\" in windows/release.json and commit it."
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+
+      # Built by ci.yml's `windows installer` job for this same commit, with
+      # tool/windows/build_release.ps1 and this commit's windows/release.json.
+      - name: The installer CI built
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/windows
+          run-id: ${{ needs.plan.outputs.ci_run }}
+          github-token: ${{ github.token }}
+
+      - name: Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_RELEASE_UPLOAD_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Upload (preview only, the appcast is untouched)
+        shell: powershell
+        run: tool\windows\publish_release.ps1 -Bucket $env:BUCKET -PublicBaseUrl $env:PUBLIC_BASE_URL
+
+      - name: Summary
+        shell: bash
+        env:
+          V: ${{ needs.plan.outputs.windows_version }}
+          B: ${{ needs.plan.outputs.windows_build }}
+          URL: ${{ needs.plan.outputs.windows_url }}
+        run: |
+          {
+            echo "### Windows $V (build $B) uploaded"
+            echo
+            echo "Not in the appcast: no installed copy is offered it yet. Unsigned."
+            echo "Test it on a clean PC: <$URL>"
+            echo
+            echo "Then run the **Promote** workflow to make it the live update."
+          } >>"$GITHUB_STEP_SUMMARY"

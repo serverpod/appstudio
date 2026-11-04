@@ -39,6 +39,15 @@ if ($sha -ne (Read-Sidecar (Get-Content $sidecar -Raw))) {
   throw "$name does not match its .sha256 sidecar. Rebuild it."
 }
 
+# WinSparkle compares build numbers, so one the appcast has already passed
+# would never be offered, and an upload cannot be taken back.
+$origin = Get-OriginBaseUrl $Bucket
+$promoted = @(Get-AppcastItems (Get-PublishedText "$origin$AppcastPath"))
+if ($promoted.Count -gt 0 -and $promoted[0].Build -ge $build) {
+  throw ("Windows build $build is not newer than build $($promoted[0].Build) " +
+    'in the appcast. Bump it: build_release.ps1 -BumpBuild.')
+}
+
 Write-Step "Uploading App Studio $version (Windows build $build)"
 Write-Host "    gs://$Bucket/$object"
 if ($DryRun) {
