@@ -218,10 +218,16 @@ jobs:
           cache: true
 
       # CEF is fetched and its wrapper built from source on every release, not
-      # restored from a cache: these are the bytes we sign.
+      # restored from a cache: these are the bytes we sign. It takes ~2 min.
+      #
+      # The wrapper is built the default way, Debug, which is what every
+      # release made on a Mac has shipped: `make deps` prepares CEF before
+      # distribute_macos.sh exports CEF_WRAPPER_BUILD_TYPE=Release, and nothing
+      # prepares it again. A Release wrapper does not even link: CEF's headers
+      # declare ~RefCountedThreadSafeBase out of line unless NDEBUG is set,
+      # the helper and the plugin are compiled without NDEBUG, and only the
+      # Debug wrapper defines it.
       - name: Dependencies and CEF
-        env:
-          CEF_WRAPPER_BUILD_TYPE: Release
         run: |
           brew list ninja >/dev/null 2>&1 || brew install ninja
           flutter pub get
