@@ -122,7 +122,10 @@ void main() {
       File(p.join(project.path, 'CLAUDE.md')).writeAsStringSync('old claude');
       File(p.join(project.path, 'AGENTS.md')).writeAsStringSync('generic');
 
-      await (await creator()).applyAgentInstructions(project.path);
+      await (await creator()).applyAgentInstructions(
+        project.path,
+        name: 'my_app',
+      );
 
       expect(File(p.join(project.path, 'CLAUDE.md')).existsSync(), isFalse);
       expect(
@@ -132,7 +135,10 @@ void main() {
     });
 
     test('writes AGENTS.md even when neither file exists yet', () async {
-      await (await creator()).applyAgentInstructions(project.path);
+      await (await creator()).applyAgentInstructions(
+        project.path,
+        name: 'my_app',
+      );
 
       expect(File(p.join(project.path, 'CLAUDE.md')).existsSync(), isFalse);
       expect(
@@ -148,7 +154,36 @@ void main() {
       );
       File(p.join(project.path, 'CLAUDE.md')).writeAsStringSync('old claude');
 
-      await creator.applyAgentInstructions(project.path);
+      await creator.applyAgentInstructions(project.path, name: 'my_app');
+    });
+
+    test('names the packages after the project', () async {
+      final creator = ProjectCreator(
+        toolchains: await emptyToolchainController(),
+        loadAsset: (_) async =>
+            'Run it in `projectname_server`; never edit `projectname_client`.',
+      );
+
+      await creator.applyAgentInstructions(project.path, name: 'my_app');
+
+      expect(
+        File(p.join(project.path, 'AGENTS.md')).readAsStringSync(),
+        'Run it in `my_app_server`; never edit `my_app_client`.',
+      );
+    });
+
+    // The template once shipped with the packages of the project it was
+    // written in, so every new project was told about `v403_client`.
+    test('the bundled template names packages only by the placeholder', () {
+      final template = File(kAgentsTemplateAsset).readAsStringSync();
+      final packages = RegExp(r'`(\w+)_(server|client|flutter)\b')
+          .allMatches(template)
+          .map((m) => m[1])
+          // Serverpod's own packages: `serverpod_client`, `serverpod_flutter`.
+          .where((name) => name != 'serverpod')
+          .toSet();
+
+      expect(packages, {kAgentsTemplateProjectName});
     });
   });
 

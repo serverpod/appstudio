@@ -23,7 +23,14 @@ final _ansiEscape = RegExp(r'\x1B\[[0-9;]*[A-Za-z]');
 
 /// Agent instructions tuned for App Studio, written into every new project as
 /// its `AGENTS.md`.
+///
+/// It names the project's packages as `projectname_server` and so on — the
+/// placeholder Serverpod's own templates use — and [kAgentsTemplateProjectName]
+/// is replaced with the project's name when it is written.
 const kAgentsTemplateAsset = 'assets/AGENTS_template.md';
+
+/// The placeholder for the project's name in [kAgentsTemplateAsset].
+const kAgentsTemplateProjectName = 'projectname';
 
 /// Serverpod project names map to Dart package names (`<name>_server`), so the
 /// CLI only accepts lowercase letters, digits and underscores.
@@ -155,12 +162,13 @@ class ProjectCreator {
     onStatus?.call('Configuring preview…');
     await _configureFlutterAppForPreview(projectPath: projectPath, name: name);
     await recordProjectSettings(projectPath: projectPath, ides: ides);
-    await applyAgentInstructions(projectPath);
+    await applyAgentInstructions(projectPath, name: name);
     return projectPath;
   }
 
   /// Drops the project's root `CLAUDE.md` and writes an App Studio–tuned
-  /// `AGENTS.md` over whatever the CLI left there.
+  /// `AGENTS.md` over whatever the CLI left there, with the packages named
+  /// after [name].
   ///
   /// `serverpod create` writes a generic `AGENTS.md` (and, for the Claude IDE,
   /// a `CLAUDE.md` that points at it). App Studio's own instructions tell the
@@ -171,13 +179,18 @@ class ProjectCreator {
   /// CLI's own instructions, and losing a finished project to an unwritable
   /// dotfile — or a missing asset — would be a far worse trade.
   @visibleForTesting
-  Future<void> applyAgentInstructions(String projectPath) async {
+  Future<void> applyAgentInstructions(
+    String projectPath, {
+    required String name,
+  }) async {
     try {
       final claude = File(p.join(projectPath, 'CLAUDE.md'));
       if (await claude.exists()) await claude.delete();
 
       final template = await loadAsset(kAgentsTemplateAsset);
-      await File(p.join(projectPath, 'AGENTS.md')).writeAsString(template);
+      await File(
+        p.join(projectPath, 'AGENTS.md'),
+      ).writeAsString(template.replaceAll(kAgentsTemplateProjectName, name));
     } catch (_) {
       // Ignored — see above.
     }

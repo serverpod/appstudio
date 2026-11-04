@@ -34,6 +34,10 @@ void main() {
   var launches = 0;
   var launchedSnapshot = <String, Object?>{};
 
+  /// Makes the next launches fail the way a project that does not build does:
+  /// `serverpod runner start` exits non-zero and no runner answers.
+  var launchFails = false;
+
   /// Stands a fake runner up the way `serverpod runner start` would, and
   /// reports the CLI as having exited cleanly once it answers.
   Future<RunnerLaunch> launcher({
@@ -41,6 +45,13 @@ void main() {
     required String serverDir,
   }) async {
     launches++;
+    if (launchFails) {
+      return RunnerLaunch(
+        output: Stream.fromIterable(['The project failed to build.']),
+        exitCode: Future.value(1),
+        kill: () {},
+      );
+    }
     final runner = await FakeRunner.start(
       serverDir,
       pid: FakeRunner.fakePid(launches),
@@ -72,12 +83,14 @@ void main() {
     ownedRunnerRecordPathOverride = p.join(scratch.path, 'runner.json');
     launches = 0;
     launchedSnapshot = {};
+    launchFails = false;
     session = ProjectSession();
     process = ServerpodProcessController(
       toolchains: await emptyToolchainController(),
       session: session,
       launcher: launcher,
       dependencies: (_, _, _) async {},
+      runnerWatchInterval: const Duration(milliseconds: 20),
     );
   });
 
@@ -152,15 +165,16 @@ void main() {
       expect(runner.calls, contains('snapshot'));
     });
 
-    test('is only detached from when the project closes', () async {
+    // The project is what the user is done with, whoever started its server.
+    test('is stopped when the project closes', () async {
       final runner = await projectWithRunner();
       await open(runner);
 
       session.closeProject();
       await until(() => process.state == ProcessState.idle);
 
-      expect(runner.calls, isNot(contains('stop')));
-      expect(runner.isClosed, isFalse);
+      expect(runner.calls, contains('stop'));
+      await until(() => runner.isClosed, reason: 'the runner to stop');
     });
 
     test('stopping it elsewhere leaves App Studio idle, not failed', () async {
@@ -183,6 +197,84 @@ void main() {
 
       expect(process.phase, PreviewPhase.failed);
       expect(process.error, contains('stopped unexpectedly'));
+    });
+  });
+
+  // An agent following the project's AGENTS.md runs `serverpod runner start`
+  // when it finds nothing running — with the project open in App Studio.
+  group('a runner started while the project is open', () {
+    Future<FakeRunner> startAnother(String serverDir, int n) async {
+      final runner = await FakeRunner.start(
+        serverDir,
+        pid: FakeRunner.fakePid(100 + n),
+      );
+      runners.add(runner);
+      return runner;
+    }
+
+    test('is attached to after the last one was stopped', () async {
+      final first = await projectWithRunner();
+      await open(first);
+      await first.stopRunner();
+      await until(() => process.state == ProcessState.idle);
+
+      final second = await startAnother(first.serverDir, 1);
+      await until(
+        () => process.state == ProcessState.running,
+        reason: 'attach to the new runner',
+      );
+
+      expect(second.calls, contains('snapshot'));
+      expect(launches, 0);
+      expect(process.ownsRunner, isFalse);
+    });
+
+    test('is attached to after a crash, and clears the failure', () async {
+      final first = await projectWithRunner();
+      await open(first);
+      await first.crash();
+      await until(() => process.phase == PreviewPhase.failed);
+
+      final second = await startAnother(first.serverDir, 2);
+      await until(
+        () => process.state == ProcessState.running,
+        reason: 'attach to the new runner',
+      );
+
+      expect(second.calls, contains('snapshot'));
+      expect(process.error, isNull);
+    });
+
+    test('is attached to after App Studio could not start one', () async {
+      launchFails = true;
+      // The runner started below is in `runners`, so tearDown removes this.
+      final root = await FakeRunner.createProject();
+      await session.openPath(root.path);
+      await until(() => process.phase == PreviewPhase.failed);
+
+      final runner = await startAnother(FakeRunner.serverDirOf(root), 3);
+      await until(
+        () => process.state == ProcessState.running,
+        reason: 'attach to the runner the agent started',
+      );
+
+      expect(runner.calls, contains('snapshot'));
+      expect(launches, 1);
+      expect(process.ownsRunner, isFalse);
+    });
+
+    // A stop is a quit, an update or a project switch: App Studio is done with
+    // the project, and must not pick up whatever comes up for it next.
+    test('is not attached to after App Studio stops', () async {
+      final runner = await projectWithRunner();
+      await open(runner);
+
+      await process.stop();
+      final next = await startAnother(runner.serverDir, 4);
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      expect(process.state, ProcessState.idle);
+      expect(next.calls, isEmpty);
     });
   });
 

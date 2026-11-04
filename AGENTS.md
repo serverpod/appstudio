@@ -150,10 +150,13 @@ migrations are commands on the same connection.
   spawned, so App Studio attaches as soon as it does and lets the CLI finish on
   its own. Its output goes to the log until then. Its exit only means failure if
   it comes before an attach.
-- **App Studio stops the runners it started and only detaches from the rest.**
-  Closing a project, switching, quitting and Sparkle's relaunch all go through
-  `stop()`; for a runner App Studio found, that is a detach and a log line saying
-  so. A runner may be the user's terminal session or their agent's.
+- **Closing a project stops its runner, whoever started it.** Closing,
+  switching, quitting and Sparkle's relaunch all go through `stop()`, and in
+  each the user is done with the project's server — so a runner a terminal
+  `serverpod start` or an agent brought up goes down too. It used to be only
+  detached from; that was changed on purpose. Ownership still decides two
+  things: the log line on attach, and what the on-disk record below reclaims
+  after a crash (only runners App Studio started).
 - **Ownership is written to disk** (`appstudio-runner.json` in the temp dir:
   server dir + pid). The runner is detached by the CLI, so nothing takes it down
   with us; `main()` → `cleanupOrphanedDevSession` → `reclaimOwnedRunner` stops one
@@ -174,6 +177,27 @@ migrations are commands on the same connection.
   state while it re-resolves: a live runner is reattached (fresh snapshot); a
   manifest with exit code 0 means someone stopped it (idle, with a log line); no
   exit code or a non-zero one is a failure.
+- **A runner someone starts while the project is open is attached to.** The
+  project's `AGENTS.md` (`assets/AGENTS_template.md`) tells the agent to run
+  `serverpod runner start` when nothing is running, and App Studio may well be
+  open on the project at the time, showing a stopped server it would never
+  look past. After a runner goes away or a start fails, `_watchForRunner`
+  resolves the server package every `runnerWatchInterval` (1 s) and attaches to
+  the first live runner, as an open would. It ignores the pid that just went,
+  so a leftover manifest is not a new runner. **`stop()` ends the watch and
+  does not restart it** — a stop is a close, quit, update, switch or half a
+  restart, and App Studio must not pick the project up again on its own.
+- **New projects get App Studio's `AGENTS.md`**, not the CLI's
+  (`applyAgentInstructions`), with `projectname` replaced by the project's name
+  — the placeholder Serverpod's own templates use. It keeps the agent inside
+  App Studio (no `flutter run`, no other devices or browsers unless asked) and
+  has it upgrade the project when `serverpod version` is newer, never
+  downgrading without asking. **It carries only what is App Studio's**: the
+  runner, the MCP tools, migrations, tests and upgrading are left to the
+  `serverpod-*` skills `serverpod create` installs for the picked editor —
+  which is always one, since the New Project form requires it. Repeating them
+  costs context in every session. `test/project_creator_test.dart` fails if
+  the template names a package by anything but the placeholder.
 - **Only phase-level changes notify the controller's listeners** — stage, preview
   URL, app launching/running, registration code. Every listener of the process
   rebuilds the shell, and a busy server logs many times a second; the log pane

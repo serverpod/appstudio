@@ -42,17 +42,19 @@ class RunnerLaunch {
 
 /// Brings a runner up for [serverDir] with [toolchain]'s Serverpod CLI.
 /// Injectable so tests can stand a fake runner up in-process instead.
-typedef RunnerLauncher = Future<RunnerLaunch> Function({
-  required Toolchain toolchain,
-  required String serverDir,
-});
+typedef RunnerLauncher =
+    Future<RunnerLaunch> Function({
+      required Toolchain toolchain,
+      required String serverDir,
+    });
 
 /// Resolves the project's packages before a runner is started for it.
-typedef DependencyResolver = Future<void> Function(
-  String projectPath,
-  RunnerLog log,
-  bool Function() isCancelled,
-);
+typedef DependencyResolver =
+    Future<void> Function(
+      String projectPath,
+      RunnerLog log,
+      bool Function() isCancelled,
+    );
 
 /// `(pid 12345)`, as `serverpod runner start` names the runner it spawned.
 final _runnerPid = RegExp(r'\(pid (\d+)\)');
@@ -70,10 +72,16 @@ final _runnerPid = RegExp(r'\(pid (\d+)\)');
 ///
 /// **A runner may not be ours.** One runner serves each server package, and a
 /// terminal `serverpod start` or an AI agent may have brought it up first.
-/// Opening such a project attaches to it, and closing it only detaches; a
-/// runner App Studio started is stopped when the project closes or the app
-/// quits. Ownership is recorded on disk ([recordOwnedRunner]) so a crash or a
-/// hot restart of App Studio cannot strand one.
+/// Opening such a project attaches to it. Closing the project stops the
+/// runner whoever started it — the project is what the user is done with.
+/// Ownership is recorded on disk ([recordOwnedRunner]) so a crash or a hot
+/// restart of App Studio cannot strand a runner App Studio started.
+///
+/// **A runner can also come up while the project is open.** After its runner
+/// stops or crashes, or App Studio's own start fails, an AI agent may bring
+/// one up with `serverpod runner start` — the project's `AGENTS.md` tells it
+/// to. [runnerWatchInterval] is how often App Studio looks for one then, and
+/// it attaches as it would on opening the project.
 class ServerpodProcessController extends ChangeNotifier
     implements FullRestartView, ProjectReadyView, RunnerActionsView {
   ServerpodProcessController({
@@ -82,6 +90,7 @@ class ServerpodProcessController extends ChangeNotifier
     RunnerLog? log,
     RunnerLauncher? launcher,
     DependencyResolver? dependencies,
+    this.runnerWatchInterval = const Duration(seconds: 1),
   })  : log = log ?? RunnerLog(),
         _launcher = launcher ?? launchRunnerProcess,
         _resolveDependencies = dependencies {
@@ -97,6 +106,17 @@ class ServerpodProcessController extends ChangeNotifier
 
   final RunnerLauncher _launcher;
   final DependencyResolver? _resolveDependencies;
+
+  /// How often to look for a runner someone else started, while the project
+  /// is open and has none attached ([_watchForRunner]).
+  final Duration runnerWatchInterval;
+
+  Timer? _watchTimer;
+  bool _watchProbing = false;
+
+  /// The runner that just went away or could not be attached to, which the
+  /// watch must not take for a new one.
+  int? _watchIgnoresPid;
 
   String? _boundProjectPath;
 
@@ -346,6 +366,7 @@ class ServerpodProcessController extends ChangeNotifier
     final path = session.projectPath;
     if (path == null) {
       _boundProjectPath = null;
+      _stopWatching();
       unawaited(stop());
       return;
     }
@@ -371,6 +392,7 @@ class ServerpodProcessController extends ChangeNotifier
     final epoch = ++_epoch;
     bool cancelled() => epoch != _epoch || session.projectPath != projectPath;
 
+    _stopWatching();
     _starting = true;
     _error = null;
     _registrationCode = null;
@@ -380,6 +402,9 @@ class ServerpodProcessController extends ChangeNotifier
     _previewUrl = null;
     _owned = false;
     _pid = null;
+    // Cleared until found: the watch for a runner keys on it, and must not go
+    // on watching the previous project's server after a failed switch.
+    _serverDir = null;
     log.clear();
     notifyListeners();
 
@@ -407,7 +432,7 @@ class ServerpodProcessController extends ChangeNotifier
                     '(pid ${manifest.pid}).'
                 : 'Attaching to the Serverpod runner already running for this '
                     'project (pid ${manifest.pid}). It was started outside App '
-                    'Studio, so closing the project leaves it running.',
+                    'Studio; closing the project stops it.',
           );
           await _attach(socketPath, epoch);
         case NoRunner():
@@ -428,7 +453,11 @@ class ServerpodProcessController extends ChangeNotifier
       }
     } catch (e) {
       if (cancelled()) return;
+      final pid = _pid;
       _fail('$e');
+      // Whatever went wrong, someone can still bring a runner up — an agent
+      // fixing the build error this start stopped on, say.
+      _watchForRunner(ignoring: pid);
     } finally {
       if (epoch == _epoch) {
         _starting = false;
@@ -513,8 +542,10 @@ class ServerpodProcessController extends ChangeNotifier
     while (true) {
       if (cancelled()) return null;
       final resolution = await resolveRunner(serverDir);
-      if (resolution case LiveRunner(:final manifest, :final socketPath)
-          when manifest.stage != RunnerStage.stopping) {
+      if (resolution case LiveRunner(
+        :final manifest,
+        :final socketPath,
+      ) when manifest.stage != RunnerStage.stopping) {
         attached = true;
         _pid = manifest.pid;
         await recordOwnedRunner(
@@ -640,8 +671,10 @@ class ServerpodProcessController extends ChangeNotifier
       if (epoch != _epoch || !identical(client, _client)) return;
       // The connection dropped under a live runner — a socket hiccup, not a
       // shutdown. Take a fresh snapshot.
-      if (resolution case LiveRunner(:final manifest, :final socketPath)
-          when manifest.stage != RunnerStage.stopping) {
+      if (resolution case LiveRunner(
+        :final manifest,
+        :final socketPath,
+      ) when manifest.stage != RunnerStage.stopping) {
         _client = null;
         try {
           await _attach(socketPath, epoch);
@@ -653,10 +686,13 @@ class ServerpodProcessController extends ChangeNotifier
       }
     }
 
-    // It has gone. Whoever stopped it, the session is over.
+    // It has gone. Whoever stopped it, the session is over — until someone
+    // starts another, which the watch picks up.
     final exitCode = _exitCode;
     final wasOwned = _owned;
+    final pid = _pid;
     _resetRunner();
+    _watchForRunner(ignoring: pid);
     if (exitCode == 0) {
       log.addLocal('The Serverpod runner was stopped outside App Studio.');
     } else {
@@ -696,10 +732,7 @@ class ServerpodProcessController extends ChangeNotifier
         await client.retryStart();
         return;
       }
-      if (_client != null || _launch != null) {
-        _owned = true;
-        await stop();
-      }
+      if (_client != null || _launch != null) await stop();
       if (session.projectPath != projectPath) return;
       await start();
     } catch (e) {
@@ -721,11 +754,20 @@ class ServerpodProcessController extends ChangeNotifier
     notifyListeners();
   }
 
-  /// Stops a runner App Studio started, or detaches from one it found.
+  /// Stops the attached runner, whether App Studio started it or found it.
+  ///
+  /// Closing a project, switching, quitting and Sparkle's relaunch all come
+  /// through here, and in each the user is done with the project's server —
+  /// a runner a terminal or an agent started included.
   ///
   /// Awaitable on purpose: `teardownSession` waits on it, so a quit or an
-  /// update never leaves a runner of ours behind with nobody to stop it.
+  /// update never leaves a runner behind with nobody to stop it.
+  ///
+  /// It also ends the watch for a runner someone else starts: a stop is a quit,
+  /// an update, a project switch or the first half of a restart, and in none
+  /// of them should App Studio attach again on its own.
   Future<void> stop() async {
+    _stopWatching();
     if (_stopping) return _stopDone?.future;
     if (state == ProcessState.idle && _launch == null) return;
 
@@ -735,7 +777,7 @@ class ServerpodProcessController extends ChangeNotifier
     notifyListeners();
     try {
       final client = _client;
-      if (client != null && _owned) {
+      if (client != null) {
         log.addLocal('Stopping the Serverpod runner.');
         final serverDir = _serverDir;
         var stopped = false;
@@ -752,13 +794,7 @@ class ServerpodProcessController extends ChangeNotifier
             isAlive: const ProcessKiller().isAlive,
           );
         }
-        await clearOwnedRunner();
-      } else if (client != null) {
-        log.addLocal(
-          'Detached from the Serverpod runner. It keeps running, since App '
-          'Studio did not start it.',
-        );
-        await client.close();
+        if (_owned) await clearOwnedRunner();
       } else if (_launch != null) {
         // Started but never attached: the CLI is still waiting for its
         // runner, and the runner may already exist.
@@ -814,6 +850,55 @@ class ServerpodProcessController extends ChangeNotifier
     _starting = false;
     _preparing = false;
     log.detach();
+  }
+
+  /// Looks for a runner someone else starts for the open project, every
+  /// [runnerWatchInterval], and attaches to the first that answers.
+  ///
+  /// Only after a runner went away or a start failed — never after [stop].
+  /// [ignoring] is the pid of the runner that just went, so a manifest it left
+  /// behind is never mistaken for a new one.
+  void _watchForRunner({int? ignoring}) {
+    _stopWatching();
+    if (_disposed || _serverDir == null || session.projectPath == null) return;
+    _watchIgnoresPid = ignoring;
+    _watchTimer = Timer.periodic(
+      runnerWatchInterval,
+      (_) => unawaited(_probeForRunner()),
+    );
+  }
+
+  void _stopWatching() {
+    _watchTimer?.cancel();
+    _watchTimer = null;
+  }
+
+  bool get _canAttachFromWatch =>
+      _watchTimer != null &&
+      state == ProcessState.idle &&
+      !_restarting &&
+      _launch == null &&
+      session.projectPath != null;
+
+  Future<void> _probeForRunner() async {
+    final serverDir = _serverDir;
+    if (_watchProbing || serverDir == null || !_canAttachFromWatch) return;
+    _watchProbing = true;
+    try {
+      final resolution = await resolveRunner(serverDir);
+      if (resolution case LiveRunner(:final manifest)
+          when manifest.stage != RunnerStage.stopping &&
+              manifest.pid != _watchIgnoresPid &&
+              _canAttachFromWatch) {
+        _stopWatching();
+        await start();
+      }
+    } catch (_) {
+      // A manifest caught mid-write or a socket path out of reach: the next
+      // tick looks again.
+    } finally {
+      _watchProbing = false;
+    }
   }
 
   void _fail(String message) {
@@ -930,6 +1015,7 @@ class ServerpodProcessController extends ChangeNotifier
   @override
   void dispose() {
     session.removeListener(_onSessionChanged);
+    _stopWatching();
     if (canStop) unawaited(stop());
     _disposed = true;
     super.dispose();
