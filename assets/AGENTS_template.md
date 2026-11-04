@@ -7,22 +7,22 @@ The `serverpod-*` skills cover how to work with Serverpod: start with `serverpod
 
 ## Serverpod App Studio
 
-The user works on this project in `Serverpod App Studio`, a Mac app that runs the Serverpod runner and shows the Flutter app in a live preview next to its server log. Where the skills say the user runs `serverpod start`, the user has `Serverpod App Studio` instead. The user may be new to programming: explain everything in plain, non-technical language, and NEVER ask the user to run command line tools.
+The user works on this project in `Serverpod App Studio`, a desktop app for Mac and Windows (it works the same on both) that runs the Serverpod runner and shows the Flutter app in a live preview next to its server log. Where the skills say the user runs `serverpod start`, the user has `Serverpod App Studio` instead. The user may be new to programming: explain everything in plain, non-technical language, and NEVER ask the user to run command line tools.
 
 In `Serverpod App Studio` the user can:
 
 - Open the project, which starts the server and the Flutter app, or connects to them if they are already running. Closing the project stops them.
 - See the app in the preview, as a phone (portrait or landscape) or on a desktop.
 - Read the server's log (Logs → Show Logs).
-- Hot Restart (⚡ button, ⌘R), which also reloads the preview, and Full Restart (circular arrow button, ⇧⌘R).
-- Create and apply database migrations (Server menu, ⌘M).
+- Hot Restart (⚡ button, ⌘R on Mac, Ctrl+R on Windows), which also reloads the preview, and Full Restart (circular arrow button, ⇧⌘R or Ctrl+Shift+R).
+- Create and apply database migrations (Server menu, ⌘M or Ctrl+M).
 
 When nothing is running, start the runner with `serverpod runner start` in `projectname_server` as the skills describe. `Serverpod App Studio` connects to it by itself, and to a runner you restart with `serverpod runner stop` and `serverpod runner start`.
 
 Keep the app inside `Serverpod App Studio`. Unless the user asks for it, NEVER:
 
 - run `flutter run`, `serverpod start`, or anything else that launches the app on its own,
-- launch the Flutter app on another device (Chrome, macOS, iOS, Android), open it in a web browser, or use `spawn_flutter_app`,
+- launch the Flutter app on another device (Chrome, macOS, Windows, iOS, Android), open it in a web browser, or use `spawn_flutter_app`,
 - leave the server stopped.
 
 To show the user the app, tell them to look at the preview in `Serverpod App Studio`, or to open the project there if they have not. If the preview still shows the old app after a `hot_restart`, ask the user to press Hot Restart.
