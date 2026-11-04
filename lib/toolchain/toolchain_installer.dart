@@ -53,6 +53,43 @@ String windowsInstallPubCache(Map<String, String> environment) {
   return cache.toLowerCase();
 }
 
+/// A working `dart install` launcher, as it was before an update.
+typedef SavedLauncher = ({String path, String contents});
+
+/// The launcher at [path] when it wraps an executable that is there, else
+/// null.
+@visibleForTesting
+Future<SavedLauncher?> readLauncher(String path) async {
+  if (dartInstallLauncherTarget(path) == null) return null;
+  try {
+    return (path: path, contents: await File(path).readAsString());
+  } on FileSystemException {
+    return null;
+  }
+}
+
+/// Puts [saved] back when a failed update took it and left what it wraps.
+///
+/// On Windows `dart install` deletes the old version's launcher before its
+/// bundle, and stops when the bundle's executable is running: another
+/// project's runner, or an agent's `serverpod mcp`. The old version is then
+/// still there, but nothing on the `PATH` runs it.
+@visibleForTesting
+Future<bool> restoreLauncher(SavedLauncher saved) async {
+  final launcher = File(saved.path);
+  if (await launcher.exists()) return false;
+  try {
+    await launcher.parent.create(recursive: true);
+    await launcher.writeAsString(saved.contents);
+  } on FileSystemException {
+    return false;
+  }
+  if (dartInstallLauncherTarget(saved.path) != null) return true;
+  // The bundle went after all.
+  await launcher.delete();
+  return false;
+}
+
 class CancelToken {
   var _cancelled = false;
 
@@ -714,6 +751,11 @@ class ToolchainInstaller {
           // `dart install` runs install_name_tool through the /usr/bin shims,
           // which the Command Line Tools make real.
           ..['PATH'] = '$dartBin:/usr/bin:/bin:/usr/sbin:/sbin');
+    final launcher = p.join(
+      paths.dartInstallBinDir,
+      _host.installedExecutableName('serverpod'),
+    );
+    final previous = _host.isWindows ? await readLauncher(launcher) : null;
     final result = await Process.run(
       dartExecutable,
       ['install', 'serverpod_cli@$version'],
@@ -721,9 +763,16 @@ class ToolchainInstaller {
       includeParentEnvironment: false,
     );
     if (result.exitCode != 0) {
+      final output = '${result.stdout}\n${result.stderr}';
+      if (previous != null) await restoreLauncher(previous);
       throw ToolInstallException(
-        'Serverpod could not be installed.',
-        detail: _tail('${result.stdout}\n${result.stderr}'),
+        // Windows will not delete an executable that is running.
+        _host.isWindows && output.contains('might be in use')
+            ? 'Serverpod could not be updated while the installed version is '
+                'running. Close other Serverpod servers and the AI agents '
+                'using Serverpod, or restart the computer, then try again.'
+            : 'Serverpod could not be installed.',
+        detail: _tail(output),
       );
     }
 
