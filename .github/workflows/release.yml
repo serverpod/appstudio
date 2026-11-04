@@ -58,11 +58,11 @@ jobs:
     name: plan
     # workflow_run fires for every CI run, a fork's pull request included, and
     # `branches: [main]` matches a fork branch that is merely NAMED main. Only
-    # a passing CI run of a push to this repository's main gets past here.
+    # a CI run of a push to this repository's main gets past here; whether it
+    # passed is the first step's question.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push' &&
+      (github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
@@ -91,25 +91,48 @@ jobs:
           EVENT: ${{ github.event_name }}
           RUN_SHA: ${{ github.event.workflow_run.head_sha }}
           RUN_ID: ${{ github.event.workflow_run.id }}
+          # The CI jobs a release needs, by name (ci.yml). Not the run's own
+          # conclusion: the windows-sockets canary is allowed to fail, but when
+          # it runs out its time — which it often does, see ci.yml — GitHub
+          # reports the whole run as cancelled.
+          REQUIRED: macos-latest|windows-latest|windows installer
         run: |
           if [[ "$EVENT" == workflow_run ]]; then
-            echo "sha=$RUN_SHA" >>"$GITHUB_OUTPUT"
-            echo "run=$RUN_ID" >>"$GITHUB_OUTPUT"
-            exit 0
+            sha="$RUN_SHA" run="$RUN_ID"
+          else
+            if [[ "$GITHUB_REF" != refs/heads/main ]]; then
+              echo "::error::Releases are made from main, not $GITHUB_REF."
+              exit 1
+            fi
+            sha="$GITHUB_SHA"
+            run="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
+              --commit "$sha" --status completed --limit 1 \
+              --json databaseId --jq '.[0].databaseId // empty')"
+            if [[ -z "$run" ]]; then
+              echo "::error::CI has not finished on $sha yet."
+              exit 1
+            fi
           fi
-          if [[ "$GITHUB_REF" != refs/heads/main ]]; then
-            echo "::error::Releases are made from main, not $GITHUB_REF."
-            exit 1
-          fi
-          run="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
-            --commit "$GITHUB_SHA" --status success --limit 1 \
-            --json databaseId --jq '.[0].databaseId // empty')"
-          if [[ -z "$run" ]]; then
-            echo "::error::CI has not passed on $GITHUB_SHA. Release a commit whose CI is green."
-            exit 1
-          fi
-          echo "sha=$GITHUB_SHA" >>"$GITHUB_OUTPUT"
+          echo "sha=$sha" >>"$GITHUB_OUTPUT"
           echo "run=$run" >>"$GITHUB_OUTPUT"
+
+          jobs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" \
+            --jq '.jobs[] | "\(.name)\t\(.conclusion)"')"
+          missing=""
+          IFS='|' read -ra required <<<"$REQUIRED"
+          for job in "${required[@]}"; do
+            grep -qxF "$job"$'\t'success <<<"$jobs" || missing+="${missing:+, }$job"
+          done
+          if [[ -z "$missing" ]]; then
+            echo "ok=true" >>"$GITHUB_OUTPUT"
+          elif [[ "$EVENT" == workflow_run ]]; then
+            # A red CI is reported by CI; nothing to release, nothing to fail.
+            echo "::notice title=Nothing released::CI did not pass: $missing"
+            echo "ok=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "::error::CI did not pass on $sha: $missing"
+            exit 1
+          fi
 
       - uses: actions/checkout@v4
         with:
@@ -118,8 +141,18 @@ jobs:
       - name: What is new
         id: plan
         env:
+          CI_OK: ${{ steps.ci.outputs.ok }}
           TEST_MACOS: ${{ inputs.test_macos_build || false }}
         run: |
+          if [[ "$CI_OK" != true ]]; then
+            {
+              echo "macos=skip"
+              echo "macos_reason=CI did not pass on this commit"
+              echo "windows=skip"
+              echo "windows_reason=CI did not pass on this commit"
+            } | tee -a "$GITHUB_OUTPUT"
+            exit 0
+          fi
           ./tool/release_plan.sh upload | tee -a "$GITHUB_OUTPUT"
           if [[ "$TEST_MACOS" == true ]]; then
             {

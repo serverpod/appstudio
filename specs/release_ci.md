@@ -35,7 +35,10 @@ This is the recommended answer to "upload when the version changes, or what?":
   make every build's bytes different, and published objects are immutable.
 - **Only commits that passed CI are released.** The workflow is chained to CI
   (`workflow_run`), and the Windows installer is the very artifact CI built
-  and tested alongside.
+  and tested alongside. "Passed" means the `macos-latest`, `windows-latest`
+  and `windows installer` jobs succeeded, not the run's own conclusion. The
+  `windows sockets (canary)` job is allowed to fail, but when it runs out its
+  time GitHub marks the whole run cancelled, and it does that often.
 
 So a release is:
 
