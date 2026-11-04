@@ -797,7 +797,9 @@ underneath.
 
 - `windows/runner/compact_window.cpp` implements the `window` channel.
   - **Shape:** the window goes borderless but stays sizable (`WS_THICKFRAME`
-    with `WM_NCCALCSIZE` returning 0), with rounded corners on Windows 11.
+    with `WM_NCCALCSIZE` returning 0). DWM's own frame (shadow, Windows 11
+    border and rounded corners) is off while compact; the phone frame draws
+    its own.
   - **Size:** `WM_SIZING` holds the frame's aspect on the content (fixed
     chrome, as on macOS). An orientation flip carries the frame's scale.
     The window stays inside the work area and enters at most 80% of its
@@ -808,17 +810,19 @@ underneath.
     the corner's `HT*`), after the method call has been answered. The
     corners' diagonal cursors come from the engine (`MouseRegion`), so
     `showResizeCursor` is a no-op on Windows.
-- **Not transparent.** Flutter's Windows embedder draws to a swap chain DWM
-  cannot blend per pixel, so the margin around the frame shows the app's
-  background. `CompactWindowChannel.supportsTransparency` keeps `ShadApp`
-  opaque there.
+- **Transparent** (since 2026-11-04). `DwmEnableBlurBehindWindow` over an
+  empty region switches on DWM's per-pixel blending of the Flutter surface
+  without blurring anything, so the margin shows the desktop and the frame's
+  shadow blends. `DwmExtendFrameIntoClientArea` is not enough: DWM fills the
+  clear pixels with the frame colour. Earlier notes here called the swap
+  chain unblendable; a spike app showed otherwise.
 - The Windows menu strip hides while compact (`stripHidden`), swapped for an
   empty box so the preview's subtree, and its CEF webview, is not rebuilt.
   The shortcuts stay live.
 - **Verified** with a spike on the dev laptop: exact aspect at enter, the
   scale carried over a flip, corner sizing held to the aspect down to the
   minimum width, and the exact rectangle and style back on exit. **Still to
-  see** in the VM, against a real preview: how the opaque margin looks.
+  see** in the VM, against a real preview: the transparent margin.
 
 ### Phase 8 — Packaging, signing, updates, release tooling (L)
 

@@ -91,11 +91,11 @@ class CompactWindowChannel implements CompactWindowPlatform {
       defaultTargetPlatform == TargetPlatform.macOS ||
       defaultTargetPlatform == TargetPlatform.windows;
 
-  /// Whether the compact window can be see-through around the phone frame.
-  /// macOS only: Flutter's Windows embedder draws to a surface Windows cannot
-  /// blend per pixel, so there the margin shows the app's background.
+  /// Whether the compact window can be see-through around the phone frame:
+  /// wherever it can be compact.
   static bool get supportsTransparency =>
-      defaultTargetPlatform == TargetPlatform.macOS;
+      defaultTargetPlatform == TargetPlatform.macOS ||
+      defaultTargetPlatform == TargetPlatform.windows;
 
   @override
   Future<void> enterCompact(CompactWindowGeometry geometry) =>

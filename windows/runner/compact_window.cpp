@@ -15,11 +15,35 @@ constexpr char kChannelName[] = "dev.serverpod.appstudio/window";
 constexpr UINT kStartMoveMessage = WM_APP + 0x60;
 constexpr UINT kStartSizeMessage = WM_APP + 0x61;
 
-// Windows 11's rounded corners for a borderless window. Older Windows
-// ignores the attribute.
+// Windows 11's rounded corners. Older Windows ignores the attribute.
 constexpr DWORD kWindowCornerPreference = 33;  // DWMWA_WINDOW_CORNER_PREFERENCE
 constexpr DWORD kCornerDefault = 0;            // DWMWCP_DEFAULT
-constexpr DWORD kCornerRound = 2;              // DWMWCP_ROUND
+constexpr DWORD kCornerDoNotRound = 1;         // DWMWCP_DONOTROUND
+
+// Lets DWM blend the window per pixel by Flutter's alpha, so the margin around
+// the phone frame shows the desktop. Blur-behind over an empty region blurs
+// nothing; enabling it is what switches the blending on. Off restores the
+// opaque window.
+void SetSeeThrough(HWND window, bool enabled) {
+  HRGN nothing = ::CreateRectRgn(0, 0, -1, -1);
+  DWM_BLURBEHIND blur{};
+  blur.dwFlags = DWM_BB_ENABLE | DWM_BB_BLURREGION;
+  blur.fEnable = enabled;
+  blur.hRgnBlur = nothing;
+  ::DwmEnableBlurBehindWindow(window, &blur);
+  ::DeleteObject(nothing);
+
+  // The frame DWM draws — shadow, Windows 11's border and rounded corners —
+  // would outline the whole transparent window. The phone frame draws its
+  // own.
+  const DWMNCRENDERINGPOLICY policy = enabled ? DWMNCRP_DISABLED
+                                              : DWMNCRP_USEWINDOWSTYLE;
+  ::DwmSetWindowAttribute(window, DWMWA_NCRENDERING_POLICY, &policy,
+                          sizeof(policy));
+  ::DwmSetWindowAttribute(window, kWindowCornerPreference,
+                          enabled ? &kCornerDoNotRound : &kCornerDefault,
+                          sizeof(DWORD));
+}
 
 double ReadDouble(const flutter::EncodableMap& map, const char* key) {
   auto it = map.find(flutter::EncodableValue(key));
@@ -155,8 +179,7 @@ void CompactWindow::EnterCompact(const Geometry& geometry) {
   style &= ~(WS_CAPTION | WS_MAXIMIZEBOX);
   style |= WS_POPUP | WS_THICKFRAME;
   ::SetWindowLongPtr(window_, GWL_STYLE, style);
-  ::DwmSetWindowAttribute(window_, kWindowCornerPreference, &kCornerRound,
-                          sizeof(kCornerRound));
+  SetSeeThrough(window_, true);
 
   RECT frame;
   ::GetWindowRect(window_, &frame);
@@ -214,8 +237,7 @@ void CompactWindow::ExitCompact() {
   saved_.reset();
   ::SetWindowLongPtr(window_, GWL_STYLE, saved.style);
   ::SetWindowLongPtr(window_, GWL_EXSTYLE, saved.ex_style);
-  ::DwmSetWindowAttribute(window_, kWindowCornerPreference, &kCornerDefault,
-                          sizeof(kCornerDefault));
+  SetSeeThrough(window_, false);
   ::SetWindowPos(window_, nullptr, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
   ::SetWindowPlacement(window_, &saved.placement);

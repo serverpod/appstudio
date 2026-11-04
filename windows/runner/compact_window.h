@@ -14,12 +14,10 @@
 // macos/Runner/MainFlutterWindow.swift. The Dart side is
 // lib/platform/compact_window.dart.
 //
-// The same contract, one difference. The window goes borderless, keeps the
-// phone frame's aspect through every resize (the chrome around the frame is
-// fixed-size, so the ratio holds on the content), stays on the visible screen,
-// and comes back exactly as it was. But it stays opaque: Flutter's Windows
-// embedder draws to a swap chain DWM cannot blend per pixel, so the margin
-// around the frame shows the app's background instead of the desktop.
+// The same contract. The window goes borderless and see-through around the
+// phone frame, keeps the frame's aspect through every resize (the chrome
+// around the frame is fixed-size, so the ratio holds on the content), stays on
+// the visible screen, and comes back exactly as it was.
 //
 // Moving and resizing are Windows' own modal loops, started as if the user
 // had pressed on a caption or a sizing border, so Windows tracks the mouse
