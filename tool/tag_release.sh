@@ -63,5 +63,33 @@ fi
 git -c user.name="github-actions[bot]" \
     -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
     tag -a "$TAG" -m "$MESSAGE" "$COMMIT"
-git push origin "refs/tags/$TAG"
+
+# GitHub refuses a workflow's own token any ref at a commit whose
+# .github/workflows/ differs from every branch tip: it counts as changing
+# workflows, which that token can never be allowed to do, by push or by API.
+# It happens when workflow files changed between the version bump and the
+# promote. The promotion has succeeded by then, so say how to finish by hand
+# rather than fail it; a token that could do this would be a standing
+# credential able to rewrite workflows.
+if ! out="$(git push origin "refs/tags/$TAG" 2>&1)"; then
+  echo "$out"
+  if [[ "$out" == *"without \`workflows\` permission"* ]]; then
+    short="$(git rev-parse --short "$COMMIT")"
+    cmd="git tag -a $TAG -m 'App Studio $VERSION' -m 'macOS build $MACOS_BUILD' -m 'Windows build $WINDOWS_BUILD' $short && git push origin $TAG"
+    echo "::warning title=Push $TAG by hand::GitHub does not let a workflow tag $short, because its workflow files differ from main's. The release is live. From a checkout: $cmd"
+    if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+      {
+        echo "**$TAG was not pushed.** GitHub does not let a workflow tag \`$short\`,"
+        echo "because its workflow files differ from main's. The release is live. Run:"
+        echo
+        echo '```bash'
+        echo "$cmd"
+        echo '```'
+      } >>"$GITHUB_STEP_SUMMARY"
+    fi
+    exit 0
+  fi
+  exit 1
+fi
+echo "$out"
 echo "    pushed $TAG"

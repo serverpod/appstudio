@@ -252,4 +252,6 @@ jobs:
       - name: Summary
         run: |
           tag="v$(sed -n 's/^version:[[:space:]]*\([0-9.]*\).*/\1/p' pubspec.yaml)"
-          echo "Release tag: [\`$tag\`]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/$tag)" >>"$GITHUB_STEP_SUMMARY"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            echo "Release tag: [\`$tag\`]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/$tag)" >>"$GITHUB_STEP_SUMMARY"
+          fi

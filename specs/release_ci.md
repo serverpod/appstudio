@@ -98,6 +98,15 @@ have moved on while the preview was being tested. A tag is never moved: if
 version), the job leaves it and says so. It runs whenever neither appcast job
 failed, so re-running Promote adds a tag that is missing.
 
+**One case needs a hand:** when `.github/workflows/` changed between the
+version bump and the promote. GitHub refuses a workflow's own token any ref at
+a commit whose workflow files differ from every branch tip, by push and by API
+alike, because it counts as changing workflows. The job then warns and puts the
+exact `git tag … && git push` command in the run summary, and the run stays
+green, since the release is live. Making it automatic would take a personal
+access token or GitHub App with workflow-write rights, which is a standing
+credential that can rewrite workflows. That isn't worth it for a rare case.
+
 ## One-time setup
 
 The commands use these names; change them if you like, but keep them

@@ -917,7 +917,9 @@ full rationale are in `specs/release_ci.md`.
 - **A promoted release is tagged `v<version>`** by Promote's last job
   (`tool/tag_release.sh`). The tag goes on the commit that set the version,
   which is the one Release built, not on the head of `main`. Tags are never
-  moved.
+  moved. If workflow files changed after the version bump, GitHub refuses
+  the workflow token that ref, by push or API. The job then warns with the
+  command to run by hand, rather than holding a workflow-write credential.
 
 ### Build numbers are a global counter — this one is unfixable
 
