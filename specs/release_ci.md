@@ -263,17 +263,23 @@ gcloud iam service-accounts create appstudio-release-upload --project=$PROJECT \
 gcloud iam service-accounts create appstudio-release-promote --project=$PROJECT \
   --display-name="App Studio release: promote to the appcast (GitHub)"
 
-# The subject of a job that uses an environment is repo:<repo>:environment:<name>.
+# The subject of a job that uses an environment is <prefix>:environment:<name>.
+# This repository uses GitHub's immutable subjects, whose prefix carries the
+# owner and repository IDs: repo:serverpod@48181558/appstudio@1305101557.
+# Ask GitHub rather than writing repo:serverpod/appstudio — that form matches
+# nothing here, and the exchange then fails with getAccessToken denied.
+SUB=$(gh api repos/$REPO/actions/oidc/customization/sub --jq .sub_claim_prefix)
 gcloud iam service-accounts add-iam-policy-binding $UPLOAD_SA --project=$PROJECT \
   --role=roles/iam.workloadIdentityUser \
-  --member="principal://iam.googleapis.com/$POOL/subject/repo:$REPO:environment:release-upload"
+  --member="principal://iam.googleapis.com/$POOL/subject/$SUB:environment:release-upload"
 gcloud iam service-accounts add-iam-policy-binding $PROMOTE_SA --project=$PROJECT \
   --role=roles/iam.workloadIdentityUser \
-  --member="principal://iam.googleapis.com/$POOL/subject/repo:$REPO:environment:production"
+  --member="principal://iam.googleapis.com/$POOL/subject/$SUB:environment:production"
 ```
 
-The condition matches on `repository_id`, not the name, so a deleted and
-re-created `serverpod/appstudio` cannot inherit the binding.
+The provider's condition matches on `repository_id` and the subject carries
+the IDs, so a deleted and re-created `serverpod/appstudio` cannot inherit
+either.
 
 **Bucket roles, scoped by object prefix.** Conditions on bucket roles need
 uniform bucket-level access. Check it first, and turn it on only if nothing
@@ -351,6 +357,11 @@ gh variable set GCP_RELEASE_PROMOTE_SERVICE_ACCOUNT --repo $REPO --body $PROMOTE
 
 ## If something fails
 
+- **`iam.serviceAccounts.getAccessToken` denied, after the Google Cloud step
+  succeeded.** GitHub's token was accepted, but its subject matches no
+  `workloadIdentityUser` binding on the service account. Compare the bindings
+  with `gh api repos/serverpod/appstudio/actions/oidc/customization/sub` (step
+  5).
 - **`storage.buckets.get` denied on upload.** This version of gcloud reads
   bucket metadata before a copy. Grant both accounts a role with only that
   permission on the bucket.
