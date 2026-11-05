@@ -914,6 +914,10 @@ full rationale are in `specs/release_ci.md`.
   are two service accounts, each bound to one environment. The uploader can
   only *create* under `releases/`, so IAM now enforces the immutability too.
   The promoter has no access to `releases/` at all.
+- **A promoted release is tagged `v<version>`** by Promote's last job
+  (`tool/tag_release.sh`). The tag goes on the commit that set the version,
+  which is the one Release built, not on the head of `main`. Tags are never
+  moved.
 
 ### Build numbers are a global counter — this one is unfixable
 

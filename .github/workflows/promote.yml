@@ -11,6 +11,8 @@
 #      reviewers. Approve, and they run tool/publish_appcast.sh (macOS) and
 #      tool/windows/promote_release.ps1 (Windows), with their signing keys
 #      from that environment's secrets.
+#   4. Once they have succeeded, the release is tagged v<version> on GitHub
+#      (tool/tag_release.sh), on the commit that set the version.
 #
 # What is promoted is what the chosen commit names (pubspec.yaml's version and
 # build, windows/release.json's build), and it must already be uploaded by the
@@ -222,3 +224,32 @@ jobs:
           } finally {
             Remove-Item $key -Force -ErrorAction SilentlyContinue
           }
+
+  # The release is live: tag it. On the commit that set the version, which is
+  # the one Release built, not on the head of main (tool/tag_release.sh). Runs
+  # when neither appcast job failed, including when the plan found both
+  # already promoted, so a re-run can still add a tag that is missing.
+  tag:
+    name: tag
+    needs: [plan, macos, windows]
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      !contains(fromJSON('["failure", "cancelled"]'), needs.macos.result) &&
+      !contains(fromJSON('["failure", "cancelled"]'), needs.windows.result)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Tag v<version>
+        run: ./tool/tag_release.sh
+
+      - name: Summary
+        run: |
+          tag="v$(sed -n 's/^version:[[:space:]]*\([0-9.]*\).*/\1/p' pubspec.yaml)"
+          echo "Release tag: [\`$tag\`]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/tree/$tag)" >>"$GITHUB_STEP_SUMMARY"

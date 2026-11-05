@@ -89,6 +89,15 @@ approved, they run:
 Each key is written to the runner's temp directory, outside the checkout, and
 deleted when its step ends.
 
+Then a `tag` job tags the release **`v<version>`** (`tool/tag_release.sh`),
+with the macOS and Windows build numbers in the tag's message. It tags the
+commit that set the version, the oldest one whose `pubspec.yaml` adds
+`version: X.Y.Z+N`. That's the commit Release built. The head of `main` may
+have moved on while the preview was being tested. A tag is never moved: if
+`v<version>` already marks another commit (a `V=build` rebuild of a tagged
+version), the job leaves it and says so. It runs whenever neither appcast job
+failed, so re-running Promote adds a tag that is missing.
+
 ## One-time setup
 
 The commands use these names; change them if you like, but keep them
