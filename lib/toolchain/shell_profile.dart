@@ -2,7 +2,7 @@
 ///
 /// The lines are exactly the ones the official instructions give — Flutter's
 /// for its SDK, `dart install`'s for its bin directory — written to the file
-/// Flutter's macOS instructions name. Each one is recorded as written, so
+/// Flutter's instructions name for this platform. Each one is recorded as written, so
 /// uninstall removes that exact line and nothing else.
 library;
 
@@ -20,10 +20,18 @@ const kWindowsUserPathRecord = r'HKCU\Environment\Path';
 
 /// The rc file to add `PATH` lines to, from `$SHELL`.
 ///
-/// zsh gets `~/.zprofile` because that is what Flutter's macOS instructions
-/// say. bash gets `~/.bash_profile`, which macOS login shells read. Anything
-/// else (fish, nu) has its own syntax, so the lines are shown for the user to
-/// add rather than guessed at.
+/// macOS: zsh gets `~/.zprofile` because that is what Flutter's macOS
+/// instructions say. bash gets `~/.bash_profile`, which macOS login shells
+/// read.
+///
+/// Linux: the files Flutter's Linux instructions name. A Linux terminal starts
+/// a non-login shell, which reads neither of macOS's files — and a new
+/// `~/.bash_profile` would stop login bash reading `~/.profile`. zsh gets
+/// `~/.zshenv` (or `$ZDOTDIR/.zshenv`), which every zsh reads; bash gets
+/// `~/.bashrc`, which every interactive bash reads; sh and ksh `~/.profile`.
+///
+/// Anything else (fish, nu) has its own syntax, so the lines are shown for the
+/// user to add rather than guessed at.
 class ShellProfile {
   const ShellProfile({required this.shell, required this.path});
 
@@ -37,20 +45,40 @@ class ShellProfile {
   /// On Windows there is no rc file: `PATH` lives in the registry, under the
   /// user's own environment, and every program started afterwards reads it
   /// from there. [kWindowsUserPathRecord] stands in for the file.
+  ///
+  /// [environment] supplies `SHELL`, and on Linux `ZDOTDIR`.
   static ShellProfile resolve({
     required String home,
     String? shellOverride,
     HostPlatform? host,
+    Map<String, String>? environment,
   }) {
-    if ((host ?? currentHost).isWindows) {
+    final resolvedHost = host ?? currentHost;
+    final env = environment ?? Platform.environment;
+    if (resolvedHost.isWindows) {
       return const ShellProfile(
         shell: 'windows',
         path: kWindowsUserPathRecord,
       );
     }
-    final shellPath =
-        shellOverride ?? Platform.environment['SHELL'] ?? '/bin/zsh';
+    final shellPath = shellOverride ?? env['SHELL'] ?? '/bin/zsh';
     final shell = p.basename(shellPath);
+    if (resolvedHost.isLinux) {
+      final zdotdir = env['ZDOTDIR'];
+      return switch (shell) {
+        'zsh' => ShellProfile(
+          shell: shell,
+          path: p.join(
+            zdotdir != null && p.isAbsolute(zdotdir) ? zdotdir : home,
+            '.zshenv',
+          ),
+        ),
+        'bash' => ShellProfile(shell: shell, path: p.join(home, '.bashrc')),
+        'sh' || 'ksh' =>
+          ShellProfile(shell: shell, path: p.join(home, '.profile')),
+        _ => ShellProfile(shell: shell, path: null),
+      };
+    }
     return switch (shell) {
       'zsh' => ShellProfile(shell: shell, path: p.join(home, '.zprofile')),
       'bash' => ShellProfile(shell: shell, path: p.join(home, '.bash_profile')),

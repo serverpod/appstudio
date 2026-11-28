@@ -506,7 +506,7 @@ void main() {
     test('an earlier build\'s private toolchain is found', () async {
       await touch(p.join(paths.legacyToolchainRoot, 'flutter', 'marker'));
       expect((await probe().inventory()).legacyInstallFound, isTrue);
-    }, skip: Platform.isWindows ? 'no Windows build shipped a toolchain' : false);
+    }, skip: Platform.isMacOS ? false : 'only macOS builds shipped a toolchain');
 
     test('so is only its PATH block', () async {
       await touch(
@@ -514,7 +514,7 @@ void main() {
         '# mine\n\n$kLegacyShellBlockStart\n# x\n$kLegacyShellBlockEnd\n',
       );
       expect((await probe().inventory()).legacyInstallFound, isTrue);
-    }, skip: Platform.isWindows ? 'no Windows build shipped a toolchain' : false);
+    }, skip: Platform.isMacOS ? false : 'only macOS builds shipped a toolchain');
   });
 
   group('parseFlutterRoot', () {

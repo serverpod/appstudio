@@ -75,6 +75,15 @@ Future<String?> captureLoginShellPath({
         'APP_STUDIO_SHELL_PROBE': '1',
       },
       runInShell: false,
+      // Linux: in a session of its own, with no terminal. Started from a
+      // terminal as a background job (`./AppStudio….AppImage &`), App Studio
+      // shares that terminal, and an interactive bash opens it to set up job
+      // control: the terminal stops the whole process group with SIGTTIN,
+      // App Studio included, so not even the timeout below fires. Output
+      // still comes back through the pipes. macOS keeps its normal start.
+      mode: (host ?? currentHost).isLinux
+          ? ProcessStartMode.detachedWithStdio
+          : ProcessStartMode.normal,
     );
   } catch (_) {
     return null;

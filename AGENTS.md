@@ -1,6 +1,6 @@
 # App Studio — agent notes
 
-macOS Flutter IDE for **Serverpod 4.1** projects: open a project, start or attach to its Serverpod runner, show the runner's structured log natively, and preview the Flutter web app in CEF at the URL the runner publishes.
+Flutter IDE for **Serverpod 4.1** projects, on macOS, Windows and Linux: open a project, start or attach to its Serverpod runner, show the runner's structured log natively, and preview the Flutter web app in CEF at the URL the runner publishes.
 
 ## Project layout
 
@@ -21,8 +21,10 @@ widgetbook/              # `make widgetbook`: catalog, host, fakes (see Widgetbo
 packages/
   mac_menu_bar/            # Local fork — SF Symbol icons, separators, reset()
   webview_cef/             # Local fork — CEF resize + skip Helper (Alerts)
+linux/                   # GTK runner (CEF hooks, _exit on quit), release.json
 tool/
   distribute_macos.sh, publish_*.sh, set_version.sh   # releasing the app
+  linux/build_appimage.sh, linux/appcast.sh           # the Linux AppImage and its feed
 ```
 
 UI reference for design patterns: `../cloudui/cloudui_flutter/`.
@@ -889,6 +891,7 @@ Earlier builds kept every tool under
   - **It is a fallback, not a replacement.** `_which` tries the inherited `PATH` first and only then spawns a shell (~80 ms). The result — including a failure — is memoised per `ToolProbe`.
   - **Discovery only.** Candidates found this way are still executed by absolute path under the probe's own controlled environment.
   - **Do not wait for the shell's stdout to reach EOF.** The shell's children inherit that pipe, so an rc that backgrounds anything holds it open long after the answer is written. The reader completes on the closing marker instead, which is also what makes the timeout fire. `${PATH}` is braced for the same class of reason: unbraced, the trailing marker is read as part of the variable *name* and the answer comes back silently empty.
+  - **On Linux the shell runs in a session of its own, with no terminal** (`ProcessStartMode.detachedWithStdio`, which calls `setsid`). Started from a terminal as a background job (`./AppStudio….AppImage &`), App Studio shares that terminal, and an interactive bash opens it for job control: the terminal stops the whole process group with SIGTTIN, App Studio included, and not even the timeout fires. Seen on Ubuntu as `Stopped (tty input)`. The pipes still carry the answer, and `kill` still reaches the shell. macOS keeps the normal start.
 - **Serverpod's candidates check `~/Library/Application Support/Dart/install/bin` first**, ahead of `~/.pub-cache/bin`. That is where `dart install serverpod_cli` puts it; the pub-cache copy is the one that goes stale.
 - `PUB_CACHE` is deliberately **not** set: `package_config.json` stores absolute paths, so a private cache would make every switch to an external editor re-resolve the project.
 - Version rules live in `tool_version.dart`. A numeric-only suffix is a *packaging revision*, not a prerelease — `2.53.0-3` is newer than `2.53.0`, while `4.0.0-beta.1` is older than `4.0.0`.
@@ -2174,6 +2177,7 @@ Windows needs Developer Mode, then Git for Windows, Flutter and Serverpod
   go to the page.
 - **Menus:** a shad menu strip (`windows_app_menu.dart`) with Ctrl
   shortcuts. It repeats `MacAppMenu`'s enable rules, so change both together.
+  Linux mounts the same strip (see Linux).
 - **Tooltips and copy** use `shortcutHint()`.
 - **Notifications:** toasts from the runner (`toast_notifications.cpp`). They
   need the installer's Start menu shortcut.
@@ -2226,6 +2230,92 @@ The repository is public, so the GitHub API works without a token. It allows
 60 requests an hour, so poll sparingly; the Actions page in a browser does
 not count against that limit. Logs need a GitHub sign-in, but annotations
 do not, which is why the jobs report through `::notice`/`::error`.
+
+## Linux
+
+The plan and what was built are in `specs/linux_port.md`; the AppImage's
+app menu entry and in-app updates are in `specs/linux_appimage.md`. As with
+Windows, macOS and Windows must not regress: every Linux path is behind a
+host check (`currentHost.isLinux`, `HostPlatform.linux` in tests), and
+`packages/webview_cef/common/` changes only behind `__linux__`, or where the
+change is behaviour-neutral on all three (a null check, say).
+
+### Dev machine
+
+- Flutter 3.44+ on `PATH`, plus Flutter's Linux desktop dependencies
+  (Ubuntu: `clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+  libstdc++-12-dev`; Arch: `clang cmake ninja pkgconf gtk3`). CEF downloads on the first CMake configure.
+- `flutter run -d linux`. The Makefile's run targets (`start`,
+  `widgetbook`, the `_driver` ones) are macOS only and run `pod install`, so
+  on Linux the Dart MCP server's rule "launch through `make`" cannot be
+  followed: run `flutter run -d linux` (or `-t widgetbook/main.dart`)
+  yourself, and check first that the user has no run of their own going.
+- `make appimage` builds `dist/linux/AppStudio-<version>-x86_64.AppImage`.
+  The AppImage needs glibc 2.38 on the machine it runs on (Ubuntu 24.04+);
+  its `AppRun` says so on an older one. A release build rewrites
+  `linux/flutter/generated_plugin*` and the Windows ones; the script puts
+  them back. Never commit that change.
+- `flutter test` and an IDE's automatic `pub get` rewrite `pubspec.lock` on
+  a machine with another Dart. Do not commit it.
+- There is no AF_UNIX crash on Linux: the `process` tests run as on macOS.
+
+### Where things are
+
+| What | Linux |
+|---|---|
+| App data and preferences | `$XDG_DATA_HOME/dev.serverpod.appstudio` (`~/.local/share/…`), one folder |
+| CEF cache | `<app data>/CEF`, set by `linux/runner/main.cc` before CEF starts |
+| Flutter | `~/develop/flutter`, from `releases_linux.json` (`.tar.xz`) |
+| Serverpod CLI | `$XDG_STATE_HOME/Dart/install/bin` (`~/.local/state/…`) |
+| `PATH` | `~/.zshenv` (or `$ZDOTDIR/.zshenv`) for zsh, `~/.bashrc` for bash, `~/.profile` for sh and ksh; fish by hand |
+| System packages | git, curl, unzip, xz: checked, never installed (no `sudo`); setup gives the distro's command and **Check again** |
+| The app | an AppImage; after Add to Applications, `~/AppImages/AppStudio-x86_64.AppImage` |
+
+### The window, CEF and keys
+
+- **Quitting:** every way out (close button, the window manager's close,
+  File → Quit, Ctrl+Q) reaches `_onExitRequested`. A second request while
+  the teardown runs waits for it, at most 15 s (`_kLinuxExitWait`); macOS
+  and Windows answer at once. `linux/runner/main.cc` then ends with
+  `_exit()`: Flutter's Linux quit leaves the engine running, and `exit()`
+  raced Mesa's exit handlers against the raster thread and crashed. Do not
+  turn it back into a `return`.
+- **CEF's helpers start from the app's own executable**, so
+  `initCEFProcesses` runs first in `main()`. The plugin's own patch script
+  targets a file current Flutter no longer generates and is out of its
+  CMake.
+- **Minimum window** 670×600, Windows' (`my_application.cc`), not macOS's
+  720. No compact window: Wayland does not let a program place its window.
+- **Keys in the preview:** the page gets them; Ctrl on any other character
+  key stays the app's shortcut. Ctrl+A/C/V/X/Y/Z stay with the page.
+- **Clipboard goes through GTK.** On Wayland only a focused window may use
+  the clipboard, and CEF draws off-screen. Ctrl+C/X copy the page's
+  selection to GTK's clipboard; Ctrl+V types the clipboard's text into the
+  page. No paste event reaches the page, and a copy made by the page's own
+  code (`Clipboard.setData`) does not leave it.
+- **Chromium's keyring is off** (`password-store=basic`): otherwise a
+  desktop without an unlocked keyring (a fresh Ubuntu, automatic login)
+  asks the user to create one as soon as the preview loads.
+- **Menus:** the Windows strip (`windows_app_menu.dart`), with Quit on
+  Ctrl+Q instead of Exit on Alt+F4, Add to / Remove from Applications in
+  Help, and no Uninstall yet. **Fonts:** shad's Inter, as on Windows, and
+  the generic `monospace`. **URLs:** `xdg-open`.
+
+### The AppImage
+
+- **Add to Applications** (`lib/platform/linux/desktop_integration.dart`)
+  moves the AppImage to `~/AppImages` and writes
+  `dev.serverpod.appstudio.desktop` with an `X-AppStudio-AddedBy` marker,
+  recording the version and build. It is offered once per run over the
+  start page, unless another tool's entry already names App Studio.
+- **Updates** (`lib/update/linux/`) are App Studio's own, from a Sparkle
+  appcast with an Ed25519 signature over the file, written by
+  `tool/linux/appcast.sh`. The feed URL and public key are in
+  `linux/release.json`; both empty means no updates, and the build refuses
+  only one. The feed itself is not signed: nothing from it but the file may
+  be trusted, which is why the version is validated before it reaches the
+  desktop entry. The automatic check only runs over the start page with
+  nothing pushed over it, since Install quits the app.
 
 ## Conventions for agents
 

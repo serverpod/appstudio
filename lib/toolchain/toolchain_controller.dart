@@ -197,6 +197,9 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
       case ToolId.developerMode:
         // A setting, not a download.
         return const PlannedTool(id: ToolId.developerMode);
+      case ToolId.systemPackages:
+        // Never planned: the user installs them (ToolAction.manual).
+        return const PlannedTool(id: ToolId.systemPackages);
       case ToolId.git:
         final release = await fetchGitRelease(client, arch: currentArch());
         return PlannedTool(
@@ -209,7 +212,7 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
           client,
           accepts: status.spec.accepts,
           arch: currentArch(),
-          windows: paths.host.isWindows,
+          os: paths.host.os,
         );
         // An update runs `flutter upgrade`, which picks its own release; the
         // feed only says what that will be.
@@ -369,6 +372,12 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
           await installer.enableDeveloperMode(onProgress: onProgress),
         );
 
+      case ToolId.systemPackages:
+        // Never installable: they need sudo, which App Studio never runs.
+        throw const ToolInstallException(
+          'Install the missing system packages from a terminal.',
+        );
+
       case ToolId.git:
         final release = _plan[id]?.gitRelease;
         if (release == null) {
@@ -518,6 +527,8 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
         ToolId.commandLineTools =>
           await Directory('/Library/Developer/CommandLineTools').exists(),
         ToolId.developerMode => developerModeEnabled(installer.windows),
+        // Never recorded: App Studio does not install them.
+        ToolId.systemPackages => false,
         ToolId.git => entry.path != null &&
             await File(paths.host.path.join(entry.path!, 'cmd', 'git.exe'))
                 .exists(),
@@ -550,6 +561,9 @@ class ToolchainController extends ChangeNotifier implements ToolsView {
         await installer.uninstallGit(entry);
       case ToolId.developerMode:
         await installer.disableDeveloperMode();
+      case ToolId.systemPackages:
+        // Never recorded, so never removed: other software needs them.
+        return;
     }
     await _saveRecord(_record.without(id));
   }

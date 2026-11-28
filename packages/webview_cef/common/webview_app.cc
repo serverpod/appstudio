@@ -167,7 +167,12 @@ void WebviewApp::OnBeforeCommandLineProcessing(const CefString &process_type, Ce
     // selected by m_uMode above, like the other platforms.
 #endif
 #ifdef __linux__
-                                           
+    // Linux's use-mock-keychain. Chromium otherwise keeps the key that
+    // encrypts cookies and saved passwords in the desktop's keyring, and on a
+    // desktop without an unlocked one (a fresh Ubuntu, automatic login) GNOME
+    // asked the user to create a keyring as soon as the preview loaded. The
+    // preview shows a local development app and stores nothing worth that.
+    command_line->AppendSwitchWithValue("password-store", "basic");
 #endif
 }
 

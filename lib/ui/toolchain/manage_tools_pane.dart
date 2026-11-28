@@ -113,12 +113,10 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
           for (final status in manual) ...[
             const ShadGap(3),
             ErrorBanner(message: manualUpdateMessage(status)),
-            if (status.bestRejected case final candidate?
-                when candidate.fitness == ToolFitness.wrongVersion)
-              if (manualUpdateCommand(candidate) case final command?) ...[
-                const ShadGap(2),
-                CommandBlock(command: command),
-              ],
+            if (manualCommandFor(status) case final command?) ...[
+              const ShadGap(2),
+              CommandBlock(command: command),
+            ],
           ],
           if (pathLines.isNotEmpty) ...[
             const ShadGap(3),
@@ -164,6 +162,9 @@ class _ManageToolsPaneState extends State<ManageToolsPane> {
         null => appWarningBadge(
             theme,
             child: Text(switch (status.action) {
+              // Linux's system packages are manual too, but they are not
+              // there at all rather than out of date.
+              _ when status.id == ToolId.systemPackages => 'Missing',
               ToolAction.manual || ToolAction.update => 'Update needed',
               _ => 'Missing',
             }),

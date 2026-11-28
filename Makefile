@@ -23,6 +23,9 @@
 #   make publish           Upload the built zip + refresh downloads/macos.json
 #   make build_debug       Unsigned zip, local only
 #
+# Linux:
+#   make appimage          Release build packed as an AppImage in dist/linux
+#
 .DEFAULT_GOAL := help
 
 # Recipes use [[ ]] and read -p.
@@ -33,7 +36,7 @@ CEF_STAMP := $(ROOT)/packages/webview_cef/macos/third/cef/version.txt
 
 .PHONY: help start deps ensure_deps widgetbook start_driver widgetbook_driver \
         clean clean_all \
-        set_version release build build_debug publish promote
+        set_version release build build_debug publish promote appimage
 
 help:
 	@echo "Run locally:"
@@ -56,6 +59,9 @@ help:
 	@echo "  make build             Signed + notarized zip in dist/, no upload"
 	@echo "  make publish           Upload the built zip + refresh the download links"
 	@echo "  make build_debug       Unsigned zip, local only"
+	@echo ""
+	@echo "Linux:"
+	@echo "  make appimage          Release build packed as an AppImage in dist/linux"
 	@echo ""
 	@echo "The app installs Flutter and the Serverpod CLI from their official"
 	@echo "sources on first run, so no toolchain is needed to build or ship it."
@@ -199,3 +205,16 @@ promote:
 	@read -r -p "Make this build the live auto-update for every install? [y/N] " a; \
 		[[ $$a == [yY]* ]] || { echo "aborted"; exit 1; }
 	cd "$(ROOT)" && ./tool/publish_appcast.sh
+
+# ---------------------------------------------------------------------------
+# Linux
+#
+# Builds on the machine it runs on and uploads nothing: hosting, the update
+# feed and the release pipeline are Serverpod's. CEF downloads during the first CMake
+# configure, so there is no deps step. FLUTTER, SKIP_BUILD, APPIMAGETOOL,
+# APPIMAGE_UPDATE_INFO and APPIMAGE_FILE_URL are read from the environment;
+# see the script.
+# ---------------------------------------------------------------------------
+
+appimage:
+	cd "$(ROOT)" && ./tool/linux/build_appimage.sh

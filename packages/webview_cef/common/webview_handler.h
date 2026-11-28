@@ -9,6 +9,8 @@
 
 #include <functional>
 #include <list>
+#include <mutex>
+#include <string>
 #include <unordered_map>
 
 #include "webview_cookieVisitor.h"
@@ -148,6 +150,17 @@ public:
                                int x,
                                int y) override;
     virtual void OnImeCompositionRangeChanged(CefRefPtr<CefBrowser> browser,const CefRange& selection_range,const CefRenderHandler::RectList& character_bounds) override;
+#ifdef __linux__
+    virtual void OnTextSelectionChanged(CefRefPtr<CefBrowser> browser,
+                                        const CefString& selected_text,
+                                        const CefRange& selected_range) override;
+    // The browser's selected text (UTF-8), as Chromium last reported it;
+    // empty when nothing is selected. Safe to call from any thread. On
+    // Wayland the off-screen browser can neither set nor read the system
+    // clipboard (it never has keyboard focus), so the Linux plugin copies
+    // this onto the clipboard through GTK.
+    std::string selectedText(int browserId);
+#endif
 
     // Request that all existing browser windows close.
     void CloseAllBrowsers(bool force_close);
@@ -212,6 +225,12 @@ private:
     std::unordered_map<int, browser_info> browser_map_;
 
     std::unordered_map<std::string, std::function<void(CefRefPtr<CefValue>)>> js_callbacks_;
+#ifdef __linux__
+    // Each browser's selected text, by browser id. Written on CEF's UI thread,
+    // read on GTK's, so it is guarded.
+    std::mutex selected_text_mutex_;
+    std::unordered_map<int, std::string> selected_text_;
+#endif
 
 #ifdef WEBVIEW_CEF_GPU_TEXTURE
     // GPU diagnostic state: whether any accelerated-paint frame has arrived, and

@@ -8,6 +8,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../platform/host_platform.dart';
 import 'tool_status.dart';
 import 'tool_version.dart';
 
@@ -20,6 +21,18 @@ final kFlutterReleasesUrl = Uri.parse(
 final kFlutterWindowsReleasesUrl = Uri.parse(
   'https://storage.googleapis.com/flutter_infra_release/releases/releases_windows.json',
 );
+
+/// The same feed for Linux. Its archives are `.tar.xz`, not `.zip`.
+final kFlutterLinuxReleasesUrl = Uri.parse(
+  'https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json',
+);
+
+/// Flutter's release feed for [os].
+Uri flutterReleasesUrlFor(HostOs os) => switch (os) {
+  HostOs.macos => kFlutterReleasesUrl,
+  HostOs.windows => kFlutterWindowsReleasesUrl,
+  HostOs.linux => kFlutterLinuxReleasesUrl,
+};
 
 /// Git for Windows' latest release, from its official GitHub repository.
 final kGitForWindowsReleaseUrl = Uri.parse(
@@ -250,13 +263,12 @@ Future<FlutterRelease> fetchFlutterRelease(
   http.Client client, {
   required VersionRange accepts,
   required String arch,
-  bool windows = false,
+  HostOs os = HostOs.macos,
 }) async {
   final String feed;
   try {
-    final response = await client
-        .get(windows ? kFlutterWindowsReleasesUrl : kFlutterReleasesUrl)
-        .timeout(_timeout);
+    final response =
+        await client.get(flutterReleasesUrlFor(os)).timeout(_timeout);
     if (response.statusCode != 200) throw 'HTTP ${response.statusCode}';
     feed = response.body;
   } catch (_) {
@@ -267,7 +279,12 @@ Future<FlutterRelease> fetchFlutterRelease(
   final release = pickFlutterRelease(feed, accepts: accepts, arch: arch);
   if (release == null) {
     throw PlanException(
-      'No stable Flutter release for this ${windows ? 'PC' : 'Mac'} matches '
+      'No stable Flutter release for this '
+      '${switch (os) {
+        HostOs.macos => 'Mac',
+        HostOs.windows => 'PC',
+        HostOs.linux => 'computer',
+      }} matches '
       '$accepts.',
     );
   }

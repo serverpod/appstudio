@@ -4,6 +4,7 @@ library;
 
 import 'dart:io';
 
+import 'package:appstudio/platform/host_platform.dart';
 import 'package:appstudio/toolchain/shell_profile.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -38,23 +39,66 @@ void main() {
   });
 
   group('ShellProfile', () {
+    const mac = HostPlatform.macos;
+
     test('zsh uses .zprofile, as Flutter\'s instructions say', () {
-      final profile =
-          ShellProfile.resolve(home: '/h', shellOverride: '/bin/zsh');
+      final profile = ShellProfile.resolve(
+          home: '/h', shellOverride: '/bin/zsh', host: mac);
       expect(profile.path, '/h/.zprofile');
     });
 
     test('bash uses .bash_profile', () {
       expect(
-        ShellProfile.resolve(home: '/h', shellOverride: '/bin/bash').path,
+        ShellProfile.resolve(home: '/h', shellOverride: '/bin/bash', host: mac)
+            .path,
         '/h/.bash_profile',
       );
     });
 
     test('anything else is shown, not guessed at', () {
-      final fish =
-          ShellProfile.resolve(home: '/h', shellOverride: '/opt/homebrew/bin/fish');
+      final fish = ShellProfile.resolve(
+          home: '/h', shellOverride: '/opt/homebrew/bin/fish', host: mac);
       expect(fish.isSupported, isFalse);
+    });
+  });
+
+  /// Flutter's Linux instructions (docs.flutter.dev/install/add-to-path).
+  /// A Linux terminal starts a non-login shell, so macOS's files would not
+  /// be read there at all.
+  group('ShellProfile on Linux', () {
+    const linux = HostPlatform.linux;
+
+    ShellProfile resolve(String shell, [Map<String, String> env = const {}]) =>
+        ShellProfile.resolve(
+          home: '/home/a',
+          shellOverride: shell,
+          host: linux,
+          environment: env,
+        );
+
+    test('zsh uses .zshenv, which every zsh reads', () {
+      expect(resolve('/usr/bin/zsh').path, '/home/a/.zshenv');
+    });
+
+    test('zsh with ZDOTDIR uses the .zshenv there', () {
+      expect(
+        resolve('/usr/bin/zsh', {'ZDOTDIR': '/home/a/.config/zsh'}).path,
+        '/home/a/.config/zsh/.zshenv',
+      );
+    });
+
+    test('bash uses .bashrc, never .bash_profile', () {
+      // A new ~/.bash_profile would stop login bash reading ~/.profile.
+      expect(resolve('/bin/bash').path, '/home/a/.bashrc');
+    });
+
+    test('sh and ksh use .profile', () {
+      expect(resolve('/bin/sh').path, '/home/a/.profile');
+      expect(resolve('/bin/ksh').path, '/home/a/.profile');
+    });
+
+    test('fish is shown, not guessed at', () {
+      expect(resolve('/usr/bin/fish').isSupported, isFalse);
     });
   });
 

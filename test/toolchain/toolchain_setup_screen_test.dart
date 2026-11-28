@@ -230,6 +230,44 @@ void main() {
     expect(find.byType(ManualUpdateDialog), findsNothing);
   }, skip: macOSOnlyForNow); // Windows: Phase 3 (flutter.bat update command)
 
+  testWidgets('missing Linux system packages block until they are installed',
+      (tester) async {
+    final tools = _ScriptedTools(inventory: linuxMissingPackagesInventory);
+    await pumpScreen(tester, tools);
+    await settleDialog(tester);
+
+    expect(find.byType(ManualUpdateDialog), findsOneWidget);
+    expect(find.text('Install system packages'), findsOneWidget);
+    expect(find.textContaining('Flutter needs curl and xz'), findsOneWidget);
+    expect(find.text('sudo apt install curl xz-utils'), findsOneWidget);
+    // Nothing is looked up or installed before them: Flutter runs on them.
+    expect(tools.preflights, 0);
+
+    await tester.tap(find.text('Check again'));
+    await settleDialog(tester);
+    expect(find.textContaining('Still missing'), findsOneWidget);
+
+    tools.inventory = completeInventory;
+    await tester.tap(find.text('Check again'));
+    await settleDialog(tester);
+    await settleDialog(tester);
+
+    expect(find.byType(ManualUpdateDialog), findsNothing);
+  });
+
+  testWidgets('an unknown distro gets the package names, not a command',
+      (tester) async {
+    final tools = _ScriptedTools(inventory: linuxUnknownDistroInventory);
+    await pumpScreen(tester, tools);
+    await settleDialog(tester);
+
+    expect(
+      find.textContaining("your distribution's package manager: curl, xz."),
+      findsOneWidget,
+    );
+    expect(find.textContaining('sudo'), findsNothing);
+  });
+
   test('the update command switches channel only when it has to', () {
     const candidate = ToolCandidate(
       id: ToolId.flutter,

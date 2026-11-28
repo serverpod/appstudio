@@ -145,6 +145,28 @@ final firstRunFolder = WidgetbookFolder(
       ],
     ),
     WidgetbookComponent(
+      name: 'Install system packages (Linux)',
+      useCases: [
+        WidgetbookUseCase(
+          name: 'Ubuntu',
+          builder: (_) => _onLanding(
+            ManualUpdateDialog(
+              toolchains:
+                  FakeToolsView(inventory: linuxMissingPackagesInventory),
+            ),
+          ),
+        ),
+        WidgetbookUseCase(
+          name: 'Unknown distro',
+          builder: (_) => _onLanding(
+            ManualUpdateDialog(
+              toolchains: FakeToolsView(inventory: linuxUnknownDistroInventory),
+            ),
+          ),
+        ),
+      ],
+    ),
+    WidgetbookComponent(
       name: 'Install plan',
       useCases: [
         for (final (name, tools) in [

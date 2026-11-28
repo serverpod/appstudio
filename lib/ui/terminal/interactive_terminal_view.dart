@@ -149,7 +149,8 @@ class InteractiveTerminalView extends StatelessWidget {
   /// does — the host in the app, and whatever a test sets in a test, so the
   /// Windows mapping can be tested on a Mac and the other way round.
   static bool get _ctrlIsTerminal =>
-      defaultTargetPlatform == TargetPlatform.windows;
+      defaultTargetPlatform == TargetPlatform.windows ||
+      defaultTargetPlatform == TargetPlatform.linux;
 
   /// Lets ⌘ chords past xterm to the menu bar. See the class comment.
   static KeyEventResult _routeKey(FocusNode node, KeyEvent event) {

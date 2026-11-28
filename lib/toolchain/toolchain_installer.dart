@@ -574,8 +574,12 @@ class ToolchainInstaller {
     await _checkDiskSpace(target.parent.path, expected);
     cancel.throwIfCancelled();
 
+    // `.zip` on macOS and Windows, `.tar.xz` on Linux: kept as the feed names
+    // it, so the unpack step knows which it has.
+    final extension =
+        release.archiveUrl.path.endsWith('.tar.xz') ? '.tar.xz' : '.zip';
     final archive = File(
-      p.join(paths.downloadsDir, 'flutter_${release.version}.zip'),
+      p.join(paths.downloadsDir, 'flutter_${release.version}$extension'),
     );
     await _download(
       url: release.archiveUrl,
@@ -1085,7 +1089,9 @@ class ToolchainInstaller {
 
   /// `unzip`, as Flutter's own instructions use — it keeps the symlinks and
   /// exec bits the SDK needs. It is a real binary in `/usr/bin`, not one of
-  /// the Command Line Tools shims.
+  /// the Command Line Tools shims. Linux's archive is a `.tar.xz`, which
+  /// Flutter's Linux instructions unpack with `tar`; it needs `xz`, one of
+  /// the system packages setup checks for first.
   Future<void> _unzip(File archive, Directory into) async {
     await into.create(recursive: true);
     // Windows: the tar.exe Windows ships (bsdtar) reads zip archives.
@@ -1094,6 +1100,11 @@ class ToolchainInstaller {
         ? await Process.run(
             _host.path.join(systemRoot, 'System32', 'tar.exe'),
             ['-xf', archive.path, '-C', into.path],
+          )
+        : archive.path.endsWith('.tar.xz')
+        ? await Process.run(
+            '/usr/bin/tar',
+            ['-xJf', archive.path, '-C', into.path],
           )
         : await Process.run(
             '/usr/bin/unzip',

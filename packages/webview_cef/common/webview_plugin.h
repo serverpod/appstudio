@@ -6,6 +6,7 @@
 #include <include/cef_base.h>
 
 #include <functional>
+#include <mutex>
 namespace webview_cef {
     class WebviewTexture{
     public:
@@ -53,6 +54,11 @@ namespace webview_cef {
         void imeSetCompositionNative(const std::wstring& text, int cursor);
         void imeCommitTextNative(const std::wstring& text);
         void imeFinishCompositionNative();
+#ifdef __linux__
+        // The focused browser's selected text (UTF-8), for the Linux plugin to
+        // put on the clipboard itself; see WebviewHandler::selectedText.
+        std::string focusedSelectedText();
+#endif
 
     private :
         // Resolve the browserId whose renderer currently has focus, or -1.
@@ -65,6 +71,13 @@ namespace webview_cef {
         CefRefPtr<WebviewHandler> m_handler;
 	    CefRefPtr<WebviewApp> m_app;
     	std::unordered_map<int, std::shared_ptr<WebviewTexture>> m_renderers;
+#ifdef __linux__
+        // Guards m_renderers. On Linux CEF runs on its own thread, which
+        // creates and paints renderers while GTK's thread closes them and
+        // reads their focus on every key press. Recursive, because some
+        // readers call others (isEditableFocused → focusedBrowserId).
+        std::recursive_mutex m_renderersMutex;
+#endif
 	    bool m_init = false;
     };
 

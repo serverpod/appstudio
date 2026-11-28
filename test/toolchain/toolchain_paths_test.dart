@@ -76,4 +76,63 @@ void main() {
       expect(windows.legacyShellFiles, isEmpty);
     });
   });
+
+  group('on Linux', () {
+    final linux = ToolchainPaths.forHome(
+      '/home/alex',
+      host: HostPlatform.linux,
+    );
+
+    test('App Studio keeps its data in one folder named after the app id', () {
+      // The folder shared_preferences already uses on Linux, so settings and
+      // data are removed together.
+      expect(
+        linux.appSupportRoot,
+        '/home/alex/.local/share/dev.serverpod.appstudio',
+      );
+      expect(linux.localDataRoot, isNull);
+      expect(linux.preferencesRoot, isNull);
+    });
+
+    test('XDG_DATA_HOME moves it', () {
+      final moved = ToolchainPaths.forHome(
+        '/home/alex',
+        host: HostPlatform.linux,
+        environment: const {'XDG_DATA_HOME': '/data/alex'},
+      );
+      expect(moved.appSupportRoot, '/data/alex/dev.serverpod.appstudio');
+    });
+
+    test('an empty or relative XDG_DATA_HOME is ignored, as the spec says',
+        () {
+      for (final value in ['', 'relative/share']) {
+        final paths = ToolchainPaths.forHome(
+          '/home/alex',
+          host: HostPlatform.linux,
+          environment: {'XDG_DATA_HOME': value},
+        );
+        expect(
+          paths.appSupportRoot,
+          '/home/alex/.local/share/dev.serverpod.appstudio',
+        );
+      }
+    });
+
+    test('XDG_DATA_HOME means nothing off Linux', () {
+      final mac = ToolchainPaths.forHome(
+        '/Users/alex',
+        host: HostPlatform.macos,
+        environment: const {'XDG_DATA_HOME': '/data/alex'},
+      );
+      expect(
+        mac.appSupportRoot,
+        '/Users/alex/Library/Application Support/App Studio',
+      );
+    });
+
+    test('no build ever shipped a toolchain there, so nothing is legacy', () {
+      expect(linux.legacyPaths, isEmpty);
+      expect(linux.legacyShellFiles, isEmpty);
+    });
+  });
 }

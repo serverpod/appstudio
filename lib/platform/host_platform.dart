@@ -42,6 +42,7 @@ class HostPlatform {
 
   bool get isWindows => os == HostOs.windows;
   bool get isMacOS => os == HostOs.macos;
+  bool get isLinux => os == HostOs.linux;
 
   /// Path rules for this host, whatever the machine running the code. On a
   /// Mac, `HostPlatform.macos.path.join` is `p.join`.

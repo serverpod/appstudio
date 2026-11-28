@@ -2,6 +2,8 @@ import 'package:appstudio/agent/agent_controller.dart';
 import 'package:appstudio/cloud/cloud_publish.dart';
 import 'package:appstudio/process/serverpod_process.dart';
 import 'package:appstudio/session/project_session.dart';
+import 'package:appstudio/platform/linux/app_version.dart';
+import 'package:appstudio/update/linux/linux_updater.dart';
 import 'package:appstudio/update/update_controller.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -230,6 +232,52 @@ void main() {
     await Future<void>.delayed(Duration.zero);
 
     expect(calls, isEmpty);
+  });
+
+  group('on Linux', () {
+    Future<UpdateController> createLinux() => UpdateController.create(
+      process: process,
+      agent: agent,
+      cloud: CloudPublishController(
+        toolchains: process.toolchains,
+        session: process.session,
+      ),
+      linux: LinuxUpdater(
+        config: const LinuxUpdateConfig(
+          appcastUrl: 'https://updates.test/appcast.xml',
+          publicKey: 'key',
+        ),
+        environment: const {
+          'APPIMAGE': '/home/alex/AppImages/AppStudio-x86_64.AppImage',
+          'APPDIR': '/tmp/.mount_App',
+        },
+        executable: '/tmp/.mount_App/usr/lib/appstudio/appstudio',
+        runningVersion: () async => const AppVersion('0.4.1', 25),
+      ),
+    );
+
+    test('reads its state from the Linux updater, not a channel', () async {
+      mockChannel({});
+      final controller = await createLinux();
+      addTearDown(controller.dispose);
+
+      expect(controller.state.canCheck, isTrue);
+      expect(controller.state.versionLabel, 'Version 0.4.1 (build 25)');
+      expect(calls, isEmpty);
+    });
+
+    test('keeps automatic checks in its preferences', () async {
+      mockChannel({});
+      final controller = await createLinux();
+      addTearDown(controller.dispose);
+
+      await controller.setAutomaticallyChecks(false);
+
+      expect(controller.state.automaticallyChecks, isFalse);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool(LinuxUpdater.automaticKey), isFalse);
+      expect(calls, isEmpty);
+    });
   });
 }
 

@@ -301,8 +301,40 @@ String? manualUpdateCommand(ToolCandidate candidate) {
   ].join('\n');
 }
 
-/// Explains a copy that App Studio did not install and so will not change.
+/// What to run for a tool the user has to fix themselves, or null when there
+/// is no one command: Flutter's own update for an old Flutter
+/// ([manualUpdateCommand]), the distro's install command for Linux's missing
+/// system packages.
+String? manualCommandFor(ToolStatus status) {
+  final candidate = status.bestRejected;
+  if (candidate == null) return null;
+  if (status.id == ToolId.systemPackages) {
+    return candidate.facts['installCommand'];
+  }
+  if (candidate.fitness != ToolFitness.wrongVersion) return null;
+  return manualUpdateCommand(candidate);
+}
+
+/// `a`, `a and b`, `a, b and c`.
+String _andList(List<String> items) => items.length <= 1
+    ? items.join()
+    : '${items.sublist(0, items.length - 1).join(', ')} and ${items.last}';
+
+/// Explains a copy that App Studio did not install and so will not change —
+/// or, on Linux, the system packages it does not install at all.
 String manualUpdateMessage(ToolStatus status) {
+  if (status.id == ToolId.systemPackages) {
+    final facts = status.bestRejected?.facts ?? const {};
+    final missing = (facts['missing'] ?? '').split(' ')
+      ..removeWhere((m) => m.isEmpty);
+    final how = facts['installCommand'] == null
+        ? ' Install ${missing.length == 1 ? 'it' : 'them'} with your '
+              'distribution\'s package manager: '
+              '${(facts['packages'] ?? '').split(' ').join(', ')}.'
+        : '';
+    return 'Flutter needs ${_andList(missing)}, and '
+        '${missing.length == 1 ? 'it is' : 'they are'} not installed.$how';
+  }
   final candidate = status.bestRejected;
   final where =
       candidate?.root == null ? '' : ' in ${prettyPath(candidate!.root!)}';
@@ -377,7 +409,9 @@ class _ManualUpdateDialogState extends State<ManualUpdateDialog> {
       canPop: false,
       child: ShadDialog.alert(
         title: Text(
-          pending.length == 1
+          pending.every((s) => s.id == ToolId.systemPackages)
+              ? 'Install system packages'
+              : pending.length == 1
               ? 'Update ${pending.single.spec.displayName}'
               : 'Update your tools',
         ),
@@ -411,9 +445,14 @@ class _ManualUpdateDialogState extends State<ManualUpdateDialog> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (_stillNeeded) ...[
-                  const ErrorBanner(
-                    message: 'Still out of date. Check that the command '
-                        'finished without errors.',
+                  ErrorBanner(
+                    message: pending.every(
+                      (s) => s.id == ToolId.systemPackages,
+                    )
+                        ? 'Still missing. Check that the command finished '
+                            'without errors.'
+                        : 'Still out of date. Check that the command '
+                            'finished without errors.',
                   ),
                   const ShadGap(3),
                 ],
@@ -423,10 +462,8 @@ class _ManualUpdateDialogState extends State<ManualUpdateDialog> {
                     style: theme.textTheme.muted,
                   ),
                   const ShadGap(2),
-                  if (status.bestRejected case final candidate?
-                      when candidate.fitness == ToolFitness.wrongVersion)
-                    if (manualUpdateCommand(candidate) case final command?)
-                      CommandBlock(command: command),
+                  if (manualCommandFor(status) case final command?)
+                    CommandBlock(command: command),
                 ],
               ],
             ),

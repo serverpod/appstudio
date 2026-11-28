@@ -7,6 +7,7 @@ import '../agent/agent_controller.dart';
 import '../cloud/cloud_publish.dart';
 import '../platform/afunix_settle.dart';
 import '../process/serverpod_process.dart';
+import 'linux/linux_updater.dart';
 import 'session_teardown.dart';
 import 'update_state.dart';
 
@@ -20,6 +21,11 @@ import 'update_state.dart';
 ///    vetoed without Swift having to call back into a possibly-busy engine;
 ///  * runs the teardown when Sparkle is about to relaunch.
 ///
+/// On Linux there is no native side: [linux] does the updating in Dart, and
+/// this class reads its state from there, so the menu, About and the
+/// analytics see the version as on the other two systems. Its dialogs run
+/// from `lib/update/linux/linux_update_commands.dart`.
+///
 /// Every channel call is guarded. An updater that throws during startup, or on
 /// a machine where the channel is absent (tests, a non-macOS host), must leave
 /// the app fully usable — nobody should lose their IDE because the updater is
@@ -29,6 +35,7 @@ class UpdateController extends ChangeNotifier {
     required this.process,
     required this.agent,
     required this.cloud,
+    this.linux,
     @visibleForTesting MethodChannel? channel,
   }) : _channel = channel ?? const MethodChannel(kUpdateChannel);
 
@@ -38,6 +45,9 @@ class UpdateController extends ChangeNotifier {
   final ServerpodProcessController process;
   final AgentController agent;
   final CloudPublishController cloud;
+
+  /// The updater on Linux; null on macOS and Windows.
+  final LinuxUpdater? linux;
   final MethodChannel _channel;
 
   UpdateState _state = UpdateState.unavailable;
@@ -52,12 +62,14 @@ class UpdateController extends ChangeNotifier {
     required ServerpodProcessController process,
     required AgentController agent,
     required CloudPublishController cloud,
+    LinuxUpdater? linux,
     @visibleForTesting MethodChannel? channel,
   }) async {
     final controller = UpdateController(
       process: process,
       agent: agent,
       cloud: cloud,
+      linux: linux,
       channel: channel,
     );
     controller._channel.setMethodCallHandler(controller._handleCall);
@@ -76,9 +88,11 @@ class UpdateController extends ChangeNotifier {
   }
 
   Future<void> refresh() async {
+    final linux = this.linux;
     final next = await _guard<UpdateState>(
       'getState',
       () async {
+        if (linux != null) return linux.state();
         final reply =
             await _channel.invokeMapMethod<Object?, Object?>('getState');
         return reply == null ? UpdateState.unavailable : UpdateState.fromMap(reply);
@@ -107,6 +121,8 @@ class UpdateController extends ChangeNotifier {
       notifyListeners();
     }
     await _guard<void>('setAutomaticallyChecks', () async {
+      final linux = this.linux;
+      if (linux != null) return linux.setAutomaticallyChecks(enabled);
       await _channel.invokeMethod<void>(
         'setAutomaticallyChecks',
         {'enabled': enabled},
@@ -129,6 +145,9 @@ class UpdateController extends ChangeNotifier {
   }
 
   void _syncSessionBusy() {
+    // On Linux the automatic check runs over the start page only, where no
+    // session is live.
+    if (linux != null) return;
     final busy = process.canStop || agent.isServeRunning;
     if (busy == _sessionBusy) return;
     _sessionBusy = busy;

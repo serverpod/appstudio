@@ -1,11 +1,12 @@
 import 'dart:io';
 
-/// `macos-arm64`, `macos-x64`, `windows-arm64`, `windows-x64`, or
-/// `unsupported`.
+/// `macos-arm64`, `macos-x64`, `windows-arm64`, `windows-x64`, `linux-arm64`,
+/// `linux-x64`, or `unsupported`.
 String currentPlatformKey() {
   final os = switch (Platform.operatingSystem) {
     'macos' => 'macos',
     'windows' => 'windows',
+    'linux' => 'linux',
     _ => null,
   };
   if (os == null) return 'unsupported';

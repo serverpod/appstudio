@@ -171,6 +171,10 @@ bool WebviewHandler::DoClose(CefRefPtr<CefBrowser> browser) {
 
 void WebviewHandler::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
     CEF_REQUIRE_UI_THREAD();
+#ifdef __linux__
+    std::lock_guard<std::mutex> lock(selected_text_mutex_);
+    selected_text_.erase(browser->GetIdentifier());
+#endif
 }
 
 bool WebviewHandler::OnBeforePopup(CefRefPtr<CefBrowser> browser,
@@ -424,6 +428,24 @@ bool WebviewHandler::StartDragging(CefRefPtr<CefBrowser> browser,
     }
     return true;
 }
+
+#ifdef __linux__
+void WebviewHandler::OnTextSelectionChanged(CefRefPtr<CefBrowser> browser,
+                                            const CefString& selected_text,
+                                            const CefRange& selected_range)
+{
+    CEF_REQUIRE_UI_THREAD();
+    std::lock_guard<std::mutex> lock(selected_text_mutex_);
+    selected_text_[browser->GetIdentifier()] = selected_text.ToString();
+}
+
+std::string WebviewHandler::selectedText(int browserId)
+{
+    std::lock_guard<std::mutex> lock(selected_text_mutex_);
+    auto it = selected_text_.find(browserId);
+    return it == selected_text_.end() ? std::string() : it->second;
+}
+#endif
 
 void WebviewHandler::OnImeCompositionRangeChanged(CefRefPtr<CefBrowser> browser, const CefRange &selection_range, const CefRenderHandler::RectList &character_bounds)
 {

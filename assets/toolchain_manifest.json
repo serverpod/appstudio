@@ -17,6 +17,11 @@
       "description": "The git Flutter runs on."
     },
     {
+      "id": "system_packages",
+      "displayName": "System packages",
+      "description": "git, curl, unzip and xz from your distribution. Flutter runs on them."
+    },
+    {
       "id": "flutter",
       "displayName": "Flutter",
       "description": "Builds and serves the Flutter web app shown in the preview pane.",

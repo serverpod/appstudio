@@ -72,6 +72,24 @@ void main() {
       final shell = await fakeShell('#!/bin/sh\necho "just noise"\n');
       expect(await captureLoginShellPath(shellOverride: shell), isNull);
     });
+
+    test(
+        'runs the shell in a session of its own on Linux, away from any '
+        'terminal', () async {
+      // Started from a terminal as a background job, App Studio shares that
+      // terminal; an interactive bash in the same session would take it for
+      // job control and get the whole process group stopped. The fake shell
+      // reports its session id in place of a PATH.
+      final shell = await fakeShell('#!/bin/sh\n'
+          "printf '__APP_STUDIO_PATH__%s__APP_STUDIO_PATH__' "
+          '"\$(ps -o sid= -p \$\$ | tr -d " ")"\n');
+      final ours = await Process.run('ps', ['-o', 'sid=', '-p', '$pid']);
+
+      final theirs = await captureLoginShellPath(shellOverride: shell);
+
+      expect(theirs, isNotNull);
+      expect(theirs, isNot('${ours.stdout}'.trim()));
+    }, testOn: 'linux');
   });
 
   group('shellPathScript', () {

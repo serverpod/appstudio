@@ -228,6 +228,49 @@ final windowsMixedInventory = _inventory(
   manifest: windowsPreviewManifest,
 );
 
+/// The Linux tool set: the system packages instead of Apple's command line
+/// tools.
+final linuxPreviewManifest = ToolManifest(
+  tools: {
+    ToolId.systemPackages: _spec(ToolId.systemPackages, '*'),
+    ToolId.flutter: _spec(ToolId.flutter, '>=3.47.0'),
+    ToolId.serverpodCli: _spec(ToolId.serverpodCli, '>=4.0.0 <4.1.0'),
+  },
+);
+
+ToolchainInventory _linuxMissing(Map<String, String> facts) => _inventory(
+  {
+    ToolId.systemPackages: (
+      [
+        ToolCandidate(
+          id: ToolId.systemPackages,
+          source: ToolSource.host,
+          fitness: ToolFitness.incomplete,
+          reason: 'missing ${facts['missing']}',
+          facts: facts,
+        ),
+      ],
+      ToolAction.manual,
+    ),
+    ToolId.flutter: (const <ToolCandidate>[], ToolAction.install),
+    ToolId.serverpodCli: (const <ToolCandidate>[], ToolAction.install),
+  },
+  manifest: linuxPreviewManifest,
+);
+
+/// A fresh Ubuntu without curl and xz, which Flutter needs.
+final linuxMissingPackagesInventory = _linuxMissing(const {
+  'missing': 'curl xz',
+  'packages': 'curl xz-utils',
+  'installCommand': 'sudo apt install curl xz-utils',
+});
+
+/// The same on a distro App Studio has no install command for.
+final linuxUnknownDistroInventory = _linuxMissing(const {
+  'missing': 'curl xz',
+  'packages': 'curl xz',
+});
+
 /// What preflight finds for [windowsEmptyInventory].
 final windowsPreviewPlan = InstallPlan({
   ToolId.developerMode: const PlannedTool(id: ToolId.developerMode),

@@ -11,6 +11,17 @@
 #include <iostream>
 #include <unordered_map>
 
+// Holds m_renderersMutex for the rest of the scope on Linux; nothing on macOS
+// and Windows, which keep their renderers as they always have.
+#ifdef __linux__
+#define LOCK_RENDERERS() \
+	std::lock_guard<std::recursive_mutex> renderers_lock(m_renderersMutex)
+#else
+#define LOCK_RENDERERS() \
+	do { \
+	} while (false)
+#endif
+
 namespace webview_cef {
 	CefMainArgs mainArgs;
 	CefRefPtr<WebviewApp> app;
@@ -58,6 +69,7 @@ namespace webview_cef {
 		uninitCallback();
 		m_handler->CloseAllBrowsers(true);
 		m_handler = nullptr;
+		LOCK_RENDERERS();
 		if(!m_renderers.empty()){
 			m_renderers.clear();
 		}
@@ -67,8 +79,18 @@ namespace webview_cef {
 		if (!m_init)
 		{
 			m_handler->onPaintCallback = [=, this](int browserId, const void* buffer, int32_t width, int32_t height) {
-				if (m_renderers.find(browserId) != m_renderers.end() && m_renderers[browserId] != nullptr) {
-					m_renderers[browserId]->onFrame(buffer, width, height);
+				// A reference of its own: a close on another thread may drop
+				// the map's while this frame is still being copied.
+				std::shared_ptr<WebviewTexture> renderer;
+				{
+					LOCK_RENDERERS();
+					auto it = m_renderers.find(browserId);
+					if (it != m_renderers.end()) {
+						renderer = it->second;
+					}
+				}
+				if (renderer != nullptr) {
+					renderer->onFrame(buffer, width, height);
 				}
 			};
 
@@ -192,10 +214,13 @@ namespace webview_cef {
 				// raw character keys to the OS IME while a web input is focused
 				// (the IME/delta path handles text). Focus moving to a new node
 				// also ends any prior composition for that browser.
-				auto rit = m_renderers.find(nBrowserId);
-				if (rit != m_renderers.end() && rit->second) {
-					rit->second->editableFocused = bEditable;
-					rit->second->composing = false;
+				{
+					LOCK_RENDERERS();
+					auto rit = m_renderers.find(nBrowserId);
+					if (rit != m_renderers.end() && rit->second) {
+						rit->second->editableFocused = bEditable;
+						rit->second->composing = false;
+					}
 				}
 				if (m_invokeFunc)
 				{
@@ -322,7 +347,10 @@ namespace webview_cef {
 				// whose release lands in a library that has already torn itself
 				// down.
 				m_handler->CloseAllBrowsers(true);
-				m_renderers.clear();
+				{
+					LOCK_RENDERERS();
+					m_renderers.clear();
+				}
 				uninitCallback();
 #ifdef OS_MAC
 				// The close is asynchronous and nothing else drives CEF here
@@ -346,7 +374,10 @@ namespace webview_cef {
 			std::string url = webview_value_get_string(values);
 			m_handler->createBrowser(url, [=, this](int browserId) {
 				std::shared_ptr<WebviewTexture> renderer = m_createTextureFunc();
-				m_renderers[browserId] = renderer;
+				{
+					LOCK_RENDERERS();
+					m_renderers[browserId] = renderer;
+				}
 				WValue	*response = webview_value_new_list();
 				webview_value_append(response, webview_value_new_int(browserId));
 				webview_value_append(response, webview_value_new_int(renderer->textureId));
@@ -357,8 +388,11 @@ namespace webview_cef {
 		else if (name.compare("close") == 0) {
 			int browserId = int(webview_value_get_int(values));
 			m_handler->closeBrowser(browserId);
-			if(m_renderers.find(browserId) != m_renderers.end() && m_renderers[browserId] != nullptr) {
-				m_renderers[browserId].reset();
+			{
+				LOCK_RENDERERS();
+				if(m_renderers.find(browserId) != m_renderers.end() && m_renderers[browserId] != nullptr) {
+					m_renderers[browserId].reset();
+				}
 			}
 			result(1, nullptr);
 		}
@@ -445,6 +479,7 @@ namespace webview_cef {
 		} 
 		else if (name.compare("setClientFocus") == 0) {
 			int browserId = int(webview_value_get_int(webview_value_get_list_value(values, 0)));
+			LOCK_RENDERERS();
 			if (m_renderers.find(browserId) != m_renderers.end() && m_renderers[browserId] != nullptr) {
 				bool focused = webview_value_get_bool(webview_value_get_list_value(values, 1));
 				m_renderers[browserId].get()->isFocused = focused;
@@ -628,8 +663,10 @@ namespace webview_cef {
 		if (isCefShutdown) return false;
 		const bool delivered = m_handler->sendKeyEvent(ev);
 		if(ev.type == KEYEVENT_RAWKEYDOWN && ev.windows_key_code == 0x7B && (ev.modifiers & EVENTFLAG_CONTROL_DOWN) != 0){
+			LOCK_RENDERERS();
 			for(auto render : m_renderers){
-				if(render.second.get()->isFocused){
+				// A closed browser keeps its entry with a null renderer.
+				if(render.second != nullptr && render.second.get()->isFocused){
 					m_handler->openDevTools(render.first);
 				}
 			}
@@ -653,6 +690,7 @@ namespace webview_cef {
 	}
 	
 	bool WebviewPlugin::getAnyBrowserFocused(){
+		LOCK_RENDERERS();
 		for(auto render : m_renderers){
 			if(render.second != nullptr && render.second.get()->isFocused){
 				return true;
@@ -662,6 +700,7 @@ namespace webview_cef {
 	}
 
 	int WebviewPlugin::focusedBrowserId(){
+		LOCK_RENDERERS();
 		for(auto& render : m_renderers){
 			if(render.second != nullptr && render.second->isFocused){
 				return render.first;
@@ -670,7 +709,16 @@ namespace webview_cef {
 		return -1;
 	}
 
+#ifdef __linux__
+	std::string WebviewPlugin::focusedSelectedText(){
+		if (isCefShutdown) return std::string();
+		int id = focusedBrowserId();
+		return id < 0 ? std::string() : m_handler->selectedText(id);
+	}
+#endif
+
 	bool WebviewPlugin::isEditableFocused(){
+		LOCK_RENDERERS();
 		int id = focusedBrowserId();
 		if(id < 0){
 			return false;
@@ -680,6 +728,7 @@ namespace webview_cef {
 	}
 
 	bool WebviewPlugin::isComposing(){
+		LOCK_RENDERERS();
 		int id = focusedBrowserId();
 		if(id < 0){
 			return false;
@@ -689,6 +738,7 @@ namespace webview_cef {
 	}
 
 	void WebviewPlugin::setComposingForBrowser(int browserId, bool composing){
+		LOCK_RENDERERS();
 		auto it = m_renderers.find(browserId);
 		if(it != m_renderers.end() && it->second){
 			it->second->composing = composing;

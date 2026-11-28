@@ -35,6 +35,10 @@ dependencies:
   xterm: ^4.0.0
   flutter_pty2: ^3.0.0
   yaml: ^3.1.4
+  # Linux updates (lib/update/linux/): the Sparkle appcast, and the Ed25519
+  # signature on each download, which Sparkle and WinSparkle check natively.
+  xml: ^7.0.1
+  cryptography: ^2.9.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

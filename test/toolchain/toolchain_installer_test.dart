@@ -288,7 +288,7 @@ void main() {
       }
       expect(await scratch.exists(), isTrue);
       expect(await zshrc.readAsString(), '# mine\n');
-    });
+    }, skip: Platform.isMacOS ? false : 'only macOS builds shipped a toolchain');
   });
 
   test('collectGarbage clears a crashed unpack', () async {

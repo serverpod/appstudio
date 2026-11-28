@@ -8,6 +8,7 @@ import '../platform/windows/win32_system.dart';
 import '../platform/windows/windows_system.dart';
 import '../process/tool_command.dart';
 import 'install_record.dart';
+import 'linux_packages.dart';
 import 'login_shell_path.dart';
 import 'shell_profile.dart';
 import 'tool_status.dart';
@@ -251,6 +252,7 @@ class ToolProbe {
     Map<String, String>? environment,
     WindowsSystem? windows,
     ProbeSandbox? sandbox,
+    this.osReleasePath = '/etc/os-release',
   })  : _run = runner ?? sandbox?.runner ?? _defaultRunner,
         _loginShellPath =
             loginShellPath ?? sandbox?.loginShellPath ?? captureLoginShellPath,
@@ -262,6 +264,10 @@ class ToolProbe {
   final ToolchainPaths paths;
   final ToolManifest manifest;
   final InstallRecord record;
+
+  /// Linux: names the distro, and so the command that installs missing system
+  /// packages.
+  final String osReleasePath;
 
   HostPlatform get _host => paths.host;
   p.Context get _path => _host.path;
@@ -311,6 +317,7 @@ class ToolProbe {
       if (manifest[ToolId.commandLineTools] != null) _probeCommandLineTools(),
       if (manifest[ToolId.developerMode] != null) _probeDeveloperMode(),
       if (manifest[ToolId.git] != null) _probeGit(),
+      if (manifest[ToolId.systemPackages] != null) _probeSystemPackages(),
       _probeServerpod(dartExecutable, deep: deep),
     ]);
     for (final status in rest) {
@@ -456,6 +463,62 @@ class ToolProbe {
           ? const [ToolCandidate.notFound(id, ToolSource.host)]
           : candidates,
       action: satisfied ? ToolAction.none : ToolAction.install,
+    );
+  }
+
+  // -- System packages (Linux) ----------------------------------------------
+
+  /// Every command in [kLinuxRequiredCommands] on `PATH`, or the ones that
+  /// are not. Missing ones are the user's to install — they need `sudo`,
+  /// which App Studio never runs — so the action is [ToolAction.manual], with
+  /// the distro's command in the `installCommand` fact when it is known.
+  Future<ToolStatus> _probeSystemPackages() async {
+    final spec = manifest[ToolId.systemPackages]!;
+    const id = ToolId.systemPackages;
+    final missing = [
+      for (final command in kLinuxRequiredCommands)
+        if (await _which(command) == null) command,
+    ];
+    if (missing.isEmpty) {
+      return ToolStatus(
+        spec: spec,
+        candidates: [
+          ToolCandidate(
+            id: id,
+            source: ToolSource.host,
+            fitness: ToolFitness.satisfied,
+          ),
+        ],
+      );
+    }
+    String? osRelease;
+    try {
+      osRelease = await File(osReleasePath).readAsString();
+    } catch (_) {
+      osRelease = null;
+    }
+    final manager = osRelease == null ? null : packageManagerFor(osRelease);
+    final command = linuxInstallCommand(missing, manager);
+    return ToolStatus(
+      spec: spec,
+      candidates: [
+        ToolCandidate(
+          id: id,
+          source: ToolSource.host,
+          // Not notFound: [ToolStatus.bestRejected] skips those, and the
+          // setup dialog reads what is missing from it.
+          fitness: ToolFitness.incomplete,
+          reason: 'missing ${missing.join(', ')}',
+          facts: {
+            'missing': missing.join(' '),
+            'packages': [
+              for (final c in missing) linuxPackageFor(c, manager),
+            ].join(' '),
+            'installCommand': ?command,
+          },
+        ),
+      ],
+      action: ToolAction.manual,
     );
   }
 

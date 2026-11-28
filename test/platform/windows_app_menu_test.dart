@@ -1,4 +1,6 @@
 import 'package:appstudio/agent/agent_controller.dart';
+import 'package:appstudio/platform/host_platform.dart';
+import 'package:appstudio/platform/linux/desktop_integration.dart';
 import 'package:appstudio/platform/windows_app_menu.dart';
 import 'package:appstudio/process/serverpod_process.dart';
 import 'package:appstudio/session/project_session.dart';
@@ -50,6 +52,8 @@ void main() {
     ChangeNotifier? changes,
     bool Function()? stripHidden,
     Widget child = const SizedBox.expand(),
+    HostPlatform host = HostPlatform.windows,
+    DesktopIntegrationStatus? desktopIntegration,
   }) async {
     await tester.pumpWidget(
       ShadApp(
@@ -72,6 +76,11 @@ void main() {
           onCreateRepairMigration: () {},
           changes: changes ?? ChangeNotifier(),
           stripHidden: stripHidden,
+          host: host,
+          desktopIntegrationStatus:
+              desktopIntegration == null ? null : () => desktopIntegration,
+          onAddToApplications: () {},
+          onRemoveFromApplications: () {},
           child: child,
         ),
       ),
@@ -169,6 +178,117 @@ void main() {
     await tester.pump();
     expect(find.text('File'), findsOneWidget);
     expect(counter.currentState!.count, 7);
+  });
+
+  Future<void> openMenu(WidgetTester tester, String title) async {
+    await tester.tap(find.text(title));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('Windows quits with Exit on Alt+F4', (tester) async {
+    await pumpMenu(tester);
+
+    await openMenu(tester, 'File');
+
+    expect(find.text('Exit'), findsOneWidget);
+    expect(find.text('Alt+F4'), findsOneWidget);
+    expect(find.text('Quit'), findsNothing);
+  });
+
+  testWidgets('Linux quits with Quit on Ctrl+Q', (tester) async {
+    await pumpMenu(tester, host: HostPlatform.linux);
+
+    await openMenu(tester, 'File');
+
+    expect(find.text('Quit'), findsOneWidget);
+    expect(find.text('Ctrl+Q'), findsOneWidget);
+    expect(find.text('Exit'), findsNothing);
+  });
+
+  testWidgets('Windows offers Uninstall', (tester) async {
+    await pumpMenu(tester);
+
+    await openMenu(tester, 'Help');
+
+    expect(find.text('Uninstall App Studio...'), findsOneWidget);
+  });
+
+  testWidgets('Linux offers no Uninstall until it knows Linux\'s folders',
+      (tester) async {
+    await pumpMenu(tester, host: HostPlatform.linux);
+
+    await openMenu(tester, 'Help');
+
+    expect(find.text('About App Studio'), findsOneWidget);
+    expect(find.text('Uninstall App Studio...'), findsNothing);
+  });
+
+  testWidgets('Linux offers Add to Applications for an AppImage nobody added',
+      (tester) async {
+    await pumpMenu(
+      tester,
+      host: HostPlatform.linux,
+      desktopIntegration: DesktopIntegrationStatus.notAdded,
+    );
+
+    await openMenu(tester, 'Help');
+
+    expect(find.text('Add to Applications...'), findsOneWidget);
+    expect(find.text('Remove from Applications...'), findsNothing);
+  });
+
+  testWidgets('Linux offers Remove from Applications once App Studio added it',
+      (tester) async {
+    await pumpMenu(
+      tester,
+      host: HostPlatform.linux,
+      desktopIntegration: DesktopIntegrationStatus.addedByAppStudio,
+    );
+
+    await openMenu(tester, 'Help');
+
+    expect(find.text('Remove from Applications...'), findsOneWidget);
+    expect(find.text('Add to Applications...'), findsNothing);
+  });
+
+  testWidgets('neither item shows where another tool or no AppImage is',
+      (tester) async {
+    for (final status in [
+      DesktopIntegrationStatus.managedByOther,
+      DesktopIntegrationStatus.unavailable,
+    ]) {
+      await pumpMenu(
+        tester,
+        host: HostPlatform.linux,
+        desktopIntegration: status,
+      );
+
+      await openMenu(tester, 'Help');
+
+      expect(find.text('Add to Applications...'), findsNothing);
+      expect(find.text('Remove from Applications...'), findsNothing);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+    }
+  });
+
+  testWidgets('Windows never offers either item', (tester) async {
+    await pumpMenu(
+      tester,
+      desktopIntegration: DesktopIntegrationStatus.notAdded,
+    );
+
+    await openMenu(tester, 'Help');
+
+    expect(find.text('Add to Applications...'), findsNothing);
+  });
+
+  testWidgets('Linux binds the same Ctrl shortcuts', (tester) async {
+    await pumpMenu(tester, host: HostPlatform.linux);
+
+    await ctrl(tester, LogicalKeyboardKey.keyN);
+
+    expect(newProjects, 1);
   });
 
   testWidgets('the shortcuts go with the menu', (tester) async {

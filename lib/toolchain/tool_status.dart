@@ -3,10 +3,10 @@ import 'toolchain_manifest.dart';
 import 'tool_version.dart';
 
 /// The tools App Studio needs, in install order: the Command Line Tools
-/// (macOS) or Git for Windows supply the `git` Flutter runs on, and the
-/// Serverpod CLI is installed with Flutter's own `dart`. On Windows,
-/// Developer Mode comes first: Flutter and the Serverpod runner need the
-/// symbolic links only it allows.
+/// (macOS), Git for Windows or Linux's system packages supply the `git`
+/// Flutter runs on, and the Serverpod CLI is installed with Flutter's own
+/// `dart`. On Windows, Developer Mode comes first: Flutter and the Serverpod
+/// runner need the symbolic links only it allows.
 ///
 /// Each tool says which hosts need it; a host's tool set is
 /// [ToolId.requiredOn], in this order.
@@ -18,8 +18,16 @@ enum ToolId {
   ),
   developerMode('developer_mode', 'Developer Mode', {HostOs.windows}),
   git('git', 'Git for Windows', {HostOs.windows}),
-  flutter('flutter', 'Flutter', {HostOs.macos, HostOs.windows}),
-  serverpodCli('serverpod_cli', 'Serverpod', {HostOs.macos, HostOs.windows});
+
+  /// Linux: `git`, `curl`, `unzip` and `xz` (`linux_packages.dart`). Never
+  /// installed by App Studio — the user runs the distro's command.
+  systemPackages('system_packages', 'System packages', {HostOs.linux}),
+  flutter('flutter', 'Flutter', {HostOs.macos, HostOs.windows, HostOs.linux}),
+  serverpodCli(
+    'serverpod_cli',
+    'Serverpod',
+    {HostOs.macos, HostOs.windows, HostOs.linux},
+  );
 
   const ToolId(this.manifestId, this.displayName, this.hosts);
 
@@ -103,7 +111,8 @@ enum ToolAction {
   update,
 
   /// There is a copy App Studio did not install and must not touch — the user
-  /// updates it themselves. In practice: their own Flutter is too old.
+  /// updates it themselves. In practice: their own Flutter is too old, or
+  /// Linux's system packages are missing, which need `sudo`.
   manual;
 
   /// Whether App Studio can carry this out on its own.

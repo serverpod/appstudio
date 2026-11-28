@@ -39,7 +39,7 @@ String? uninstallConsequence(ToolId id) => switch (id) {
       ToolId.developerMode =>
         'Other developer tools on this PC may rely on Developer Mode.',
       ToolId.git => 'Other apps and terminals that use git may be affected.',
-      ToolId.flutter || ToolId.serverpodCli => null,
+      ToolId.flutter || ToolId.serverpodCli || ToolId.systemPackages => null,
     };
 
 Future<UninstallChoice?> showUninstallConfirmDialog(

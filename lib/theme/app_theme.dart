@@ -8,18 +8,25 @@ import 'package:shad/shad.dart';
 const Color kBrandBlue = Color(0xFF1295F0);
 
 bool get _windows => defaultTargetPlatform == TargetPlatform.windows;
+bool get _linux => defaultTargetPlatform == TargetPlatform.linux;
 
 /// macOS system UI font (SF Pro on modern macOS).
 const _kMacUiFont = '.AppleSystemUIFont';
 
-/// The UI font: SF on macOS. On Windows, shad's own bundled Inter (`null`
-/// picks it) — the typeface shad's metrics were drawn for, so layouts measure
-/// as designed and no weight correction is needed.
-String? get _uiFont => _windows ? null : _kMacUiFont;
+/// The UI font: SF on macOS. On Windows and Linux, shad's own bundled Inter
+/// (`null` picks it) — the typeface shad's metrics were drawn for, so layouts
+/// measure as designed and no weight correction is needed.
+String? get _uiFont => _windows || _linux ? null : _kMacUiFont;
 
 /// Monospace for terminal output and code: Menlo on macOS, Cascadia Mono —
-/// shipped with Windows 11 — on Windows.
-String get kMonoFont => _windows ? 'Cascadia Mono' : 'Menlo';
+/// shipped with Windows 11 — on Windows. On Linux the generic `monospace`
+/// family, which fontconfig resolves to the distro's own (DejaVu Sans Mono on
+/// Ubuntu): no single monospace font is on every distro.
+String get kMonoFont => _windows
+    ? 'Cascadia Mono'
+    : _linux
+    ? 'monospace'
+    : 'Menlo';
 
 /// Headline face, bundled at Black (900) and no other weight.
 ///
@@ -39,8 +46,8 @@ const kHeadlineFont = 'Inter';
 /// uncorrected `w500` lands where Inter's `w600` would and the whole UI reads
 /// a step heavy.
 ///
-/// 1 on Windows, where the UI font is Inter itself.
-double get _kWeightAxisRatio => _windows ? 1 : 1.65 / 3.17;
+/// 1 on Windows and Linux, where the UI font is Inter itself.
+double get _kWeightAxisRatio => _windows || _linux ? 1 : 1.65 / 3.17;
 
 /// A `wght` variation carrying the appearance [weight] has in shad's font.
 ///
